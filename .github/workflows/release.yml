@@ -1,0 +1,47 @@
+name: Release
+
+# Pushing a tag like v0.1.0 builds the extension and publishes a GitHub
+# Release with the .vsix attached and that version's changelog as its notes.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check that the tag matches package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - run: npm run check
+      - run: npm run lint
+      - run: npm test
+      - run: npm run package
+      - name: Extract the release notes
+        run: |
+          awk -v version="$VERSION" '
+            /^## / { printing = ($2 == version) ; next }
+            printing { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::CHANGELOG.md has no section for $VERSION"
+            exit 1
+          fi
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "lookout-$VERSION.vsix" --title "Lookout $VERSION" --notes-file release-notes.md

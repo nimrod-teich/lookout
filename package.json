@@ -1,0 +1,111 @@
+{
+  "name": "lookout",
+  "displayName": "Lookout",
+  "description": "See every AI coding agent session at a glance: what is working, what needs you, and where. Works with Claude Code.",
+  "version": "0.1.0",
+  "publisher": "nimrod-teich",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nimrod-teich/lookout.git"
+  },
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "coding agent",
+    "claude code",
+    "sessions",
+    "status bar"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "lookout.jump",
+        "title": "Jump to Session",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.jumpNextAttention",
+        "title": "Jump to Next Session That Needs You",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.markAllSeen",
+        "title": "Mark All Sessions as Seen",
+        "category": "Lookout"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "lookout.jump",
+        "key": "ctrl+alt+j"
+      },
+      {
+        "command": "lookout.jumpNextAttention",
+        "key": "ctrl+alt+shift+j"
+      }
+    ],
+    "configuration": {
+      "title": "Lookout",
+      "properties": {
+        "lookout.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the session counts in the status bar."
+        },
+        "lookout.notifications.waiting": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when a session of this window starts to wait for you and you are not looking at it."
+        },
+        "lookout.notifications.done": {
+          "type": "boolean",
+          "default": false,
+          "description": "Notify when a session of this window finishes a turn and you are not looking at it."
+        },
+        "lookout.claudeConfigDir": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "check": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.4",
+    "@types/vscode": "1.94.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.11.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  },
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0A2436",
+    "theme": "dark"
+  }
+}
