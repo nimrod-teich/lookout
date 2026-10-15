@@ -804,8 +804,48 @@ body.vscode-reduce-motion .hover-card {
   color: var(--ink);
 }
 
+/* Remote Control: a labelled mini switch, lit while it is on. */
+.action.remote {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: calc(var(--vscode-font-size) - 3px);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.action.remote .knob {
+  position: relative;
+  width: 16px;
+  height: 9px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--ink) 25%, transparent);
+  transition: background 150ms ease;
+}
+
+.action.remote .knob::after {
+  content: "";
+  position: absolute;
+  top: 1.5px;
+  left: 1.5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vscode-sideBar-background);
+  transition: left 150ms ease;
+}
+
 .action.remote.on {
   color: var(--working);
+}
+
+.action.remote.on .knob {
+  background: var(--working);
+}
+
+.action.remote.on .knob::after {
+  left: 8.5px;
 }
 
 .action.remote.on:hover {

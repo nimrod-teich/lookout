@@ -250,8 +250,9 @@ function createCard(view: SessionView): HTMLElement {
     event.stopPropagation();
     vscode.postMessage({ type: "rename", id: view.id });
   });
-  const remote = el("span", "action remote", "◎");
-  remote.setAttribute("role", "button");
+  const remote = el("span", "action remote");
+  remote.append(el("i", "knob"), el("span", "label", "Remote"));
+  remote.setAttribute("role", "switch");
   remote.addEventListener("click", (event) => {
     event.stopPropagation();
     vscode.postMessage({ type: "remote", id: view.id });
@@ -280,6 +281,7 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   card.querySelector(".elapsed")!.textContent = elapsedText(view);
   const remote = card.querySelector(".action.remote")!;
   remote.classList.toggle("on", view.remote === true);
+  remote.setAttribute("aria-checked", String(view.remote === true));
   remote.setAttribute("title", view.remote ? "Remote Control is on: reachable from claude.ai/code and the Claude app. Click to turn it off" : "Turn Remote Control on: drive this session from claude.ai/code or the Claude app");
   const line = card.querySelector(".line")!;
   const text = secondLine(view);
