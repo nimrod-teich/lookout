@@ -134,6 +134,17 @@ describe("SessionRegistry", () => {
     expect(registry.scan()[0]).toMatchObject({ status: "waiting", waitingFor: "permission prompt" });
   });
 
+  it("sees a rewrite that keeps the file's size and mtime, as happens on a coarse clock", () => {
+    const { configDir, proc, registry, sessions } = setup();
+    writeSession(configDir, proc, { pid: 11, sessionId: sessionId(1), status: "busy" });
+    expect(registry.scan()[0]?.status).toBe("busy");
+    const file = path.join(sessions, "11.json");
+    const stamp = fs.statSync(file).mtime;
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace('"status":"busy"', '"status":"idle"'));
+    fs.utimesSync(file, stamp, stamp);
+    expect(registry.scan()[0]?.status).toBe("idle");
+  });
+
   it("forgets a session whose file is removed", () => {
     const { configDir, proc, registry, sessions } = setup();
     writeSession(configDir, proc, { pid: 11, sessionId: sessionId(1) });
