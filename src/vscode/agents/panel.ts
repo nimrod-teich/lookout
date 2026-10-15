@@ -9,4 +9,10 @@ export interface PanelAdapter {
   reveal(view: SessionView, log: Log): Promise<PanelReveal>;
   /** The session's tab is the one in front. */
   isActive(view: SessionView): boolean;
+  /**
+   * Lets the user rename the session through the agent's own rename, which
+   * writes the new title where the agent keeps it. Called only for sessions
+   * this window hosts. Resolves false when the agent's rename could not be reached.
+   */
+  rename(view: SessionView, log: Log): Promise<boolean>;
 }

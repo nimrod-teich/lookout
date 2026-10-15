@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import type { AgentProvider } from "../core/agents/agent";
 import { ClaudeProvider } from "../core/agents/claude/provider";
 import { Attention } from "../core/attention";
-import { StateHistory } from "../core/history";
 import { sortViews } from "../core/model";
 import { Monitor } from "../core/monitor";
 import { createProcessTable, type ProcessTable } from "../core/proc";
@@ -57,7 +56,6 @@ export class Controller implements vscode.Disposable {
 
   private readonly proc: ProcessTable = createProcessTable();
   private readonly attention = new Attention();
-  private readonly history = new StateHistory();
   private readonly windows: WindowRegistry;
   private providers: AgentProvider[] = [];
   private monitor: Monitor | undefined;
@@ -125,9 +123,7 @@ export class Controller implements vscode.Disposable {
       return;
     }
     const update = this.attention.update(views, (view) => isWatched(view, this.terminals));
-    const now = Date.now();
-    this.history.record(update.views, now);
-    this.publish(sortViews(update.views.map((view) => ({ ...view, history: this.history.of(view.id) }))));
+    this.publish(sortViews(update.views));
     this.saveDone();
     for (const view of update.finished) this.finished.fire(view);
     for (const view of update.waiting) this.waiting.fire(view);

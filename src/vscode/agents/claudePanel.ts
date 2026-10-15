@@ -6,6 +6,10 @@ import type { PanelAdapter, PanelReveal } from "./panel";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** The Claude Code extension's command that reveals the tab or sidebar holding a session. */
 const CLAUDE_OPEN = "claude-vscode.editor.open";
+/** The Claude Code extension's rename: an input box for the active session tab, saved as the session's custom title. */
+const CLAUDE_RENAME = "claude-vscode.renameSessionTab";
+/** How long to wait for the tab to come to the front before asking for the rename. */
+const ACTIVATE_WAIT_MS = 1500;
 const CLAUDE_PANEL_VIEW_TYPE = "claudeVSCodePanel";
 const FOCUS_GROUP = [
   "workbench.action.focusFirstEditorGroup",
@@ -73,4 +77,18 @@ function isActive(view: SessionView): boolean {
   return tab !== undefined && isClaudeTab(tab, claudeTabLabel(view.title));
 }
 
-export const claudePanel: PanelAdapter = { reveal, isActive };
+/** Reveals the session, waits for its tab to be in front, then opens Claude Code's rename box. */
+async function rename(view: SessionView, log: Log): Promise<boolean> {
+  const revealed = await reveal(view, log);
+  if (revealed === "refused-invalid" || revealed === "failed") return false;
+  for (let waited = 0; !isActive(view) && waited < ACTIVATE_WAIT_MS; waited += 50) await new Promise((r) => setTimeout(r, 50));
+  try {
+    await vscode.commands.executeCommand(CLAUDE_RENAME);
+    return true;
+  } catch (err) {
+    log.errorOnce(`${CLAUDE_RENAME} failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
+export const claudePanel: PanelAdapter = { reveal, isActive, rename };

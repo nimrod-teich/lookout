@@ -11,6 +11,7 @@ export interface BoardActions {
   usage(): BoardUsage | undefined;
   refreshUsage(): void;
   jump(view: SessionView): Promise<void>;
+  rename(view: SessionView): Promise<void>;
   markSeen(id: string): void;
   markAllSeen(): void;
 }
@@ -62,11 +63,13 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         this.refresh();
         return;
       case "jump":
+      case "rename":
       case "seen": {
         // The webview can only act on sessions it was shown.
         const view = this.actions.sessions().find((s) => s.id === message.id);
         if (!view) return;
         if (message.type === "jump") void this.actions.jump(view);
+        else if (message.type === "rename") void this.actions.rename(view);
         else this.actions.markSeen(view.id);
         return;
       }
