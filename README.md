@@ -27,6 +27,10 @@ Running several AI coding agents at once means clicking through tabs to find out
 
 <table>
   <tr>
+    <td><b>Board</b></td>
+    <td>The Lookout view in the activity bar. A beam strip at the top places every session as a blip: which side it is on says its state, its distance from the lighthouse how long it has been there. Below, one card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its project and worktree, where it runs, its model and context size. Click a blip or a card to jump to the session.</td>
+  </tr>
+  <tr>
     <td><b>Watch</b></td>
     <td>The status bar shows how many sessions are working, how many wait for you, and how many finished since you last looked. Its background lights up while any session waits. Hover for every session's title, project, worktree and state.</td>
   </tr>
@@ -97,6 +101,7 @@ Windows support is new. Its process handling is tested on Windows in CI; it has 
 | `Lookout: Jump to Session` | `Ctrl+Alt+J` | Lists the sessions and brings the chosen one's tab or terminal to the front. Clicking the status bar item runs it too. |
 | `Lookout: Jump to Next Session That Needs You` | `Ctrl+Alt+Shift+J` | Jumps to the session that has waited longest for you, then to the finished ones. Each press moves to the next. |
 | `Lookout: Mark All Sessions as Seen` | | Clears every "finished" mark. |
+| `Lookout: Show Sessions` | | Opens the board. |
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -119,7 +124,7 @@ With Claude Code:
 | What | Where it comes from |
 | --- | --- |
 | Which sessions exist, and their state | `<config>/sessions/<pid>.json`, one file per Claude Code process. A file counts only while its process is alive. |
-| Title, current directory | The session's transcript, `<config>/projects/<project>/<session-id>.jsonl`, read incrementally. |
+| Title, current directory, activity | The session's transcript, `<config>/projects/<project>/<session-id>.jsonl`, read incrementally. A tool call with no result yet is what the session is doing; the first line of the latest assistant message is what it last said. |
 | Jumping to a panel session | The Claude Code extension's `claude-vscode.editor.open` command with the session id; if that fails, the tab whose label matches the session title. |
 
 These files and that command are internal to Claude Code and can change between versions.
@@ -135,7 +140,7 @@ npm test
 npm run build   # bundle to dist/
 ```
 
-`src/core` has no dependency on the VS Code API and is tested against temporary directories. `src/vscode` is tested against a stub of the `vscode` module (`test/vscode/stub-vscode.ts`). Press F5 in VS Code to run the extension in an Extension Development Host.
+`src/core` has no dependency on the VS Code API and is tested against temporary directories. `src/vscode` is tested against a stub of the `vscode` module (`test/vscode/stub-vscode.ts`). `src/webview` is the board's page. Press F5 in VS Code to run the extension in an Extension Development Host, or open `preview/index.html` in a browser after `npm run build` to see the board with fixture sessions (`?theme=light`, `?fixture=empty`).
 
 ### Adding an agent
 

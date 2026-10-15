@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- Dev preview of the board outside VS Code: npm run build, then open this file. -->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="theme-dark.css" id="theme">
+<link rel="stylesheet" href="../media/board.css">
+<style>html { background: var(--vscode-sideBar-background); } body { width: 300px; }</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  const params = new URLSearchParams(location.search);
+  if (params.get("theme") === "light") {
+    document.getElementById("theme").href = "theme-light.css";
+    document.body.className = "vscode-light";
+  } else {
+    document.body.className = "vscode-dark";
+  }
+  window.acquireVsCodeApi = () => ({ postMessage: (m) => console.log("to extension:", JSON.stringify(m)) });
+  window.addEventListener("load", async () => {
+    const fixture = await (await fetch(`fixtures/${params.get("fixture") ?? "busy"}.json`)).json();
+    const now = Date.now();
+    for (const s of fixture.sessions) if (typeof s.since === "number" && s.since < 1e9) s.since = now - s.since;
+    window.postMessage({ type: "sessions", sessions: fixture.sessions, now }, "*");
+  });
+</script>
+<script src="../dist/board.js"></script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countStates, describeLocation, describeState, formatElapsed } from "../../src/core/format";
+import { countStates, describeLocation, describeState, formatElapsed, formatTokens, shortModel } from "../../src/core/format";
 import { view } from "../vscode/helpers";
 
 describe("format", () => {
@@ -31,5 +31,12 @@ describe("format", () => {
       unknown: 0,
       idle: 0,
     });
+  });
+
+  it("formats token counts and model names", () => {
+    expect([formatTokens(850), formatTokens(189_585), formatTokens(1_250_000)]).toEqual(["850", "190k", "1.3M"]);
+    expect(shortModel("claude-fable-5-1[1m]")).toBe("Fable 5.1");
+    expect(shortModel("claude-opus-5-5")).toBe("Opus 5.5");
+    expect(shortModel("gpt-6")).toBe("gpt-6");
   });
 });

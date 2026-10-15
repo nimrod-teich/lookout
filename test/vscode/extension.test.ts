@@ -23,6 +23,7 @@ function context() {
   return {
     subscriptions,
     globalStorageUri: { fsPath: path.join(configDir, "global-storage") },
+    extensionUri: { fsPath: "/ext" },
     workspaceState: {
       get: (key: string, fallback: unknown) => saved[key] ?? fallback,
       update: (key: string, value: unknown) => {

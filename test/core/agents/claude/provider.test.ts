@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClaudeProvider } from "../../../../src/core/agents/claude/provider";
-import { applyLine, titleOf, type TranscriptState } from "../../../../src/core/agents/claude/transcript";
+import { activityOf, agentsOf, applyLine, emptyTranscript, summarizeTool, titleOf, type TranscriptState } from "../../../../src/core/agents/claude/transcript";
 import { appendEntries, FakeProc, sessionId, tempConfigDir, transcriptPath, writeSession } from "../../helpers";
 
 function setup() {
@@ -11,7 +11,7 @@ function setup() {
 
 describe("transcript", () => {
   it("prefers a user rename over the generated title over the last prompt", () => {
-    const state: TranscriptState = {};
+    const state = emptyTranscript();
     applyLine(state, JSON.stringify({ type: "last-prompt", lastPrompt: "fix the\n  build" }));
     expect(titleOf(state)).toBe("fix the build");
     applyLine(state, JSON.stringify({ type: "ai-title", aiTitle: "Build fix" }));
@@ -22,19 +22,82 @@ describe("transcript", () => {
   });
 
   it("falls back when a rename is cleared", () => {
-    const state: TranscriptState = { customTitle: "My tab", aiTitle: "Build fix" };
+    const state: TranscriptState = { ...emptyTranscript(), customTitle: "My tab", aiTitle: "Build fix" };
     applyLine(state, JSON.stringify({ type: "custom-title", customTitle: "" }));
     expect(titleOf(state)).toBe("Build fix");
   });
 
   it("follows the main chain's cwd and ignores subagents and bad lines", () => {
-    const state: TranscriptState = {};
+    const state = emptyTranscript();
     applyLine(state, JSON.stringify({ type: "user", cwd: "/work/app" }));
     applyLine(state, JSON.stringify({ type: "assistant", cwd: "/work/other", isSidechain: true }));
     applyLine(state, "{not json");
     applyLine(state, "null");
     applyLine(state, "");
     expect(state.cwd).toBe("/work/app");
+  });
+});
+
+describe("transcript activity", () => {
+  const ts = "2026-10-15T10:00:00.000Z";
+  const assistant = (block: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ type: "assistant", timestamp: ts, message: { model: "claude-fable-5-1", content: [block], usage: { input_tokens: 10, cache_read_input_tokens: 100_000, cache_creation_input_tokens: 500, output_tokens: 7 } }, ...extra });
+  const result = (id: string) => JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+  const prompt = (text: string) => JSON.stringify({ type: "user", message: { content: [{ type: "text", text }] } });
+
+  it("tracks tool calls until their results arrive", () => {
+    const state = emptyTranscript();
+    applyLine(state, assistant({ type: "tool_use", id: "t1", name: "Bash", input: { command: "npm test\n# more", description: undefined } }));
+    expect(activityOf(state)).toBe("Bash · npm test");
+    applyLine(state, assistant({ type: "tool_use", id: "t2", name: "Agent", input: { description: "Review the diff", prompt: "..." } }));
+    applyLine(state, assistant({ type: "tool_use", id: "t3", name: "Read", input: { file_path: "/work/app/src/index.ts" } }));
+    expect(activityOf(state)).toBe("Bash · npm test +2");
+    expect(agentsOf(state)).toBe(1);
+    applyLine(state, result("t1"));
+    expect(activityOf(state)).toBe("Agent · Review the diff +1");
+    applyLine(state, result("t2"));
+    applyLine(state, result("t3"));
+    expect(activityOf(state)).toBeUndefined();
+    expect(agentsOf(state)).toBe(0);
+  });
+
+  it("summarizes each tool by what it works on", () => {
+    expect(summarizeTool("Bash", { command: "ls", description: "List files" })).toBe("List files");
+    expect(summarizeTool("Edit", { file_path: "C:\\work\\app\\src\\a.ts" })).toBe("a.ts");
+    expect(summarizeTool("Grep", { pattern: "TODO" })).toBe("TODO");
+    expect(summarizeTool("Skill", { skill: "code-review" })).toBe("code-review");
+    expect(summarizeTool("WebFetch", { url: "https://example.com/x" })).toBe("https://example.com/x");
+    expect(summarizeTool("WebSearch", { query: "vitest fake timers" })).toBe("vitest fake timers");
+    expect(summarizeTool("Bash", { command: "x".repeat(100) })).toBe(`${"x".repeat(59)}…`);
+    expect(summarizeTool("TaskStop", { task_id: "b1" })).toBeUndefined();
+    expect(summarizeTool("Bash", "not an object")).toBeUndefined();
+  });
+
+  it("clears the tools in flight on a new prompt or an interrupt", () => {
+    const state = emptyTranscript();
+    applyLine(state, assistant({ type: "tool_use", id: "t1", name: "Bash", input: { command: "sleep 100" } }));
+    applyLine(state, prompt("[Request interrupted by user for tool use]"));
+    expect(activityOf(state)).toBeUndefined();
+
+    applyLine(state, assistant({ type: "tool_use", id: "t2", name: "Bash", input: { command: "sleep 100" } }));
+    applyLine(state, JSON.stringify({ type: "user", message: { content: "[Request interrupted by user]" } }));
+    expect(activityOf(state)).toBeUndefined();
+
+    applyLine(state, assistant({ type: "tool_use", id: "t3", name: "Bash", input: { command: "sleep 100" } }));
+    applyLine(state, JSON.stringify({ type: "user", isMeta: true, message: { content: [{ type: "text", text: "<system-reminder>" }] } }));
+    expect(activityOf(state)).toBe("Bash · sleep 100");
+    applyLine(state, prompt("next task please"));
+    expect(activityOf(state)).toBeUndefined();
+  });
+
+  it("keeps the last reply, the model and the context size, ignoring subagents", () => {
+    const state = emptyTranscript();
+    applyLine(state, assistant({ type: "thinking", thinking: "hmm" }));
+    applyLine(state, assistant({ type: "text", text: "\n\nDone. The build passes.\nDetails below." }));
+    expect(state).toMatchObject({ lastReply: "Done. The build passes.", model: "claude-fable-5-1", contextTokens: 100_510 });
+    applyLine(state, assistant({ type: "text", text: "sidechain text" }, { isSidechain: true }));
+    applyLine(state, JSON.stringify({ type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text: "" }] } }));
+    expect(state).toMatchObject({ lastReply: "Done. The build passes.", model: "claude-fable-5-1" });
   });
 });
 
@@ -56,7 +119,8 @@ describe("ClaudeProvider", () => {
     expect([11, 12, 13, 14, 15].map((pid) => byPid.get(pid)?.status)).toEqual(["working", "waiting", "idle", "idle", "unknown"]);
     expect(byPid.get(12)?.needs).toBe("permission prompt");
     expect(byPid.get(11)?.needs).toBeUndefined();
-    expect(byPid.get(11)).toMatchObject({ agent: "claude-code", panel: true, since: 2_000 });
+    expect(byPid.get(11)).toMatchObject({ agent: "claude-code", panel: true, since: 2_000, agents: 0 });
+    expect(byPid.get(11)?.activity).toBeUndefined();
     expect(byPid.get(14)?.panel).toBe(false);
   });
 
@@ -84,6 +148,21 @@ describe("ClaudeProvider", () => {
 
     appendEntries(transcript, [{ type: "assistant", cwd: "/work/svc/.claude/worktrees/hotfix" }]);
     expect(provider.poll(7_000)[0]?.cwd).toBe("/work/svc/.claude/worktrees/hotfix");
+  });
+
+  it("reports the activity of a working session only", () => {
+    const { configDir, proc, provider } = setup();
+    const id = sessionId(1);
+    writeSession(configDir, proc, { pid: 11, sessionId: id, status: "busy" });
+    appendEntries(transcriptPath(configDir, "/work/app", id), [
+      { type: "assistant", message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t1", name: "Agent", input: { description: "Plan the work" } }], usage: { input_tokens: 5 } } },
+    ]);
+    expect(provider.poll(0)[0]).toMatchObject({ activity: "Agent · Plan the work", agents: 1, model: "claude-opus-5-5", contextTokens: 5 });
+
+    writeSession(configDir, proc, { pid: 11, sessionId: id, status: "idle" });
+    const idle = provider.poll(0)[0];
+    expect(idle?.activity).toBeUndefined();
+    expect(idle?.agents).toBe(0);
   });
 
   it("finds a transcript stored under another project directory", () => {

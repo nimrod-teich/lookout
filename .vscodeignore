@@ -1,6 +1,10 @@
 **
 !dist/extension.js
+!dist/board.js
 !media/icon.png
+!media/board.css
+!media/activity.svg
 !package.json
 !README.md
+!CHANGELOG.md
 !LICENSE

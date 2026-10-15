@@ -2,7 +2,7 @@ import * as esbuild from "esbuild";
 
 const watch = process.argv.includes("--watch");
 
-const options = {
+const extension = {
   entryPoints: ["src/extension.ts"],
   outfile: "dist/extension.js",
   bundle: true,
@@ -14,9 +14,20 @@ const options = {
   logLevel: "info",
 };
 
+// The board runs inside a webview: a browser bundle with no imports left.
+const board = {
+  entryPoints: ["src/webview/board.ts"],
+  outfile: "dist/board.js",
+  bundle: true,
+  platform: "browser",
+  format: "iife",
+  target: "es2022",
+  sourcemap: true,
+  logLevel: "info",
+};
+
 if (watch) {
-  const ctx = await esbuild.context(options);
-  await ctx.watch();
+  for (const options of [extension, board]) await (await esbuild.context(options)).watch();
 } else {
-  await esbuild.build(options);
+  await Promise.all([esbuild.build(extension), esbuild.build(board)]);
 }

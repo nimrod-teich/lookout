@@ -16,6 +16,15 @@ export interface AgentSession {
   cwd: string;
   /** Runs in the agent's own editor panel, as opposed to a terminal. */
   panel: boolean;
+  /** What the session is doing right now, e.g. "Bash · npm test". */
+  activity?: string;
+  /** Subagents in flight. */
+  agents?: number;
+  /** First line of the assistant's latest message. */
+  lastReply?: string;
+  model?: string;
+  /** Tokens in the context window at the last model call. */
+  contextTokens?: number;
 }
 
 /**

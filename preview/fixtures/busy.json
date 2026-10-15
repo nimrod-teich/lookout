@@ -1,0 +1,11 @@
+{
+  "sessions": [
+    { "id": "1", "agent": "claude-code", "pid": 1, "title": "Migrate billing webhooks", "state": "waiting", "since": 185000, "needs": "permission prompt", "project": "api", "cwd": "/work/api", "host": "panel", "agents": 0, "model": "claude-opus-5-5", "contextTokens": 142000, "lastReply": "I need to run the migration." },
+    { "id": "2", "agent": "claude-code", "pid": 2, "title": "Update the changelog", "state": "done", "since": 720000, "project": "docs", "cwd": "/work/docs", "host": "terminal", "terminalPid": 70, "agents": 0, "model": "claude-sonnet-5-5", "contextTokens": 18000, "lastReply": "Done. The changelog lists the three fixes and the new flag." },
+    { "id": "3", "agent": "claude-code", "pid": 3, "title": "Fix flaky checkout test", "state": "working", "since": 240000, "project": "web", "cwd": "/work/web", "host": "panel", "agents": 0, "activity": "Bash · npm test -- checkout", "model": "claude-fable-5-1", "contextTokens": 189585 },
+    { "id": "4", "agent": "claude-code", "pid": 4, "title": "Split the usage rollup query", "state": "working", "since": 1920000, "project": "api", "worktree": "rollup-split", "cwd": "/work/api/.claude/worktrees/rollup-split", "host": "panel", "agents": 3, "activity": "Agent · Review the query plan +2", "model": "claude-fable-5-1", "contextTokens": 402000 },
+    { "id": "5", "agent": "claude-code", "pid": 5, "title": "Dashboard slowness", "state": "working", "since": 30000, "project": "dashboard", "cwd": "/work/dashboard", "host": "window", "windowLabel": "dashboard", "agents": 0, "model": "claude-opus-5-5", "contextTokens": 61000 },
+    { "id": "6", "agent": "claude-code", "pid": 6, "title": "Tenant-specific Grafana dashboard provisioning", "state": "idle", "since": 2760000, "project": "infra", "cwd": "/work/infra", "host": "panel", "agents": 0, "model": "claude-fable-5-1", "contextTokens": 95000, "lastReply": "Both dashboards are provisioned; tell me when you want the alert rules." },
+    { "id": "7", "agent": "claude-code", "pid": 7, "title": "Untitled session", "state": "idle", "since": 5000, "project": "api", "cwd": "/work/api", "host": "elsewhere", "agents": 0 }
+  ]
+}

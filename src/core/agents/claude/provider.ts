@@ -5,7 +5,7 @@ import type { AgentProvider, AgentSession, AgentStatus } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
-import { applyLine, titleOf, type TranscriptState } from "./transcript";
+import { activityOf, agentsOf, applyLine, emptyTranscript, titleOf, type TranscriptState } from "./transcript";
 
 export const CLAUDE_CODE = "claude-code";
 
@@ -69,6 +69,11 @@ export class ClaudeProvider implements AgentProvider {
         title: titleOf(transcript),
         cwd: transcript.cwd ?? file.cwd,
         panel: file.entrypoint === PANEL_ENTRYPOINT,
+        activity: status === "working" ? activityOf(transcript) : undefined,
+        agents: status === "working" ? agentsOf(transcript) : 0,
+        lastReply: transcript.lastReply,
+        model: transcript.model,
+        contextTokens: transcript.contextTokens,
       };
     });
     for (const id of this.tracked.keys()) if (!live.has(id)) this.tracked.delete(id);
@@ -89,7 +94,7 @@ export class ClaudeProvider implements AgentProvider {
   private readTranscript(file: SessionFile, now: number): TranscriptState {
     let tracked = this.tracked.get(file.sessionId);
     if (!tracked) {
-      tracked = { state: {}, nextLookupAt: 0 };
+      tracked = { state: emptyTranscript(), nextLookupAt: 0 };
       this.tracked.set(file.sessionId, tracked);
     }
     if (!tracked.tail && now >= tracked.nextLookupAt) {
@@ -99,7 +104,7 @@ export class ClaudeProvider implements AgentProvider {
     }
     const read = tracked.tail?.read();
     if (read) {
-      if (read.reset) tracked.state = {};
+      if (read.reset) tracked.state = emptyTranscript();
       for (const line of read.lines) applyLine(tracked.state, line);
     }
     return tracked.state;

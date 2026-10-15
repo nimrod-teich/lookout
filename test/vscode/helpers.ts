@@ -12,6 +12,7 @@ export function view(overrides: Partial<SessionView> = {}): SessionView {
     project: "app",
     cwd: "/work/app",
     host: "panel",
+    agents: 0,
     ...overrides,
   };
 }

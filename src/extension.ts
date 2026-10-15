@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { nextAttention } from "./core/model";
 import type { SessionView } from "./core/types";
+import { Board, BOARD_VIEW } from "./vscode/board";
 import { readConfig } from "./vscode/config";
 import { Controller } from "./vscode/controller";
 import { jumpToSession, revealed } from "./vscode/jump";
@@ -14,6 +15,7 @@ import { Terminals } from "./vscode/terminals";
 const JUMP = "lookout.jump";
 const JUMP_NEXT_ATTENTION = "lookout.jumpNextAttention";
 const MARK_ALL_SEEN = "lookout.markAllSeen";
+const SHOW_BOARD = "lookout.showBoard";
 
 export function activate(context: vscode.ExtensionContext): void {
   const log = createLog();
@@ -33,10 +35,19 @@ export function activate(context: vscode.ExtensionContext): void {
   /** The session the last "next" jump went to, so repeated presses cycle through them. */
   let lastJump: string | undefined;
 
-  const render = () => statusBar.render(controller.sessions, config.statusBarEnabled);
   const jump = async (view: SessionView) => {
     lastJump = view.id;
     if (revealed(await jumpToSession(view, terminals, log))) controller.markSeen(view.id);
+  };
+  const board = new Board(context.extensionUri, {
+    sessions: () => controller.sessions,
+    jump,
+    markSeen: (id) => controller.markSeen(id),
+    markAllSeen: () => controller.markAllSeen(),
+  });
+  const render = () => {
+    statusBar.render(controller.sessions, config.statusBarEnabled);
+    board.refresh();
   };
   const noticeFocus = () => controller.noticeFocus();
 
@@ -45,6 +56,8 @@ export function activate(context: vscode.ExtensionContext): void {
     terminals,
     controller,
     statusBar,
+    board,
+    vscode.window.registerWebviewViewProvider(BOARD_VIEW, board),
     controller.onDidChange(render),
     controller.onDidStartWaiting(async (view) => {
       if (config.notifyWaiting && (await notifyWaiting(view))) await jump(view);
@@ -79,6 +92,7 @@ export function activate(context: vscode.ExtensionContext): void {
       else void vscode.window.showInformationMessage("Lookout: no session in this window is waiting for you.");
     }),
     vscode.commands.registerCommand(MARK_ALL_SEEN, () => controller.markAllSeen()),
+    vscode.commands.registerCommand(SHOW_BOARD, () => vscode.commands.executeCommand(`${BOARD_VIEW}.focus`)),
   );
 
   controller.start(config);
