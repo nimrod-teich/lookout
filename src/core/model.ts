@@ -73,6 +73,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
     ...projectOf(session.cwd),
     cwd: session.cwd,
     ...locate(session, ancestors, ctx),
+    remote: session.remote === true,
     activity: session.activity,
     agents: session.agents ?? 0,
     lastReply: session.lastReply,

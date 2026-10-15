@@ -17,6 +17,7 @@ export type FromBoard =
   | { type: "ready" }
   | { type: "jump"; id: string }
   | { type: "rename"; id: string }
+  | { type: "remote"; id: string }
   | { type: "seen"; id: string }
   | { type: "seenAll" }
   | { type: "refreshUsage" };
