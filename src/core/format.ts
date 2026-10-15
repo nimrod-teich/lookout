@@ -55,3 +55,10 @@ export function shortModel(id: string): string {
   const family = match[1]!;
   return `${family[0]!.toUpperCase()}${family.slice(1)} ${match[2]}.${match[3]}`;
 }
+
+/** "$0.42", "$118", "$1.2k". */
+export function formatUsd(usd: number): string {
+  if (usd < 10) return `$${usd.toFixed(2)}`;
+  if (usd < 1000) return `$${Math.round(usd)}`;
+  return `$${(usd / 1000).toFixed(1)}k`;
+}

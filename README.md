@@ -28,7 +28,7 @@ Running several AI coding agents at once means clicking through tabs to find out
 <table>
   <tr>
     <td><b>Board</b></td>
-    <td>The Lookout view in the activity bar. At the top, the harbour: a night scene where every session is a boat on the water. Its lane says its state, its distance from the lighthouse how long it has been there; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with your 5-hour usage. Below, one card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its tool calls per minute over the last 15 minutes, a ring for how full its context window is, its project and worktree, where it runs and its model. Click a boat or a card to jump to the session; a pencil on the card renames it through the agent; a click on a state in the legend hides that group.</td>
+    <td>The Lookout view in the activity bar. At the top, the harbour: a night scene where every session is a boat on the water. Its lane says its state, its distance from the lighthouse how long it has been there; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with your 5-hour usage. Below, one card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its tool calls per minute over the last 15 minutes, a ring for how full its context window is, the tokens it has used so far with their price at API list rates, its project and worktree, where it runs and its model. Click a boat or a card to jump to the session; a pencil on the card renames it through the agent; a click on a state in the legend hides that group.</td>
   </tr>
   <tr>
     <td><b>Usage</b></td>
@@ -132,6 +132,7 @@ With Claude Code:
 | --- | --- |
 | Which sessions exist, and their state | `<config>/sessions/<pid>.json`, one file per Claude Code process. A file counts only while its process is alive. |
 | Title, current directory, activity | The session's transcript, `<config>/projects/<project>/<session-id>.jsonl`, read incrementally. A tool call with no result yet is what the session is doing; the first line of the latest assistant message is what it last said. |
+| Tokens and price | Claude Code writes a cost checkpoint into the transcript now and then (`cost-state`: tokens per model and its own price in USD, subagents included). Lookout reads from the last checkpoint and adds the main transcript's usage since, priced at Anthropic's list rates (cache writes at 1.25× input for 5-minute entries, 2× for 1-hour ones). Subagent usage after the checkpoint is not counted, and a model Lookout has no price for leaves the price out. |
 | Jumping to a panel session | The Claude Code extension's `claude-vscode.editor.open` command with the session id; if that fails, the tab whose label matches the session title. |
 | Usage | `~/.claude.json`, where Claude Code caches the usage it last fetched. A refresh starts the Claude Code binary bundled with the Claude Code extension and sends it a `get_usage` request; it fetches with its own credentials, calls no model, and rewrites its cache. Lookout never reads your credentials. |
 
