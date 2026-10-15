@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { nextAttention } from "./core/model";
 import type { SessionView } from "./core/types";
 import { Board, BOARD_VIEW } from "./vscode/board";
+import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
 import { Controller } from "./vscode/controller";
 import { jumpToSession, revealed } from "./vscode/jump";
@@ -11,11 +12,13 @@ import { notifyFinished, notifyWaiting } from "./vscode/notifications";
 import { pickSession } from "./vscode/quickPick";
 import { StatusBar } from "./vscode/statusBar";
 import { Terminals } from "./vscode/terminals";
+import { UsageBar } from "./vscode/usageBar";
 
 const JUMP = "lookout.jump";
 const JUMP_NEXT_ATTENTION = "lookout.jumpNextAttention";
 const MARK_ALL_SEEN = "lookout.markAllSeen";
 const SHOW_BOARD = "lookout.showBoard";
+const REFRESH_USAGE = "lookout.refreshUsage";
 
 export function activate(context: vscode.ExtensionContext): void {
   const log = createLog();
@@ -26,11 +29,13 @@ export function activate(context: vscode.ExtensionContext): void {
       label: vscode.workspace.name ?? "untitled window",
       sharedDir: path.join(context.globalStorageUri.fsPath, "windows"),
       state: context.workspaceState,
+      claudeBinary: findClaudeBinary,
     },
     terminals,
     log,
   );
   const statusBar = new StatusBar(JUMP);
+  const usageBar = new UsageBar(REFRESH_USAGE);
   let config = readConfig();
   /** The session the last "next" jump went to, so repeated presses cycle through them. */
   let lastJump: string | undefined;
@@ -41,12 +46,18 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   const board = new Board(context.extensionUri, {
     sessions: () => controller.sessions,
+    usage: () => {
+      const usage = controller.usage;
+      return usage && { ...usage, canRefresh: controller.canRefreshUsage };
+    },
     jump,
     markSeen: (id) => controller.markSeen(id),
     markAllSeen: () => controller.markAllSeen(),
+    refreshUsage: () => void controller.refreshUsage(),
   });
   const render = () => {
     statusBar.render(controller.sessions, config.statusBarEnabled);
+    usageBar.render(controller.usage, config.statusBarEnabled && config.statusBarUsage, controller.canRefreshUsage);
     board.refresh();
   };
   const noticeFocus = () => controller.noticeFocus();
@@ -56,7 +67,9 @@ export function activate(context: vscode.ExtensionContext): void {
     terminals,
     controller,
     statusBar,
+    usageBar,
     board,
+    controller.onDidChangeUsage(render),
     vscode.window.registerWebviewViewProvider(BOARD_VIEW, board),
     controller.onDidChange(render),
     controller.onDidStartWaiting(async (view) => {
@@ -93,6 +106,13 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand(MARK_ALL_SEEN, () => controller.markAllSeen()),
     vscode.commands.registerCommand(SHOW_BOARD, () => vscode.commands.executeCommand(`${BOARD_VIEW}.focus`)),
+    vscode.commands.registerCommand(REFRESH_USAGE, async () => {
+      if (!controller.canRefreshUsage) {
+        void vscode.window.showInformationMessage("Lookout can't fetch usage: usage refresh is off, or the Claude Code extension is not installed.");
+        return;
+      }
+      if (!(await controller.refreshUsage())) void vscode.window.showWarningMessage("Lookout: Claude Code gave no usage numbers. Check the Lookout output log.");
+    }),
   );
 
   controller.start(config);

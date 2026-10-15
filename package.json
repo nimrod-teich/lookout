@@ -50,6 +50,11 @@
         "command": "lookout.showBoard",
         "title": "Show Sessions",
         "category": "Lookout"
+      },
+      {
+        "command": "lookout.refreshUsage",
+        "title": "Refresh Usage",
+        "category": "Lookout"
       }
     ],
     "keybindings": [
@@ -69,6 +74,27 @@
           "type": "boolean",
           "default": true,
           "description": "Show the session counts in the status bar."
+        },
+        "lookout.statusBar.showUsage": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the 5-hour and weekly usage in the status bar."
+        },
+        "lookout.usage.refresh": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "auto",
+            "off"
+          ],
+          "default": "manual",
+          "scope": "machine",
+          "enumDescriptions": [
+            "Fetch fresh usage numbers only when you run Lookout: Refresh Usage or click the usage item.",
+            "Fetch when the numbers are older than 10 minutes, at most every 5 minutes.",
+            "Never run the Claude Code binary; show only what Claude Code cached."
+          ],
+          "markdownDescription": "How Lookout keeps the usage numbers fresh. A refresh starts the Claude Code binary from the Claude Code extension and asks it for the account's usage; it fetches with its own credentials and calls no model. Lookout never reads your credentials."
         },
         "lookout.notifications.waiting": {
           "type": "boolean",

@@ -2,7 +2,7 @@
 import { formatElapsed, formatTokens, shortModel } from "../core/format";
 import type { SessionView } from "../core/types";
 import { BEAM, groupSessions, hostChip, layoutBlips, secondLine } from "./model";
-import type { FromBoard, ToBoard } from "./protocol";
+import type { BoardUsage, FromBoard, ToBoard } from "./protocol";
 
 declare function acquireVsCodeApi(): { postMessage(message: FromBoard): void };
 
@@ -11,6 +11,7 @@ const vscode = acquireVsCodeApi();
 const root = document.getElementById("root")!;
 
 let sessions: SessionView[] = [];
+let usage: BoardUsage | undefined;
 /** The extension's clock minus ours, so elapsed times agree with the status bar. */
 let clockOffset = 0;
 
@@ -139,6 +140,69 @@ function renderBeam(): void {
   }
 }
 
+// Usage meters: one bar per limit, under the beam.
+
+const meters = el("div", "meters");
+const meterRows = new Map<string, HTMLElement>();
+
+function resetText(resetsAt: number | undefined): string {
+  if (resetsAt === undefined || resetsAt <= now()) return "";
+  return `resets in ${formatElapsed(resetsAt - now())}`;
+}
+
+function renderMeters(): void {
+  meters.classList.toggle("hidden", usage === undefined);
+  meters.classList.toggle("stale", usage?.stale === true);
+  if (!usage) return;
+  const seen = new Set<string>();
+  let previous: HTMLElement | undefined;
+  for (const meter of usage.meters) {
+    seen.add(meter.key);
+    let row = meterRows.get(meter.key);
+    if (!row) {
+      row = el("div", "meter");
+      const bar = el("span", "bar");
+      bar.append(el("span", "fill"), el("span", "tick"));
+      row.append(el("span", "label"), bar, el("span", "percent"), el("span", "reset"));
+      meterRows.set(meter.key, row);
+    }
+    row.className = `meter ${meter.percent >= 95 ? "high" : meter.percent >= 80 ? "warn" : ""}`;
+    row.querySelector(".label")!.textContent = meter.label;
+    (row.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
+    const tick = row.querySelector(".tick") as HTMLElement;
+    // Where in the window we are: lets the burn rate be read against the fill.
+    if (meter.resetsAt !== undefined && meter.windowMs) {
+      const through = 1 - Math.min(1, Math.max(0, (meter.resetsAt - now()) / meter.windowMs));
+      tick.style.left = `${Math.round(through * 100)}%`;
+      tick.classList.remove("hidden");
+    } else {
+      tick.classList.add("hidden");
+    }
+    row.querySelector(".percent")!.textContent = `${meter.percent}%`;
+    row.querySelector(".reset")!.textContent = resetText(meter.resetsAt);
+    if (row.previousElementSibling !== (previous ?? null) || row.parentElement !== meters) meters.insertBefore(row, previous ? previous.nextSibling : meters.firstChild);
+    previous = row;
+  }
+  for (const [key, row] of meterRows) {
+    if (seen.has(key)) continue;
+    row.remove();
+    meterRows.delete(key);
+  }
+  let foot = meters.querySelector<HTMLElement>(".foot");
+  if (!foot) {
+    foot = el("div", "foot");
+    foot.append(el("span", "asof"));
+    const refresh = el("button", "link", "refresh");
+    refresh.type = "button";
+    refresh.addEventListener("click", () => vscode.postMessage({ type: "refreshUsage" }));
+    foot.append(refresh);
+    meters.append(foot);
+  }
+  meters.append(foot);
+  foot.querySelector(".asof")!.textContent = `Usage as of ${formatElapsed(now() - usage.fetchedAt)} ago${usage.stale ? ", stale" : ""}`;
+  foot.querySelector(".link")!.classList.toggle("hidden", !usage.canRefresh);
+}
+
 function createCard(view: SessionView): HTMLElement {
   const card = el("button", "card");
   card.type = "button";
@@ -186,7 +250,9 @@ function updateCard(card: HTMLElement, view: SessionView): void {
 
 function render(): void {
   if (!beam.isConnected) root.prepend(beam);
+  if (!meters.isConnected) beam.append(meters);
   renderBeam();
+  renderMeters();
   const groups = groupSessions(sessions);
   root.classList.toggle("empty", sessions.length === 0);
   if (sessions.length === 0) {
@@ -259,12 +325,14 @@ function tick(): void {
     if (card) card.querySelector(".elapsed")!.textContent = elapsedText(view);
   }
   renderBeam();
+  if (usage) renderMeters();
 }
 
 window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   const message = event.data;
   if (message.type !== "sessions") return;
   sessions = message.sessions;
+  usage = message.usage;
   clockOffset = message.now - Date.now();
   render();
 });

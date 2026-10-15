@@ -2,12 +2,14 @@ import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import { countStates } from "../core/format";
 import type { SessionView } from "../core/types";
-import type { FromBoard, ToBoard } from "../webview/protocol";
+import type { BoardUsage, FromBoard, ToBoard } from "../webview/protocol";
 
 export const BOARD_VIEW = "lookout.board";
 
 export interface BoardActions {
   sessions(): readonly SessionView[];
+  usage(): BoardUsage | undefined;
+  refreshUsage(): void;
   jump(view: SessionView): Promise<void>;
   markSeen(id: string): void;
   markAllSeen(): void;
@@ -47,7 +49,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
     if (this.view) {
       this.view.badge = attention > 0 ? { value: attention, tooltip: `${counts.waiting} need you, ${counts.done} finished` } : undefined;
       if (this.view.visible) {
-        const message: ToBoard = { type: "sessions", sessions: [...sessions], now: Date.now() };
+        const message: ToBoard = { type: "sessions", sessions: [...sessions], now: Date.now(), usage: this.actions.usage() };
         void this.view.webview.postMessage(message);
       }
     }
@@ -70,6 +72,9 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
       }
       case "seenAll":
         this.actions.markAllSeen();
+        return;
+      case "refreshUsage":
+        this.actions.refreshUsage();
         return;
     }
   }

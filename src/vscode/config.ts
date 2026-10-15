@@ -1,8 +1,11 @@
 import * as vscode from "vscode";
 import { resolveConfigDir } from "../core/agents/claude/paths";
+import type { RefreshMode } from "../core/usage";
 
 export interface Config {
   statusBarEnabled: boolean;
+  statusBarUsage: boolean;
+  usageRefresh: RefreshMode;
   notifyWaiting: boolean;
   notifyDone: boolean;
   /** The Claude Code config directory to read sessions and transcripts from. */
@@ -22,10 +25,16 @@ function claudeExtensionConfigDir(): string | undefined {
   return typeof entry?.value === "string" ? entry.value : undefined;
 }
 
+function refreshMode(value: string | undefined): RefreshMode {
+  return value === "auto" || value === "off" ? value : "manual";
+}
+
 export function readConfig(): Config {
   const lookout = vscode.workspace.getConfiguration("lookout");
   return {
     statusBarEnabled: lookout.get<boolean>("statusBar.enabled", true),
+    statusBarUsage: lookout.get<boolean>("statusBar.showUsage", true),
+    usageRefresh: refreshMode(lookout.get<string>("usage.refresh")),
     notifyWaiting: lookout.get<boolean>("notifications.waiting", true),
     notifyDone: lookout.get<boolean>("notifications.done", false),
     claudeConfigDir: resolveConfigDir({

@@ -6,6 +6,8 @@ import { sortViews } from "../core/model";
 import { Monitor } from "../core/monitor";
 import { createProcessTable, type ProcessTable } from "../core/proc";
 import type { SessionView } from "../core/types";
+import { isStale, shouldAutoRefresh, UsageCache, usageCacheFile, type RefreshMode, type UsageSnapshot } from "../core/usage";
+import { refreshUsage } from "../core/usageRefresh";
 import { WindowRegistry } from "../core/windows";
 import type { Config } from "./config";
 import type { Log } from "./log";
@@ -29,14 +31,24 @@ export interface ControllerHost {
   sharedDir: string;
   /** Per-workspace storage, to carry finished marks across a reload. */
   state: vscode.Memento;
+  /** The Claude Code binary that can fetch the account's usage, when installed. */
+  claudeBinary(): string | undefined;
+}
+
+/** The usage numbers as the UI gets them. */
+export interface Usage extends UsageSnapshot {
+  stale: boolean;
 }
 
 /** Polls the sessions on this host and announces when what the UI shows changes. */
 export class Controller implements vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<readonly SessionView[]>();
+  private readonly usageChanged = new vscode.EventEmitter<Usage | undefined>();
   private readonly finished = new vscode.EventEmitter<SessionView>();
   private readonly waiting = new vscode.EventEmitter<SessionView>();
   readonly onDidChange = this.changed.event;
+  /** The usage numbers were fetched or read anew. */
+  readonly onDidChangeUsage = this.usageChanged.event;
   /** A session of this window finished a turn while the user was not looking. */
   readonly onDidFinish = this.finished.event;
   /** A session of this window started to wait for the user while they were not looking. */
@@ -53,6 +65,11 @@ export class Controller implements vscode.Disposable {
   private current: readonly SessionView[] = [];
   private snapshot = "[]";
   private savedDone = "";
+  private usageCache: UsageCache | undefined;
+  private usageMode: RefreshMode = "manual";
+  private currentUsage: UsageSnapshot | undefined;
+  private refreshing: Promise<boolean> | undefined;
+  private lastRefreshAttempt = -Infinity;
 
   constructor(
     private readonly host: ControllerHost,
@@ -71,10 +88,21 @@ export class Controller implements vscode.Disposable {
     return this.current;
   }
 
+  get usage(): Usage | undefined {
+    return this.currentUsage && { ...this.currentUsage, stale: isStale(this.currentUsage, Date.now()) };
+  }
+
+  /** Lookout can ask the agent for fresh usage numbers. */
+  get canRefreshUsage(): boolean {
+    return this.usageMode !== "off" && this.host.claudeBinary() !== undefined;
+  }
+
   /** Starts, or restarts with other settings. */
   start(config: Config): void {
     this.providers = [new ClaudeProvider(config.claudeConfigDir, this.proc)];
     this.monitor = new Monitor(this.providers, this.proc);
+    this.usageCache = new UsageCache(usageCacheFile(config.claudeConfigDir));
+    this.usageMode = config.usageRefresh;
     this.log.info(`Watching ${this.providers.map((p) => p.label).join(", ")} (${config.claudeConfigDir})`);
     this.watch();
     this.poll();
@@ -99,6 +127,41 @@ export class Controller implements vscode.Disposable {
     this.saveDone();
     for (const view of update.finished) this.finished.fire(view);
     for (const view of update.waiting) this.waiting.fire(view);
+    this.pollUsage();
+  }
+
+  private pollUsage(): void {
+    const read = this.usageCache?.read();
+    if (read && read.fetchedAt !== this.currentUsage?.fetchedAt) {
+      this.currentUsage = read;
+      this.usageChanged.fire(this.usage);
+    }
+    if (this.canRefreshUsage && shouldAutoRefresh(this.usageMode, this.currentUsage, this.lastRefreshAttempt, Date.now())) void this.refreshUsage();
+  }
+
+  /**
+   * Has the agent fetch fresh usage numbers. Resolves true when they arrived.
+   * One fetch runs at a time; a call during a fetch waits for that one.
+   */
+  refreshUsage(): Promise<boolean> {
+    if (this.refreshing) return this.refreshing;
+    const binary = this.host.claudeBinary();
+    if (!binary || this.usageMode === "off") return Promise.resolve(false);
+    this.lastRefreshAttempt = Date.now();
+    this.refreshing = refreshUsage({ binary })
+      .then((snapshot) => {
+        if (!snapshot) {
+          this.log.errorOnce("Usage refresh: the Claude Code binary gave no usage numbers");
+          return false;
+        }
+        this.currentUsage = snapshot;
+        this.usageChanged.fire(this.usage);
+        return true;
+      })
+      .finally(() => {
+        this.refreshing = undefined;
+      });
+    return this.refreshing;
   }
 
   /** The user looked at this session. */
@@ -162,6 +225,7 @@ export class Controller implements vscode.Disposable {
     this.proc.onDidUpdate = undefined;
     this.windows.unregister(this.host.pid);
     this.changed.dispose();
+    this.usageChanged.dispose();
     this.finished.dispose();
     this.waiting.dispose();
   }
