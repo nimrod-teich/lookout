@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView } from "../../src/core/types";
+import type { BoardUsage } from "../../src/webview/protocol";
 import { Board } from "../../src/vscode/board";
 import { view } from "./helpers";
 import { createWebviewView, stub } from "./stub-vscode";
 
-function setup(sessions: SessionView[] = []) {
-  const actions = { sessions: () => sessions, jump: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn() };
+function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
+  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn() };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
   board.resolveWebviewView(webviewView as never);
@@ -70,6 +71,14 @@ describe("Board", () => {
     expect(actions.jump).toHaveBeenCalledWith(shown);
     expect(actions.markSeen).toHaveBeenCalledTimes(1);
     expect(actions.markAllSeen).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the usage along with the sessions and relays a refresh request", () => {
+    const usage: BoardUsage = { fetchedAt: 1, stale: false, canRefresh: true, meters: [{ key: "session", label: "5h", percent: 18 }] };
+    const { actions, webviewView } = setup([], usage);
+    expect(webviewView.posted[0]).toMatchObject({ type: "sessions", usage });
+    webviewView.receive({ type: "refreshUsage" });
+    expect(actions.refreshUsage).toHaveBeenCalledTimes(1);
   });
 
   it("stops sending after the view is disposed", () => {

@@ -51,6 +51,8 @@ export const stub = {
   /** The quick pick that is open, if any. */
   openPicker: undefined as StubQuickPick | undefined,
   webviewProviders: new Map<string, unknown>(),
+  /** What `extensions.getExtension` returns for any id. */
+  extension: undefined as { extensionPath: string } | undefined,
   /** What the user presses on the next notification. */
   notificationAnswer: undefined as string | undefined,
   openTerminal: new EventEmitter<StubTerminal>(),
@@ -69,6 +71,7 @@ export const stub = {
     this.quickPick = undefined;
     this.openPicker = undefined;
     this.webviewProviders.clear();
+    this.extension = undefined;
     this.notificationAnswer = undefined;
     this.openTerminal.dispose();
     this.closeTerminal.dispose();
@@ -305,6 +308,10 @@ export const commands = {
     stub.commands.set(command, handler);
     return { dispose: () => void stub.commands.delete(command) };
   },
+};
+
+export const extensions = {
+  getExtension: () => stub.extension,
 };
 
 export const workspace = {

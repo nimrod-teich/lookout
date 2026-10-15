@@ -22,7 +22,12 @@
     const fixture = await (await fetch(`fixtures/${params.get("fixture") ?? "busy"}.json`)).json();
     const now = Date.now();
     for (const s of fixture.sessions) if (typeof s.since === "number" && s.since < 1e9) s.since = now - s.since;
-    window.postMessage({ type: "sessions", sessions: fixture.sessions, now }, "*");
+    const usage = fixture.usage;
+    if (usage) {
+      usage.fetchedAt = now - usage.fetchedAt;
+      for (const m of usage.meters) if (m.resetsAt) m.resetsAt = now + m.resetsAt;
+    }
+    window.postMessage({ type: "sessions", sessions: fixture.sessions, now, usage }, "*");
   });
 </script>
 <script src="../dist/board.js"></script>

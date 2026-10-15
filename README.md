@@ -31,6 +31,10 @@ Running several AI coding agents at once means clicking through tabs to find out
     <td>The Lookout view in the activity bar. A beam strip at the top places every session as a blip: which side it is on says its state, its distance from the lighthouse how long it has been there. Below, one card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its project and worktree, where it runs, its model and context size. Click a blip or a card to jump to the session.</td>
   </tr>
   <tr>
+    <td><b>Usage</b></td>
+    <td>Your 5-hour and weekly limits, in the status bar and on the board, with each window's reset time and how far through it you are. The numbers are the ones Claude Code caches; <code>Lookout: Refresh Usage</code> (or a click on the status bar item) has Claude Code fetch them again, with its own credentials.</td>
+  </tr>
+  <tr>
     <td><b>Watch</b></td>
     <td>The status bar shows how many sessions are working, how many wait for you, and how many finished since you last looked. Its background lights up while any session waits. Hover for every session's title, project, worktree and state.</td>
   </tr>
@@ -44,7 +48,7 @@ Running several AI coding agents at once means clicking through tabs to find out
   </tr>
   <tr>
     <td><b>No&nbsp;setup</b></td>
-    <td>Lookout reads the state the agent already records on disk. It installs no hooks, reads no credentials, and sends nothing off the machine.</td>
+    <td>Lookout reads the state the agent already records on disk. It installs no hooks, reads no credentials, and sends nothing off the machine. The only program it starts is Claude Code's own binary, to refresh the usage numbers when you ask.</td>
   </tr>
 </table>
 
@@ -102,10 +106,13 @@ Windows support is new. Its process handling is tested on Windows in CI; it has 
 | `Lookout: Jump to Next Session That Needs You` | `Ctrl+Alt+Shift+J` | Jumps to the session that has waited longest for you, then to the finished ones. Each press moves to the next. |
 | `Lookout: Mark All Sessions as Seen` | | Clears every "finished" mark. |
 | `Lookout: Show Sessions` | | Opens the board. |
+| `Lookout: Refresh Usage` | | Has Claude Code fetch the account's usage again. Clicking the usage item in the status bar runs it too. |
 
 | Setting | Default | Description |
 | --- | --- | --- |
 | `lookout.statusBar.enabled` | `true` | Show the session counts in the status bar. |
+| `lookout.statusBar.showUsage` | `true` | Show the 5-hour and weekly usage in the status bar. |
+| `lookout.usage.refresh` | `manual` | `manual`: fetch only on `Lookout: Refresh Usage`. `auto`: fetch when the numbers are older than 10 minutes, at most every 5 minutes. `off`: never start the Claude Code binary; show only what it cached. |
 | `lookout.notifications.waiting` | `true` | Notify when a session of this window starts to wait for you and you are not looking at it. |
 | `lookout.notifications.done` | `false` | Notify when a session of this window finishes a turn and you are not looking at it. |
 | `lookout.claudeConfigDir` | `""` | Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`. |
@@ -126,6 +133,7 @@ With Claude Code:
 | Which sessions exist, and their state | `<config>/sessions/<pid>.json`, one file per Claude Code process. A file counts only while its process is alive. |
 | Title, current directory, activity | The session's transcript, `<config>/projects/<project>/<session-id>.jsonl`, read incrementally. A tool call with no result yet is what the session is doing; the first line of the latest assistant message is what it last said. |
 | Jumping to a panel session | The Claude Code extension's `claude-vscode.editor.open` command with the session id; if that fails, the tab whose label matches the session title. |
+| Usage | `~/.claude.json`, where Claude Code caches the usage it last fetched. A refresh starts the Claude Code binary bundled with the Claude Code extension and sends it a `get_usage` request; it fetches with its own credentials, calls no model, and rewrites its cache. Lookout never reads your credentials. |
 
 These files and that command are internal to Claude Code and can change between versions.
 
