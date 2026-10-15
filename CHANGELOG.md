@@ -4,7 +4,7 @@
 
 First release.
 
-- **Board.** A view in the activity bar: a beam strip that places every session by state and time, and one card per session, grouped by state, showing what each session is doing, its project, where it runs, its model and context size. Click a blip or a card to jump.
+- **Board.** A view in the activity bar. At the top, the harbour: a night scene with the lighthouse, its sweeping beam, and the sessions as boats on the water, placed by state and by time in that state; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with the 5-hour usage. Below, one card per session, grouped by state, showing what each session is doing, its project, where it runs, its model and context size. Click a boat or a card to jump.
 - **Status bar.** Counts of sessions that are working, waiting for you, and finished since you last looked, with a spinner while any session works and a highlighted background while any session waits. The hover list shows every session's title, project, worktree and state.
 - **Jump.** `Lookout: Jump to Session` (`Ctrl+Alt+J`) lists the sessions, the ones that need attention first, with how long each has been in its state, and brings the chosen one's tab or terminal to the front. `Lookout: Jump to Next Session That Needs You` (`Ctrl+Alt+Shift+J`) goes straight to the one that has waited longest and cycles through the rest on repeated presses.
 - **Finished turns.** A session that finishes a turn while you are not looking at it is marked finished until you open its tab or terminal; the marks survive a window reload. `Lookout: Mark All Sessions as Seen` clears them.
