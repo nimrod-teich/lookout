@@ -45,6 +45,11 @@
         "command": "lookout.markAllSeen",
         "title": "Mark All Sessions as Seen",
         "category": "Lookout"
+      },
+      {
+        "command": "lookout.showBoard",
+        "title": "Show Sessions",
+        "category": "Lookout"
       }
     ],
     "keybindings": [
@@ -82,6 +87,26 @@
           "markdownDescription": "Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`."
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lookout",
+          "title": "Lookout",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "lookout": [
+        {
+          "type": "webview",
+          "id": "lookout.board",
+          "name": "Sessions",
+          "icon": "media/activity.svg",
+          "contextualTitle": "Lookout"
+        }
+      ]
     }
   },
   "scripts": {

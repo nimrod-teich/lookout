@@ -50,6 +50,7 @@ export const stub = {
   quickPick: undefined as ((items: readonly unknown[]) => unknown) | undefined,
   /** The quick pick that is open, if any. */
   openPicker: undefined as StubQuickPick | undefined,
+  webviewProviders: new Map<string, unknown>(),
   /** What the user presses on the next notification. */
   notificationAnswer: undefined as string | undefined,
   openTerminal: new EventEmitter<StubTerminal>(),
@@ -67,6 +68,7 @@ export const stub = {
     this.focused = true;
     this.quickPick = undefined;
     this.openPicker = undefined;
+    this.webviewProviders.clear();
     this.notificationAnswer = undefined;
     this.openTerminal.dispose();
     this.closeTerminal.dispose();
@@ -169,6 +171,61 @@ export class TabInputWebview {
 
 export const StatusBarAlignment = { Left: 1, Right: 2 };
 
+export const Uri = {
+  joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: [base.fsPath, ...parts].join("/"), path: [base.fsPath, ...parts].join("/") }),
+};
+
+export interface StubWebviewView {
+  webview: {
+    options: unknown;
+    html: string;
+    cspSource: string;
+    asWebviewUri(uri: { path: string }): string;
+    postMessage(message: unknown): Promise<boolean>;
+    onDidReceiveMessage(listener: (message: unknown) => void): { dispose(): void };
+  };
+  visible: boolean;
+  badge: { value: number; tooltip: string } | undefined;
+  onDidChangeVisibility(listener: () => void): { dispose(): void };
+  onDidDispose(listener: () => void): { dispose(): void };
+  /** Test helpers. */
+  posted: unknown[];
+  receive(message: unknown): void;
+  setVisible(visible: boolean): void;
+  dispose(): void;
+}
+
+export function createWebviewView(): StubWebviewView {
+  const received = new EventEmitter<unknown>();
+  const visibility = new EventEmitter<void>();
+  const disposed = new EventEmitter<void>();
+  const view: StubWebviewView = {
+    webview: {
+      options: undefined,
+      html: "",
+      cspSource: "vscode-webview://stub",
+      asWebviewUri: (uri) => `https://stub.webview${uri.path}`,
+      postMessage: (message) => {
+        view.posted.push(message);
+        return Promise.resolve(true);
+      },
+      onDidReceiveMessage: received.event,
+    },
+    visible: true,
+    badge: undefined,
+    onDidChangeVisibility: visibility.event,
+    onDidDispose: disposed.event,
+    posted: [],
+    receive: (message) => received.fire(message),
+    setVisible: (visible) => {
+      view.visible = visible;
+      visibility.fire();
+    },
+    dispose: () => disposed.fire(),
+  };
+  return view;
+}
+
 function recorded<T extends object>(target: string, props: string[], methods: string[]): T {
   const values: Record<string, unknown> = {};
   const obj: Record<string, unknown> = {};
@@ -226,6 +283,11 @@ export const window = {
   onDidCloseTerminal: stub.closeTerminal.event,
   onDidChangeActiveTerminal: stub.focusChange.event,
   onDidChangeWindowState: stub.focusChange.event,
+  registerWebviewViewProvider: (id: string, provider: unknown) => {
+    stub.ops.push(["window", "registerWebviewViewProvider", id]);
+    stub.webviewProviders.set(id, provider);
+    return { dispose: () => void stub.webviewProviders.delete(id) };
+  },
 };
 
 export const commands = {

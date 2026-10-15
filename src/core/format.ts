@@ -40,3 +40,18 @@ export function countStates(views: readonly SessionView[]): Counts {
   for (const view of views) counts[view.state]++;
   return counts;
 }
+
+/** "850", "190k", "1.2M". */
+export function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/** "claude-fable-5-1[1m]" → "Fable 5.1"; unknown ids are returned as they are. */
+export function shortModel(id: string): string {
+  const match = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(id);
+  if (!match) return id;
+  const family = match[1]!;
+  return `${family[0]!.toUpperCase()}${family.slice(1)} ${match[2]}.${match[3]}`;
+}

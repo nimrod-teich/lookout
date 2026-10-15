@@ -30,4 +30,13 @@ export interface SessionView {
   terminalPid?: number;
   /** Name of the other VS Code window the session runs in, when `host` is "window". */
   windowLabel?: string;
+  /** What the session is doing right now, e.g. "Bash · npm test". */
+  activity?: string;
+  /** Subagents in flight. */
+  agents: number;
+  /** First line of the assistant's latest message. */
+  lastReply?: string;
+  model?: string;
+  /** Tokens in the context window at the last model call. */
+  contextTokens?: number;
 }

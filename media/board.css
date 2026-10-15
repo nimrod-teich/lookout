@@ -1,0 +1,451 @@
+:root {
+  --working: var(--vscode-progressBar-background);
+  --waiting: var(--vscode-editorWarning-foreground);
+  --done: var(--vscode-testing-iconPassed);
+  --idle: var(--vscode-descriptionForeground);
+  --lamp: #ffb000;
+  --ink: var(--vscode-foreground);
+  --muted: var(--vscode-descriptionForeground);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  background: transparent;
+}
+
+#root {
+  padding: 0 0 16px;
+}
+
+/* The beam strip ---------------------------------------------------------- */
+
+.beam {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 10px 2px;
+  background: var(--vscode-sideBar-background);
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.beam svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  color: var(--ink);
+  overflow: visible;
+}
+
+.rings path {
+  fill: none;
+  stroke: currentColor;
+  stroke-opacity: 0.12;
+  stroke-width: 0.8;
+  stroke-dasharray: 2 3;
+}
+
+.sweep {
+  transform-box: view-box;
+  transform-origin: 150px 100px;
+  animation: sweep 7s ease-in-out infinite alternate;
+  mix-blend-mode: screen;
+}
+
+.vscode-light .sweep,
+.vscode-high-contrast-light .sweep {
+  mix-blend-mode: multiply;
+  opacity: 0.55;
+}
+
+.tower .body {
+  fill: currentColor;
+  fill-opacity: 0.75;
+}
+
+.tower .lamp {
+  fill: var(--lamp);
+  filter: drop-shadow(0 0 3px var(--lamp));
+}
+
+.blip {
+  cursor: pointer;
+  transition: transform 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.blip .dot {
+  fill: var(--idle);
+  stroke: var(--vscode-sideBar-background);
+  stroke-width: 1.2;
+}
+
+.blip .halo {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 1.2;
+}
+
+.blip.state-working .dot {
+  fill: var(--working);
+}
+
+.blip.state-waiting .dot {
+  fill: var(--waiting);
+}
+
+.blip.state-waiting .halo {
+  stroke: var(--waiting);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sonar 1.8s ease-out infinite;
+}
+
+.blip.state-done .dot {
+  fill: var(--done);
+}
+
+.blip.state-idle .dot,
+.blip.state-unknown .dot {
+  fill-opacity: 0.55;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 2px 2px 6px;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  color: var(--muted);
+}
+
+.legend-item b {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.swatch {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 2px;
+  background: var(--idle);
+  vertical-align: 0;
+}
+
+.state-working .swatch,
+.group-working .swatch {
+  background: var(--working);
+}
+
+.state-waiting .swatch,
+.group-waiting .swatch {
+  background: var(--waiting);
+}
+
+.state-done .swatch,
+.group-done .swatch {
+  background: var(--done);
+}
+
+/* Groups ------------------------------------------------------------------ */
+
+.heading {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 12px 12px 4px;
+  font-size: calc(var(--vscode-font-size) - 1px);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.heading .count {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.heading .link {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.heading .link:hover {
+  text-decoration: underline;
+}
+
+/* Cards ------------------------------------------------------------------- */
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 8px;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 7px 10px 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.card:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.card:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.state-waiting {
+  background: color-mix(in srgb, var(--waiting) 12%, transparent);
+  border-color: color-mix(in srgb, var(--waiting) 45%, transparent);
+}
+
+.state-waiting:hover {
+  background: color-mix(in srgb, var(--waiting) 18%, transparent);
+}
+
+.rail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--idle);
+  opacity: 0.5;
+}
+
+.state-working .rail {
+  background: var(--working);
+  opacity: 1;
+}
+
+.state-working .rail::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 40%;
+  background: linear-gradient(to bottom, transparent, var(--vscode-sideBar-background), transparent);
+  opacity: 0.8;
+  animation: travel 2.4s linear infinite;
+}
+
+.state-waiting .rail {
+  background: var(--waiting);
+  opacity: 1;
+}
+
+.state-done .rail {
+  background: var(--done);
+  opacity: 1;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.state-idle .title,
+.state-unknown .title {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.elapsed {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-size: calc(var(--vscode-font-size) - 1px);
+  color: var(--muted);
+}
+
+.state-waiting .elapsed {
+  color: var(--waiting);
+  font-weight: 600;
+}
+
+.state-working .elapsed {
+  color: var(--working);
+}
+
+.line {
+  display: flex;
+  gap: 6px;
+  overflow: hidden;
+  font-family: var(--vscode-editor-font-family);
+  font-size: calc(var(--vscode-font-size) - 1px);
+  color: var(--muted);
+}
+
+.line .mark {
+  flex: none;
+  width: 1ch;
+  font-weight: 700;
+}
+
+.state-working .line .mark {
+  color: var(--working);
+}
+
+.state-waiting .line .mark {
+  color: var(--waiting);
+}
+
+.state-done .line .mark {
+  color: var(--done);
+}
+
+.line .text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line.empty {
+  display: none;
+}
+
+.state-waiting .line .text {
+  color: var(--ink);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 6px;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  color: var(--muted);
+}
+
+.chip {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  line-height: 16px;
+}
+
+.seen {
+  flex: none;
+  align-self: center;
+  display: none;
+  padding: 0 5px;
+  border-radius: 3px;
+  color: var(--done);
+  font-weight: 700;
+}
+
+.state-done:hover .seen {
+  display: inline;
+}
+
+.seen:hover {
+  background: color-mix(in srgb, var(--done) 20%, transparent);
+}
+
+/* Empty state ------------------------------------------------------------- */
+
+.nothing {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.nothing .big {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.nothing .small {
+  margin: 0;
+}
+
+/* Motion ------------------------------------------------------------------ */
+
+@keyframes sweep {
+  from {
+    transform: rotate(-52deg);
+  }
+
+  to {
+    transform: rotate(52deg);
+  }
+}
+
+@keyframes sonar {
+  from {
+    transform: scale(0.5);
+    opacity: 0.9;
+  }
+
+  to {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+@keyframes travel {
+  from {
+    top: -40%;
+  }
+
+  to {
+    top: 100%;
+  }
+}
+
+body.vscode-reduce-motion .sweep,
+body.vscode-reduce-motion .halo,
+body.vscode-reduce-motion .rail::after,
+body.vscode-reduce-motion .blip {
+  animation: none;
+  transition: none;
+}
+
+body.vscode-high-contrast .card,
+body.vscode-high-contrast-light .card {
+  border-color: var(--vscode-contrastBorder);
+}

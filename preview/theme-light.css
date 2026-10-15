@@ -1,0 +1,19 @@
+/* VS Code "Light Modern" values, enough for the board. */
+:root {
+  --vscode-font-family: "Segoe WPC", "Segoe UI", system-ui, sans-serif;
+  --vscode-font-size: 13px;
+  --vscode-editor-font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+  --vscode-foreground: #3b3b3b;
+  --vscode-descriptionForeground: #717171;
+  --vscode-sideBar-background: #f8f8f8;
+  --vscode-sideBarSectionHeader-foreground: #3b3b3b;
+  --vscode-sideBarSectionHeader-border: #e5e5e5;
+  --vscode-widget-border: #e5e5e5;
+  --vscode-list-hoverBackground: #f2f2f2;
+  --vscode-focusBorder: #005fb8;
+  --vscode-progressBar-background: #005fb8;
+  --vscode-editorWarning-foreground: #bf8803;
+  --vscode-testing-iconPassed: #388a34;
+  --vscode-toolbar-hoverBackground: #b8b8b850;
+  --vscode-contrastBorder: transparent;
+}
