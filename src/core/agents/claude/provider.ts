@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { findLastLine, JsonlTail } from "../../jsonlTail";
+import { findLastLine, JsonlTail, readLineAt } from "../../jsonlTail";
 import type { ProcessTable } from "../../proc";
 import type { AgentProvider, AgentSession, AgentStatus } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
@@ -36,6 +36,16 @@ function statusOf(file: SessionFile): AgentStatus {
       return "idle";
     default:
       return "unknown";
+  }
+}
+
+/** Applies the last title entries of each kind, wherever they are in the file; lines read later override them in order. */
+function seedTitles(file: string, state: TranscriptState): void {
+  for (const needle of ['"type":"custom-title"', '"type":"ai-title"']) {
+    const at = findLastLine(file, needle, CHECKPOINT_SEARCH_BYTES);
+    if (at === undefined) continue;
+    const line = readLineAt(file, at);
+    if (line !== undefined) applyLine(state, line);
   }
 }
 
@@ -131,9 +141,12 @@ export class ClaudeProvider implements AgentProvider {
     } catch {
       // Opening the tail reports the missing file.
     }
+    if (size <= BACKFILL_BYTES) return new JsonlTail(file, { startAt: 0 });
+    // Whatever is skipped, the title must not be: Claude Code stamps it once,
+    // and again on resume just before a checkpoint.
+    seedTitles(file, state);
     const checkpoint = findLastLine(file, '"type":"cost-state"', CHECKPOINT_SEARCH_BYTES);
     if (checkpoint !== undefined && size - checkpoint <= CHECKPOINT_READ_BYTES) return new JsonlTail(file, { startAt: checkpoint });
-    if (size <= BACKFILL_BYTES) return new JsonlTail(file, { startAt: 0 });
     state.joinedLate = true;
     return new JsonlTail(file, { backfillBytes: BACKFILL_BYTES });
   }
