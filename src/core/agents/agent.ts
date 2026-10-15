@@ -25,6 +25,10 @@ export interface AgentSession {
   model?: string;
   /** Tokens in the context window at the last model call. */
   contextTokens?: number;
+  /** Size of that window, when the agent knows it. */
+  contextWindow?: number;
+  /** Tool calls per minute over the last 15 minutes, oldest first. */
+  pulse?: number[];
 }
 
 /**

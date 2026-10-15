@@ -52,6 +52,19 @@ export function secondLine(view: SessionView): string | undefined {
   }
 }
 
+/** Bar heights for the pulse, 0..1, scaled to the busiest minute. */
+export function pulseBars(pulse: readonly number[] | undefined): number[] {
+  if (!pulse || pulse.length === 0) return [];
+  const peak = Math.max(...pulse);
+  return pulse.map((n) => (peak === 0 ? 0 : n / peak));
+}
+
+/** How full the context window is, 0..100, when the window is known. */
+export function contextPercent(view: SessionView): number | undefined {
+  if (!view.contextTokens || !view.contextWindow) return undefined;
+  return Math.min(100, Math.round((view.contextTokens / view.contextWindow) * 100));
+}
+
 /** Geometry of the harbour scene, in SVG units. The lighthouse stands on the left shore. */
 export const HARBOUR = {
   width: 300,

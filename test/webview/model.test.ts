@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupSessions, HARBOUR, hostChip, layoutBoats, secondLine, waterline } from "../../src/webview/model";
+import { contextPercent, groupSessions, HARBOUR, hostChip, layoutBoats, pulseBars, secondLine, waterline } from "../../src/webview/model";
 import { view } from "../vscode/helpers";
 
 describe("groupSessions", () => {
@@ -108,5 +108,20 @@ describe("layoutBoats", () => {
     const low = layoutBoats([view({ state: "working" })], 0, waterline(0))[0]!;
     const high = layoutBoats([view({ state: "working" })], 0, waterline(100))[0]!;
     expect(high.y).toBeLessThan(low.y);
+  });
+});
+
+describe("card telemetry", () => {
+  it("scales the pulse to its busiest minute", () => {
+    expect(pulseBars([0, 2, 4, 1])).toEqual([0, 0.5, 1, 0.25]);
+    expect(pulseBars([0, 0])).toEqual([0, 0]);
+    expect(pulseBars(undefined)).toEqual([]);
+  });
+
+  it("gives the context as a percentage only when the window is known", () => {
+    expect(contextPercent(view({ contextTokens: 150_000, contextWindow: 200_000 }))).toBe(75);
+    expect(contextPercent(view({ contextTokens: 1_200_000, contextWindow: 1_000_000 }))).toBe(100);
+    expect(contextPercent(view({ contextTokens: 150_000 }))).toBeUndefined();
+    expect(contextPercent(view({ contextWindow: 200_000 }))).toBeUndefined();
   });
 });

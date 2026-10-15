@@ -20,13 +20,20 @@ export interface TranscriptState {
   model?: string;
   /** Tokens in the context window at the last model call. */
   contextTokens?: number;
+  /** When the assistant called tools, newest last; older than `PULSE_WINDOW_MS` is dropped. */
+  toolCallTimes: number[];
 }
+
+/** How far back the pulse looks. */
+export const PULSE_WINDOW_MS = 15 * 60_000;
+const PULSE_BINS = 15;
+const MAX_TOOL_TIMES = 400;
 
 const INTERRUPT = "[Request interrupted by user";
 const SUMMARY_MAX = 60;
 
 export function emptyTranscript(): TranscriptState {
-  return { openTools: new Map() };
+  return { openTools: new Map(), toolCallTimes: [] };
 }
 
 function firstLine(text: string, max = SUMMARY_MAX): string | undefined {
@@ -100,9 +107,14 @@ function applyAssistant(state: TranscriptState, e: Record<string, unknown>): voi
     const tokens = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
     if (tokens > 0) state.contextTokens = tokens;
   }
+  const at = typeof e.timestamp === "string" ? Date.parse(e.timestamp) : NaN;
   for (const block of blocksOf(e.message)) {
     if (block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") {
       state.openTools.set(block.id, { id: block.id, name: block.name, summary: summarizeTool(block.name, block.input) });
+      if (Number.isFinite(at)) {
+        state.toolCallTimes.push(at);
+        if (state.toolCallTimes.length > MAX_TOOL_TIMES) state.toolCallTimes.splice(0, state.toolCallTimes.length - MAX_TOOL_TIMES);
+      }
     } else if (block.type === "text" && typeof block.text === "string") {
       const line = firstLine(block.text, 120);
       if (line) state.lastReply = line;
@@ -178,6 +190,25 @@ export function activityOf(state: TranscriptState): string | undefined {
   if (!first) return undefined;
   const label = first.summary ? `${first.name} · ${first.summary}` : first.name;
   return tools.length > 1 ? `${label} +${tools.length - 1}` : label;
+}
+
+/** Tool calls per minute over the last 15 minutes, oldest first. */
+export function pulseOf(state: TranscriptState, now: number): number[] {
+  const bins = new Array<number>(PULSE_BINS).fill(0);
+  const binMs = PULSE_WINDOW_MS / PULSE_BINS;
+  const start = now - PULSE_WINDOW_MS;
+  for (const at of state.toolCallTimes) {
+    if (at < start || at > now) continue;
+    bins[Math.min(PULSE_BINS - 1, Math.floor((at - start) / binMs))]!++;
+  }
+  return bins;
+}
+
+/** Claude's context window for a model id: 1M for the `[1m]` variants, or when the usage already passed 200k. */
+export function contextWindowOf(model: string | undefined, contextTokens: number | undefined): number | undefined {
+  if (!model) return undefined;
+  if (model.includes("[1m]") || (contextTokens !== undefined && contextTokens > 200_000)) return 1_000_000;
+  return 200_000;
 }
 
 /** Subagents in flight. */

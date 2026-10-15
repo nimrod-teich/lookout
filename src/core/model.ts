@@ -78,6 +78,8 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
     lastReply: session.lastReply,
     model: session.model,
     contextTokens: session.contextTokens,
+    contextWindow: session.contextWindow,
+    pulse: session.pulse,
   };
 }
 

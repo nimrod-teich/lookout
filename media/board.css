@@ -523,6 +523,85 @@ body {
   color: var(--ink);
 }
 
+/* Pulse: tool calls per minute, last 15 minutes. */
+.pulse {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  margin-top: 2px;
+}
+
+.pulse.empty {
+  display: none;
+}
+
+.pulse .bar {
+  flex: 1;
+  max-width: 5px;
+  border-radius: 1px;
+  background: var(--idle);
+  opacity: 0.7;
+}
+
+.pulse .bar.quiet {
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.state-working .pulse .bar {
+  background: var(--working);
+}
+
+.state-waiting .pulse .bar {
+  background: var(--waiting);
+}
+
+.state-done .pulse .bar {
+  background: var(--done);
+}
+
+.state-working .pulse .bar.quiet,
+.state-waiting .pulse .bar.quiet,
+.state-done .pulse .bar.quiet {
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+/* Context ring: how full the window is. */
+.ring {
+  flex: none;
+  align-self: center;
+  position: relative;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: conic-gradient(var(--working) calc(var(--p) * 1%), color-mix(in srgb, var(--ink) 12%, transparent) 0);
+  display: grid;
+  place-items: center;
+}
+
+.ring::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: var(--vscode-sideBar-background);
+}
+
+.ring.warn {
+  background: conic-gradient(var(--waiting) calc(var(--p) * 1%), color-mix(in srgb, var(--ink) 12%, transparent) 0);
+}
+
+.ring.hidden {
+  display: none;
+}
+
+.ring-value {
+  position: relative;
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
