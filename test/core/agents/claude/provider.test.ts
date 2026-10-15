@@ -148,9 +148,15 @@ describe("ClaudeProvider", () => {
     expect([11, 12, 13, 14, 15].map((pid) => byPid.get(pid)?.status)).toEqual(["working", "waiting", "idle", "idle", "unknown"]);
     expect(byPid.get(12)?.needs).toBe("permission prompt");
     expect(byPid.get(11)?.needs).toBeUndefined();
-    expect(byPid.get(11)).toMatchObject({ agent: "claude-code", panel: true, since: 2_000, agents: 0 });
+    expect(byPid.get(11)).toMatchObject({ agent: "claude-code", panel: true, since: 2_000, agents: 0, remote: false });
     expect(byPid.get(11)?.activity).toBeUndefined();
     expect(byPid.get(14)?.panel).toBe(false);
+  });
+
+  it("marks a session under Remote Control", () => {
+    const { configDir, proc, provider } = setup();
+    writeSession(configDir, proc, { pid: 11, sessionId: sessionId(1), bridgeSessionId: "cse_01ABC" });
+    expect(provider.poll(0)[0]?.remote).toBe(true);
   });
 
   it("prefers the specific reason a session waits", () => {

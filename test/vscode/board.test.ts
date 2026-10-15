@@ -6,7 +6,16 @@ import { view } from "./helpers";
 import { createWebviewView, stub } from "./stub-vscode";
 
 function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
-  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn() };
+  const actions = {
+    sessions: () => sessions,
+    usage: () => usage,
+    jump: vi.fn(() => Promise.resolve()),
+    rename: vi.fn(() => Promise.resolve()),
+    markSeen: vi.fn(),
+    markAllSeen: vi.fn(),
+    refreshUsage: vi.fn(),
+    remote: vi.fn(() => Promise.resolve()),
+  };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
   board.resolveWebviewView(webviewView as never);
@@ -83,6 +92,15 @@ describe("Board", () => {
     expect(webviewView.posted[0]).toMatchObject({ type: "sessions", usage });
     webviewView.receive({ type: "refreshUsage" });
     expect(actions.refreshUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it("relays the card's Remote Control button for a session it was shown, and no other", () => {
+    const shown = view({ id: "00000000-0000-4000-8000-000000000001" });
+    const { actions, webviewView } = setup([shown]);
+    webviewView.receive({ type: "remote", id: shown.id });
+    webviewView.receive({ type: "remote", id: "00000000-0000-4000-8000-000000000002" });
+    expect(actions.remote).toHaveBeenCalledTimes(1);
+    expect(actions.remote).toHaveBeenCalledWith(shown);
   });
 
   it("stops sending after the view is disposed", () => {
