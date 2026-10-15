@@ -12,7 +12,6 @@ import { notifyFinished, notifyWaiting } from "./vscode/notifications";
 import { pickSession } from "./vscode/quickPick";
 import { StatusBar } from "./vscode/statusBar";
 import { Terminals } from "./vscode/terminals";
-import { UsageBar } from "./vscode/usageBar";
 
 const JUMP = "lookout.jump";
 const JUMP_NEXT_ATTENTION = "lookout.jumpNextAttention";
@@ -35,7 +34,6 @@ export function activate(context: vscode.ExtensionContext): void {
     log,
   );
   const statusBar = new StatusBar(JUMP);
-  const usageBar = new UsageBar(REFRESH_USAGE);
   let config = readConfig();
   /** The session the last "next" jump went to, so repeated presses cycle through them. */
   let lastJump: string | undefined;
@@ -56,8 +54,13 @@ export function activate(context: vscode.ExtensionContext): void {
     refreshUsage: () => void controller.refreshUsage(),
   });
   const render = () => {
-    statusBar.render(controller.sessions, config.statusBarEnabled);
-    usageBar.render(controller.usage, config.statusBarEnabled && config.statusBarUsage, controller.canRefreshUsage);
+    statusBar.render({
+      views: controller.sessions,
+      usage: controller.usage,
+      enabled: config.statusBarEnabled,
+      showUsage: config.statusBarUsage,
+      canRefreshUsage: controller.canRefreshUsage,
+    });
     board.refresh();
   };
   const noticeFocus = () => controller.noticeFocus();
@@ -67,7 +70,6 @@ export function activate(context: vscode.ExtensionContext): void {
     terminals,
     controller,
     statusBar,
-    usageBar,
     board,
     controller.onDidChangeUsage(render),
     vscode.window.registerWebviewViewProvider(BOARD_VIEW, board),

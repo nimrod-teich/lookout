@@ -59,9 +59,7 @@ body {
 }
 
 .harbour .beam {
-  mix-blend-mode: screen;
   pointer-events: none;
-  transition: none;
 }
 
 .harbour .rock {
@@ -222,7 +220,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 0 2px 8px;
+  margin: 0 12px 8px;
   padding-top: 8px;
   border-top: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
 }
@@ -360,7 +358,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 0 8px;
+  padding: 0 12px;
 }
 
 .card {

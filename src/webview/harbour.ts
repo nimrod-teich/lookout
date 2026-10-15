@@ -44,7 +44,7 @@ export class Harbour {
     defs.innerHTML = `
       <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#06101a"/><stop offset="1" stop-color="#0c2238"/></linearGradient>
       <linearGradient id="water" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#124a68"/><stop offset="1" stop-color="#061b2b"/></linearGradient>
-      <linearGradient id="light" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff3d1" stop-opacity="0.7"/><stop offset="0.5" stop-color="#fff3d1" stop-opacity="0.18"/><stop offset="1" stop-color="#fff3d1" stop-opacity="0"/></linearGradient>
+      <linearGradient id="light" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff3d1" stop-opacity="0.6"/><stop offset="0.5" stop-color="#fff3d1" stop-opacity="0.16"/><stop offset="1" stop-color="#fff3d1" stop-opacity="0"/></linearGradient>
       <radialGradient id="glow"><stop offset="0" stop-color="#ffd66b" stop-opacity="0.9"/><stop offset="1" stop-color="#ffd66b" stop-opacity="0"/></radialGradient>
       <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.2"/></filter>`;
     root.append(defs);

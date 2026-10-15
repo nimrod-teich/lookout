@@ -32,11 +32,11 @@ Running several AI coding agents at once means clicking through tabs to find out
   </tr>
   <tr>
     <td><b>Usage</b></td>
-    <td>Your 5-hour and weekly limits, in the status bar and on the board, with each window's reset time and how far through it you are. Claude Code fetches the numbers again when they are older than 10 minutes, with its own credentials; <code>Lookout: Refresh Usage</code> (or a click on the status bar item) fetches at once.</td>
+    <td>Your 5-hour and weekly limits, in the status bar item and on the board, with each window's reset time and how far through it you are. Claude Code fetches the numbers again when they are older than 10 minutes, with its own credentials; <code>Lookout: Refresh Usage</code> fetches at once.</td>
   </tr>
   <tr>
     <td><b>Watch</b></td>
-    <td>The status bar shows how many sessions are working, how many wait for you, and how many finished since you last looked. Its background lights up while any session waits. Hover for every session's title, project, worktree and state.</td>
+    <td>One status bar item shows how many sessions are working, how many wait for you, how many finished since you last looked, and your 5-hour and weekly usage. Its background lights up while any session waits. Hover for every session's title, project, worktree and state, and every usage limit.</td>
   </tr>
   <tr>
     <td><b>Jump</b></td>
@@ -106,12 +106,12 @@ Windows support is new. Its process handling is tested on Windows in CI; it has 
 | `Lookout: Jump to Next Session That Needs You` | `Ctrl+Alt+Shift+J` | Jumps to the session that has waited longest for you, then to the finished ones. Each press moves to the next. |
 | `Lookout: Mark All Sessions as Seen` | | Clears every "finished" mark. |
 | `Lookout: Show Sessions` | | Opens the board. |
-| `Lookout: Refresh Usage` | | Has Claude Code fetch the account's usage again. Clicking the usage item in the status bar runs it too. |
+| `Lookout: Refresh Usage` | | Has Claude Code fetch the account's usage again. |
 
 | Setting | Default | Description |
 | --- | --- | --- |
 | `lookout.statusBar.enabled` | `true` | Show the session counts in the status bar. |
-| `lookout.statusBar.showUsage` | `true` | Show the 5-hour and weekly usage in the status bar. |
+| `lookout.statusBar.showUsage` | `true` | Show the 5-hour and weekly usage in the status bar item. |
 | `lookout.usage.refresh` | `auto` | `auto`: fetch when the numbers are older than 10 minutes, at most every 5 minutes. `manual`: fetch only on `Lookout: Refresh Usage`. `off`: never start the Claude Code binary; show only what it cached. |
 | `lookout.notifications.waiting` | `true` | Notify when a session of this window starts to wait for you and you are not looking at it. |
 | `lookout.notifications.done` | `false` | Notify when a session of this window finishes a turn and you are not looking at it. |
