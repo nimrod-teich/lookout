@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { countStates, describeLocation, describeState, type Counts } from "../core/format";
 import type { SessionView } from "../core/types";
-import { STATE_ICON } from "./icons";
+import { BRAND_ICON, STATE_ICON } from "./icons";
 
 /** Braille spinner frames for the "working" count. */
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -16,7 +16,7 @@ function statusText(counts: Counts, frame: number): string {
   if (counts.done) parts.push(`${STATE_ICON.done} ${counts.done}`);
   if (counts.unknown) parts.push(`${STATE_ICON.unknown} ${counts.unknown}`);
   if (!counts.working && !counts.waiting && !counts.done) parts.push(`${counts.idle} idle`);
-  return `$(telescope) ${parts.join("  ")}`;
+  return `${BRAND_ICON} ${parts.join("  ")}`;
 }
 
 function spokenText(counts: Counts): string {

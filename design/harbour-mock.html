@@ -1,0 +1,90 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=block" rel="stylesheet">
+<style>
+:root { --bg:#181818; --ink:#d6d6d6; --muted:#8f8f8f; --working:#3b9eff; --waiting:#ffb000; --done:#5fd08c; --idle:#6c7680; --font: Inter, system-ui, sans-serif; --mono: "JetBrains Mono", monospace; }
+body.light { --bg:#f6f6f6; --ink:#2b2b2b; --muted:#6c6c6c; --working:#0b6fd6; --waiting:#b7790a; --done:#2e8b57; --idle:#8a929b; }
+html { background: var(--bg); } body { margin:0; width:320px; font-family:var(--font); font-size:13px; color:var(--ink); }
+/* ---- the harbour: always night, whatever the theme ---- */
+.harbour { position:relative; height:168px; overflow:hidden; background: linear-gradient(180deg,#07111c 0%, #0b1e30 55%, #0a2740 70%, #082033 100%); }
+.stars i { position:absolute; width:2px; height:2px; border-radius:50%; background:#dbe7f3; opacity:.55; }
+.sea { position:absolute; left:0; right:0; bottom:0; height:52px; background: linear-gradient(180deg, rgba(17,66,96,.9), #062032); }
+.sea::before, .sea::after { content:""; position:absolute; left:-20px; right:-20px; height:1px; background: rgba(160,210,240,.18); }
+.sea::before { top:14px; } .sea::after { top:31px; }
+.tide { position:absolute; left:0; right:0; top:116px; height:1px; background: linear-gradient(90deg, rgba(255,176,0,.0), rgba(255,176,0,.7) 30%, rgba(255,176,0,.7) 70%, rgba(255,176,0,0)); }
+.tide b { position:absolute; right:10px; top:-15px; font:500 10px var(--mono); color:#ffcf66; letter-spacing:.02em; }
+.beam { position:absolute; left:36px; top:66px; width:280px; height:120px; transform-origin:0 0; transform: rotate(-8deg); background: linear-gradient(90deg, rgba(255,241,208,.55), rgba(255,241,208,.18) 45%, rgba(255,241,208,0)); clip-path: polygon(0 0, 100% 0, 100% 100%, 0 7px); mix-blend-mode:screen; }
+.tower { position:absolute; left:26px; bottom:38px; width:16px; height:52px; background: linear-gradient(90deg,#1b2a3a,#0d1724); clip-path: polygon(20% 0, 80% 0, 100% 100%, 0 100%); }
+.lamp { position:absolute; left:28px; bottom:86px; width:12px; height:10px; border-radius:3px; background:#ffcf4d; box-shadow:0 0 14px 5px rgba(255,190,40,.55); }
+.boat { position:absolute; width:8px; height:8px; border-radius:50%; }
+.boat::after { content:""; position:absolute; left:50%; top:12px; width:2px; height:18px; transform:translateX(-50%); background: inherit; opacity:.35; filter: blur(1px); }
+.boat.w { background:var(--working); box-shadow:0 0 8px 2px rgba(59,158,255,.5); }
+.boat.n { background:var(--waiting); width:11px; height:11px; box-shadow:0 0 14px 5px rgba(255,176,0,.65); }
+.boat.d { background:var(--done); box-shadow:0 0 8px 2px rgba(95,208,140,.5); }
+.boat.i { background:#9fb0c0; opacity:.6; }
+.label { position:absolute; font:500 10px var(--mono); color:#cfe3f2; letter-spacing:.01em; white-space:nowrap; text-shadow:0 1px 2px #000; }
+.legend { display:flex; gap:12px; padding:6px 12px; font-size:11px; color:var(--muted); background: linear-gradient(180deg, rgba(0,0,0,.18), transparent); }
+.legend b { color:var(--ink); } .legend i { display:inline-block; width:7px; height:7px; border-radius:2px; margin-right:5px; vertical-align:0; }
+/* ---- groups & glass cards ---- */
+h2 { display:flex; align-items:baseline; gap:6px; margin:12px 12px 6px; font-size:12px; font-weight:600; } h2 span { font-weight:400; color:var(--muted); } h2 .r { margin-left:auto; font-weight:400; color:#4d9cf0; font-size:11px; }
+.cards { display:flex; flex-direction:column; gap:6px; padding:0 10px; }
+.card { position:relative; border-radius:10px; padding:9px 11px 9px 13px; background: color-mix(in srgb, var(--ink) 5%, transparent); border:1px solid color-mix(in srgb, var(--ink) 10%, transparent); overflow:hidden; }
+.card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--c); }
+.card.n { --c:var(--waiting); background: color-mix(in srgb, var(--waiting) 12%, transparent); border-color: color-mix(in srgb, var(--waiting) 45%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--waiting) 15%, transparent), 0 4px 18px -8px var(--waiting); }
+.card.w { --c:var(--working); } .card.d { --c:var(--done); } .card.i { --c:var(--idle); opacity:.8; }
+.row { display:flex; align-items:baseline; gap:8px; } .t { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; letter-spacing:-.005em; }
+.e { font:600 12px var(--mono); color:var(--c, var(--muted)); font-variant-numeric:tabular-nums; }
+.line { display:flex; gap:6px; margin-top:3px; font:12px var(--mono); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .line b { color:var(--c); font-weight:700; }
+.card.n .line { color:var(--ink); }
+.pulse { display:flex; align-items:flex-end; gap:2px; height:14px; margin-top:7px; } .pulse i { width:4px; border-radius:1px; background:var(--c); opacity:.75; }
+.pulse i.g { background: color-mix(in srgb, var(--ink) 15%, transparent); }
+.chips { display:flex; flex-wrap:wrap; gap:4px 6px; margin-top:7px; font-size:11px; color:var(--muted); } .chips span { padding:0 6px; border-radius:4px; background: color-mix(in srgb, var(--ink) 7%, transparent); line-height:17px; }
+.ctx { position:absolute; right:10px; bottom:9px; width:28px; height:28px; border-radius:50%; background: conic-gradient(var(--c) calc(var(--p) * 1%), color-mix(in srgb, var(--ink) 12%, transparent) 0); display:grid; place-items:center; font:500 8.5px var(--mono); color:var(--ink); }
+.ctx::before { content:""; position:absolute; inset:4px; border-radius:50%; background:var(--bg); } .ctx span { position:relative; }
+/* ---- lanes ---- */
+.lanes { padding:0 12px 10px; } .lane { display:grid; grid-template-columns:86px 1fr; align-items:center; gap:8px; height:18px; font-size:11px; color:var(--muted); }
+.lane .bar { position:relative; height:6px; border-radius:3px; background: color-mix(in srgb, var(--ink) 10%, transparent); overflow:hidden; }
+.lane .bar i { position:absolute; top:0; bottom:0; } .lane .bar .w { background:var(--working); } .lane .bar .n { background:var(--waiting); } .lane .bar .i { background:transparent; } .lane .bar .d { background:var(--done); }
+.lane .t { font-weight:400; font-size:11px; }
+.axis { display:flex; justify-content:space-between; margin:2px 0 0 94px; font:10px var(--mono); color:var(--muted); }
+</style></head><body class="dark">
+<div class="harbour">
+  <div class="stars"><i style="left:60px;top:14px"></i><i style="left:120px;top:30px"></i><i style="left:200px;top:12px"></i><i style="left:260px;top:40px;opacity:.3"></i><i style="left:300px;top:20px"></i><i style="left:160px;top:48px;opacity:.35"></i><i style="left:230px;top:58px;opacity:.4"></i></div>
+  <div class="sea"></div>
+  <div class="tide"><b>5h 19%</b></div>
+  <div class="beam"></div>
+  <div class="tower"></div><div class="lamp"></div>
+  <div class="boat n" style="left:118px;top:96px"></div><div class="label" style="left:134px;top:91px">Migrate billing webhooks · 3m</div>
+  <div class="boat w" style="left:178px;top:78px"></div><div class="label" style="left:192px;top:73px">Fix flaky checkout test</div>
+  <div class="boat w" style="left:236px;top:112px"></div>
+  <div class="boat d" style="left:92px;top:124px"></div>
+  <div class="boat i" style="left:270px;top:130px"></div>
+</div>
+<div class="legend"><span><i style="background:var(--waiting)"></i><b>1</b> needs you</span><span><i style="background:var(--done)"></i><b>1</b> finished</span><span><i style="background:var(--working)"></i><b>2</b> working</span><span><i style="background:var(--idle)"></i><b>1</b> idle</span></div>
+
+<h2>Needs you <span>1</span></h2>
+<div class="cards">
+  <div class="card n" style="--p:14"><div class="row"><span class="t">Migrate billing webhooks</span><span class="e">3m</span></div>
+    <div class="line"><b>?</b> permission prompt: Bash · psql -f migrate.sql</div>
+    <div class="pulse"><i style="height:4px"></i><i style="height:9px"></i><i style="height:6px"></i><i style="height:12px"></i><i style="height:5px"></i><i class="g" style="height:3px"></i><i class="g" style="height:3px"></i><i class="g" style="height:3px"></i><i class="g" style="height:3px"></i><i class="g" style="height:3px"></i></div>
+    <div class="chips"><span>api</span><span>Opus 5.5</span><span>142k</span></div><div class="ctx"><span>14%</span></div></div>
+</div>
+<h2>Working <span>2</span></h2>
+<div class="cards">
+  <div class="card w" style="--p:19"><div class="row"><span class="t">Fix flaky checkout test</span><span class="e">7m</span></div>
+    <div class="line"><b>›</b> Bash · npm test -- checkout</div>
+    <div class="pulse"><i style="height:3px"></i><i style="height:7px"></i><i style="height:12px"></i><i style="height:8px"></i><i style="height:14px"></i><i style="height:9px"></i><i style="height:11px"></i><i style="height:6px"></i><i style="height:13px"></i><i style="height:10px"></i></div>
+    <div class="chips"><span>web</span><span>Fable 5.1</span><span>190k</span></div><div class="ctx"><span>19%</span></div></div>
+  <div class="card w" style="--p:40"><div class="row"><span class="t">Split the usage rollup query</span><span class="e">32m</span></div>
+    <div class="line"><b>›</b> Agent · Review the query plan +2</div>
+    <div class="pulse"><i style="height:10px"></i><i style="height:4px"></i><i style="height:3px"></i><i style="height:3px"></i><i style="height:12px"></i><i style="height:14px"></i><i style="height:5px"></i><i style="height:3px"></i><i style="height:3px"></i><i style="height:9px"></i></div>
+    <div class="chips"><span>api · rollup-split</span><span>Fable 5.1</span><span>402k</span><span>3 agents</span></div><div class="ctx"><span>40%</span></div></div>
+</div>
+<h2>Last hour <span class="r">timeline</span></h2>
+<div class="lanes">
+  <div class="lane"><span class="t">Migrate billing…</span><div class="bar"><i class="w" style="left:0;width:62%"></i><i class="n" style="left:62%;width:38%"></i></div></div>
+  <div class="lane"><span class="t">Fix flaky checkout</span><div class="bar"><i class="i" style="left:0;width:40%"></i><i class="w" style="left:40%;width:12%"></i><i class="d" style="left:52%;width:6%"></i><i class="w" style="left:70%;width:30%"></i></div></div>
+  <div class="lane"><span class="t">Split the usage…</span><div class="bar"><i class="w" style="left:0;width:100%"></i></div></div>
+  <div class="lane"><span class="t">Update the chan…</span><div class="bar"><i class="w" style="left:20%;width:30%"></i><i class="d" style="left:50%;width:50%"></i></div></div>
+  <div class="axis"><span>-60m</span><span>-30m</span><span>now</span></div>
+</div>
+</body></html>

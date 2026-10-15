@@ -69,7 +69,7 @@ describe("the extension", () => {
     activate(context());
     const registry = path.join(configDir, "global-storage", "windows", `${process.pid}.json`);
     expect(JSON.parse(fs.readFileSync(registry, "utf8"))).toEqual({ pid: process.pid, label: "stub-workspace" });
-    await vi.waitFor(() => expect(statusText()).toMatch(/^\$\(telescope\) [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await vi.waitFor(() => expect(statusText()).toMatch(/^\$\(lookout-lighthouse\) [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
 
     // Jump: the picker offers the session; choosing it calls the Claude command with its id.
     // On platforms that list processes in the background, the session is placed once the list arrives.
@@ -82,14 +82,14 @@ describe("the extension", () => {
 
     // The session asks for permission while its tab is not in front: one notification.
     writeSession({ status: "waiting", waitingFor: "permission prompt", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toBe("$(telescope) $(bell-dot) 1"), WAIT);
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(bell-dot) 1"), WAIT);
     expect(infoMessages().filter((m) => m.includes("needs you"))).toEqual(['"Untitled session" needs you: permission prompt']);
 
     // It works again, then finishes unwatched: marked finished, no notification by default.
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
     await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toBe("$(telescope) $(check) 1"), WAIT);
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1"), WAIT);
     expect(infoMessages().some((m) => m.includes("finished"))).toBe(false);
     expect(saved["lookout.done"]).toEqual([SESSION]);
 
@@ -97,16 +97,16 @@ describe("the extension", () => {
     stub.ops.length = 0;
     await stub.commands.get("lookout.jumpNextAttention")!();
     expect(stub.ops.some(([target, command]) => target === "commands" && command === CLAUDE_OPEN)).toBe(true);
-    expect(statusText()).toBe("$(telescope) 1 idle");
+    expect(statusText()).toBe("$(lookout-lighthouse) 1 idle");
     expect(saved["lookout.done"]).toEqual([]);
 
     // Finish again, then clear with the command.
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
     await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toBe("$(telescope) $(check) 1"), WAIT);
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1"), WAIT);
     await stub.commands.get("lookout.markAllSeen")!();
-    expect(statusText()).toBe("$(telescope) 1 idle");
+    expect(statusText()).toBe("$(lookout-lighthouse) 1 idle");
 
     child.kill();
     await vi.waitFor(() => expect(stub.ops.some(([target, action]) => target === "statusBar:lookout.sessions" && action === "hide")).toBe(true), WAIT);
@@ -121,13 +121,13 @@ describe("the extension", () => {
       JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now(), utilization: { five_hour: { utilization: 18 }, seven_day: { utilization: 31 } } } }),
     );
     activate(context());
-    await vi.waitFor(() => expect(statusText("usage")).toBe("$(dashboard) 5h 18% · wk 31%"), WAIT);
+    await vi.waitFor(() => expect(statusText("usage")).toBe("$(lookout-lighthouse) 5h 18% · wk 31%"), WAIT);
   }, 60_000);
 
   it("restores finished marks from the workspace state", async () => {
     saved["lookout.done"] = [SESSION];
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });
     activate(context());
-    await vi.waitFor(() => expect(statusText()).toBe("$(telescope) $(check) 1"), WAIT);
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1"), WAIT);
   }, 60_000);
 });
