@@ -122,6 +122,16 @@ describe("pulse and context window", () => {
     expect(pulse.reduce((a, b) => a + b)).toBe(4);
   });
 
+  it("shows only the minutes since the session started, so a young session's bars grow from the left", () => {
+    const state = emptyTranscript();
+    const now = 1_000_000_000;
+    state.toolCallTimes = [now - 30_000, now - 90_000];
+    expect(pulseOf(state, now, now - 2.5 * 60_000)).toEqual([0, 1, 1]);
+    expect(pulseOf(state, now, now - 20 * 60_000)).toHaveLength(15);
+    expect(pulseOf(state, now, now + 5_000)).toEqual([1]);
+    expect(pulseOf(state, now)).toHaveLength(15);
+  });
+
   it("infers Claude's context window from the model id and the usage", () => {
     expect(contextWindowOf("claude-fable-5-1[1m]", 1000)).toBe(1_000_000);
     expect(contextWindowOf("claude-opus-5-5", 150_000)).toBe(200_000);
@@ -188,7 +198,7 @@ describe("ClaudeProvider", () => {
   it("reports the activity of a working session only", () => {
     const { configDir, proc, provider } = setup();
     const id = sessionId(1);
-    writeSession(configDir, proc, { pid: 11, sessionId: id, status: "busy" });
+    writeSession(configDir, proc, { pid: 11, sessionId: id, status: "busy", startedAt: -20 * 60_000 });
     appendEntries(transcriptPath(configDir, "/work/app", id), [
       { type: "assistant", message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t1", name: "Agent", input: { description: "Plan the work" } }], usage: { input_tokens: 5 } } },
     ]);

@@ -234,7 +234,6 @@ function createCard(view: SessionView): HTMLElement {
   const line = el("span", "line");
   line.append(el("span", "mark"), el("span", "text"));
   const pulse = el("span", "pulse");
-  pulse.title = "Tool calls per minute, last 15 minutes";
   const chipsEl = el("span", "chips");
   const spend = el("span", "chip spend");
   main.append(row, line, pulse, chipsEl, spend);
@@ -288,6 +287,7 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   line.classList.toggle("empty", text === undefined);
   const pulse = card.querySelector(".pulse") as HTMLElement;
   const bars = pulseBars(view.pulse);
+  pulse.title = bars.length < 15 ? "Tool calls per minute since the session started" : "Tool calls per minute, last 15 minutes";
   pulse.classList.toggle("empty", bars.length === 0 || bars.every((b) => b === 0));
   while (pulse.childNodes.length > bars.length) pulse.lastChild!.remove();
   bars.forEach((height, i) => {
