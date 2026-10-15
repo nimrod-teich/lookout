@@ -104,6 +104,15 @@ describe("layoutBoats", () => {
     expect(boats.map((b) => b.label)).toEqual(["First · 3m", "Second · 3m", undefined, undefined]);
   });
 
+  it("keeps boats of one lane apart when they started together", () => {
+    const now = 60_000;
+    const boats = layoutBoats([view({ id: "a", state: "working", since: now - 27_000 }), view({ id: "b", state: "working", since: now - 15_000 }), view({ id: "c", state: "working", since: now - 20_000 })], now, water);
+    const xs = boats.map((b) => b.x).sort((p, q) => p - q);
+    expect(xs[1]! - xs[0]!).toBeGreaterThanOrEqual(11);
+    expect(xs[2]! - xs[1]!).toBeGreaterThanOrEqual(11);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(HARBOUR.farX);
+  });
+
   it("follows the tide", () => {
     const low = layoutBoats([view({ state: "working" })], 0, waterline(0))[0]!;
     const high = layoutBoats([view({ state: "working" })], 0, waterline(100))[0]!;
@@ -146,6 +155,15 @@ describe("laneSegments", () => {
       ["working", 50, 40],
       ["waiting", 90, 10],
     ]);
+  });
+
+  it("keeps the current state visible even when it was entered seconds ago", () => {
+    const now = 10 * HOUR;
+    const segments = laneSegments([{ state: "waiting", at: now - 30 * MIN }, { state: "working", at: now - 15_000 }], now, HOUR);
+    expect(segments.map((s) => s.state)).toEqual(["waiting", "working"]);
+    expect(segments[1]!.width).toBe(2);
+    expect(segments[0]!.left + segments[0]!.width).toBeCloseTo(segments[1]!.left, 5);
+    expect(segments[1]!.left + segments[1]!.width).toBeCloseTo(100, 5);
   });
 
   it("leaves the time before Lookout saw the session empty", () => {

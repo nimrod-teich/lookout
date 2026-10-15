@@ -32,7 +32,7 @@ Running several AI coding agents at once means clicking through tabs to find out
   </tr>
   <tr>
     <td><b>Usage</b></td>
-    <td>Your 5-hour and weekly limits, in the status bar and on the board, with each window's reset time and how far through it you are. The numbers are the ones Claude Code caches; <code>Lookout: Refresh Usage</code> (or a click on the status bar item) has Claude Code fetch them again, with its own credentials.</td>
+    <td>Your 5-hour and weekly limits, in the status bar and on the board, with each window's reset time and how far through it you are. Claude Code fetches the numbers again when they are older than 10 minutes, with its own credentials; <code>Lookout: Refresh Usage</code> (or a click on the status bar item) fetches at once.</td>
   </tr>
   <tr>
     <td><b>Watch</b></td>
@@ -112,7 +112,7 @@ Windows support is new. Its process handling is tested on Windows in CI; it has 
 | --- | --- | --- |
 | `lookout.statusBar.enabled` | `true` | Show the session counts in the status bar. |
 | `lookout.statusBar.showUsage` | `true` | Show the 5-hour and weekly usage in the status bar. |
-| `lookout.usage.refresh` | `manual` | `manual`: fetch only on `Lookout: Refresh Usage`. `auto`: fetch when the numbers are older than 10 minutes, at most every 5 minutes. `off`: never start the Claude Code binary; show only what it cached. |
+| `lookout.usage.refresh` | `auto` | `auto`: fetch when the numbers are older than 10 minutes, at most every 5 minutes. `manual`: fetch only on `Lookout: Refresh Usage`. `off`: never start the Claude Code binary; show only what it cached. |
 | `lookout.notifications.waiting` | `true` | Notify when a session of this window starts to wait for you and you are not looking at it. |
 | `lookout.notifications.done` | `false` | Notify when a session of this window finishes a turn and you are not looking at it. |
 | `lookout.claudeConfigDir` | `""` | Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`. |

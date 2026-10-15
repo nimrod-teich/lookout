@@ -26,7 +26,7 @@ function claudeExtensionConfigDir(): string | undefined {
 }
 
 function refreshMode(value: string | undefined): RefreshMode {
-  return value === "auto" || value === "off" ? value : "manual";
+  return value === "manual" || value === "off" ? value : "auto";
 }
 
 export function readConfig(): Config {
