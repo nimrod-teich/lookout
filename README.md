@@ -28,11 +28,11 @@ Running several AI coding agents at once means clicking through tabs to find out
 <table>
   <tr>
     <td><b>Board</b></td>
-    <td>The Lookout view in the activity bar. At the top, the harbour: a night scene where every session is a boat on the water. Its lane says its state, its distance from the lighthouse how long it has been there; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with your 5-hour usage. Below, one card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its tool calls per minute over the last 15 minutes, a ring for how full its context window is, the tokens it has used so far with their price at API list rates, its project and worktree, where it runs and its model. Click a boat or a card to jump to the session; a pencil on the card renames it through the agent; a click on a state in the legend hides that group.</td>
+    <td>The Lookout view in the activity bar. At the top, the harbour: a night scene where every session is a boat on the water. Its lane says its state, its distance from the lighthouse how long it has been there; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with your 5-hour usage. Hover a boat for the session's details; its card lights up below. Below, one card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its tool calls per minute over the last 15 minutes, a ring for how full its context window is, the tokens it has used so far with their price at API list rates, its project and worktree, where it runs and its model. Click a boat or a card to jump to the session; a pencil on the card renames it through the agent; a click on a state in the legend hides that group.</td>
   </tr>
   <tr>
     <td><b>Usage</b></td>
-    <td>Your 5-hour and weekly limits, in the status bar item and on the board, with each window's reset time. The line on each bar marks how much of the window has passed: a fill ahead of the line is a faster pace than even use. Claude Code fetches the numbers again when they are older than 10 minutes, with its own credentials; <code>Lookout: Refresh Usage</code> fetches at once.</td>
+    <td>Your 5-hour and weekly limits, in the status bar item and on the board, with each window's reset time. The bars turn amber from half and red from 80%. Claude Code fetches the numbers again when they are older than 10 minutes, with its own credentials; <code>Lookout: Refresh Usage</code> fetches at once.</td>
   </tr>
   <tr>
     <td><b>Watch</b></td>
