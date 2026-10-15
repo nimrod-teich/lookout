@@ -59,6 +59,9 @@ export interface LaneSegment {
   width: number;
 }
 
+/** The current state always gets at least this much of the lane, so a state entered seconds ago is visible. */
+const MIN_CURRENT_WIDTH = 2;
+
 /** The last hour of a session as coloured segments across a lane; nothing before Lookout first saw it. */
 export function laneSegments(points: readonly { state: State; at: number }[] | undefined, now: number, windowMs: number): LaneSegment[] {
   if (!points || points.length === 0) return [];
@@ -69,6 +72,14 @@ export function laneSegments(points: readonly { state: State; at: number }[] | u
     const to = Math.min(now, points[i + 1]?.at ?? now);
     if (to <= from) continue;
     segments.push({ state: points[i]!.state, left: ((from - start) / windowMs) * 100, width: ((to - from) / windowMs) * 100 });
+  }
+  const current = segments.at(-1);
+  if (current && current.width < MIN_CURRENT_WIDTH) {
+    const grow = MIN_CURRENT_WIDTH - current.width;
+    current.left = Math.max(0, current.left - grow);
+    current.width = MIN_CURRENT_WIDTH;
+    const before = segments.at(-2);
+    if (before) before.width = Math.max(0, current.left - before.left);
   }
   return segments;
 }
@@ -103,6 +114,8 @@ export const HARBOUR = {
 
 /** How far below the waterline each group's boats float. */
 const LANES: Record<Group["key"], number> = { waiting: 8, working: 17, done: 26, idle: 35 };
+/** Boats of one lane stay at least this far apart, so sessions started together stay visible. */
+const MIN_GAP = 11;
 /** The far edge of the harbour means this long in a state. */
 const MAX_MINUTES = 240;
 
@@ -132,11 +145,14 @@ export interface Boat {
 export function layoutBoats(views: readonly SessionView[], now: number, water: number): Boat[] {
   const boats: Boat[] = [];
   for (const group of groupSessions(views)) {
-    group.views.forEach((view, i) => {
+    // Newest first in the lane, so the push for spacing goes away from the shore.
+    const lane = [...group.views].sort((a, b) => (b.since ?? 0) - (a.since ?? 0));
+    let lastX = -Infinity;
+    lane.forEach((view, i) => {
       const minutes = view.since === undefined ? 0 : Math.max(0, now - view.since) / 60_000;
       const t = Math.min(1, Math.log10(1 + minutes) / Math.log10(1 + MAX_MINUTES));
-      // Boats of one lane with the same age would stack; stagger them a little.
-      const x = Math.min(HARBOUR.farX, HARBOUR.nearX + (HARBOUR.farX - HARBOUR.nearX) * t + (i % 3) * 7);
+      const x = Math.min(HARBOUR.farX, Math.max(HARBOUR.nearX + (HARBOUR.farX - HARBOUR.nearX) * t, lastX + MIN_GAP));
+      lastX = x;
       const y = water + LANES[group.key] + (i % 2) * 3;
       const label = group.key === "waiting" && i < 2 ? `${view.title} · ${view.since === undefined ? "" : elapsed(now - view.since)}`.replace(/ · $/, "") : undefined;
       boats.push({

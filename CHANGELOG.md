@@ -9,7 +9,7 @@ First release.
 - **Jump.** `Lookout: Jump to Session` (`Ctrl+Alt+J`) lists the sessions, the ones that need attention first, with how long each has been in its state, and brings the chosen one's tab or terminal to the front. `Lookout: Jump to Next Session That Needs You` (`Ctrl+Alt+Shift+J`) goes straight to the one that has waited longest and cycles through the rest on repeated presses.
 - **Finished turns.** A session that finishes a turn while you are not looking at it is marked finished until you open its tab or terminal; the marks survive a window reload. `Lookout: Mark All Sessions as Seen` clears them.
 - **Notifications.** A notification with a Jump button when a session starts to wait for you (`lookout.notifications.waiting`, on by default) or finishes a turn (`lookout.notifications.done`, off by default).
-- **Usage.** The 5-hour and weekly limits in the status bar and on the board, from Claude Code's cache. `Lookout: Refresh Usage` has Claude Code fetch them again; `lookout.usage.refresh` can make that automatic or turn it off.
+- **Usage.** The 5-hour and weekly limits in the status bar and on the board, from Claude Code's cache. Claude Code fetches them again when they are older than 10 minutes (`lookout.usage.refresh`: `auto`, `manual` or `off`); `Lookout: Refresh Usage` fetches at once.
 - **Agents.** Claude Code: sessions in the VS Code panel and in integrated terminals. Sessions in another VS Code window are listed with that window's name.
 - **Icon.** The lighthouse is the mark everywhere: the activity bar, and the two status bar items through an icon font the extension ships.
 - **Platforms.** Linux, WSL, Linux remotes, and Windows.

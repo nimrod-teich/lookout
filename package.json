@@ -87,7 +87,7 @@
             "auto",
             "off"
           ],
-          "default": "manual",
+          "default": "auto",
           "scope": "machine",
           "enumDescriptions": [
             "Fetch fresh usage numbers only when you run Lookout: Refresh Usage or click the usage item.",
