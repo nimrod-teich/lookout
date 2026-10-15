@@ -635,6 +635,79 @@ body {
   background: color-mix(in srgb, var(--done) 20%, transparent);
 }
 
+/* The last hour --------------------------------------------------------- */
+
+.timeline.hidden {
+  display: none;
+}
+
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 12px;
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.lane .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  color: var(--muted);
+}
+
+.lane:hover .name {
+  color: var(--ink);
+}
+
+.lane .bar {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  overflow: hidden;
+}
+
+.lane .seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--idle);
+  opacity: 0.45;
+}
+
+.lane .seg.state-working {
+  background: var(--working);
+  opacity: 1;
+}
+
+.lane .seg.state-waiting {
+  background: var(--waiting);
+  opacity: 1;
+}
+
+.lane .seg.state-done {
+  background: var(--done);
+  opacity: 1;
+}
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 3px 12px 0 108px;
+  font-family: var(--vscode-editor-font-family);
+  font-size: calc(var(--vscode-font-size) - 3px);
+  color: var(--muted);
+}
+
 /* Empty state ------------------------------------------------------------- */
 
 .nothing {

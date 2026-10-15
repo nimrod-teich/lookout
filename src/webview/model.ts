@@ -52,6 +52,27 @@ export function secondLine(view: SessionView): string | undefined {
   }
 }
 
+export interface LaneSegment {
+  state: State;
+  /** Percent of the lane's width. */
+  left: number;
+  width: number;
+}
+
+/** The last hour of a session as coloured segments across a lane; nothing before Lookout first saw it. */
+export function laneSegments(points: readonly { state: State; at: number }[] | undefined, now: number, windowMs: number): LaneSegment[] {
+  if (!points || points.length === 0) return [];
+  const start = now - windowMs;
+  const segments: LaneSegment[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const from = Math.max(start, points[i]!.at);
+    const to = Math.min(now, points[i + 1]?.at ?? now);
+    if (to <= from) continue;
+    segments.push({ state: points[i]!.state, left: ((from - start) / windowMs) * 100, width: ((to - from) / windowMs) * 100 });
+  }
+  return segments;
+}
+
 /** Bar heights for the pulse, 0..1, scaled to the busiest minute. */
 export function pulseBars(pulse: readonly number[] | undefined): number[] {
   if (!pulse || pulse.length === 0) return [];

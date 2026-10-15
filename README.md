@@ -28,7 +28,7 @@ Running several AI coding agents at once means clicking through tabs to find out
 <table>
   <tr>
     <td><b>Board</b></td>
-    <td>The Lookout view in the activity bar. At the top, the harbour: a night scene where every session is a boat on the water. Its lane says its state, its distance from the lighthouse how long it has been there; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with your 5-hour usage. Below, one card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its tool calls per minute over the last 15 minutes, a ring for how full its context window is, its project and worktree, where it runs and its model. Click a boat or a card to jump to the session.</td>
+    <td>The Lookout view in the activity bar. At the top, the harbour: a night scene where every session is a boat on the water. Its lane says its state, its distance from the lighthouse how long it has been there; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with your 5-hour usage. Below, one card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its tool calls per minute over the last 15 minutes, a ring for how full its context window is, its project and worktree, where it runs and its model. A "Last hour" timeline at the bottom shows each session's run of states, so you can see which one waited for you while you were elsewhere. Click a boat, a card or a lane to jump to the session.</td>
   </tr>
   <tr>
     <td><b>Usage</b></td>
