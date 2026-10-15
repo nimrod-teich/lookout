@@ -43,4 +43,6 @@ export interface SessionView {
   contextWindow?: number;
   /** Tool calls per minute over the last 15 minutes, oldest first. */
   pulse?: number[];
+  /** The states the session went through in the last hour, oldest first, as this window saw them. */
+  history?: { state: State; at: number }[];
 }

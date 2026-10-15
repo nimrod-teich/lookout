@@ -2,7 +2,7 @@
 import { formatElapsed, formatTokens, shortModel } from "../core/format";
 import type { SessionView } from "../core/types";
 import { Harbour } from "./harbour";
-import { contextPercent, groupSessions, hostChip, pulseBars, secondLine } from "./model";
+import { contextPercent, groupSessions, hostChip, laneSegments, pulseBars, secondLine } from "./model";
 import type { BoardUsage, FromBoard, ToBoard } from "./protocol";
 
 declare function acquireVsCodeApi(): { postMessage(message: FromBoard): void };
@@ -218,6 +218,58 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   });
 }
 
+// The last hour: one lane per session, coloured by state.
+
+const HOUR_MS = 60 * 60_000;
+const timeline = el("section", "group timeline");
+{
+  const heading = el("h2", "heading");
+  heading.append(el("span", "label", "Last hour"));
+  timeline.append(heading, el("div", "lanes"));
+  const axis = el("div", "axis");
+  for (const tick of ["-60m", "-30m", "now"]) axis.append(el("span", "", tick));
+  timeline.append(axis);
+}
+const lanes = new Map<string, HTMLElement>();
+
+function renderTimeline(): void {
+  const list = timeline.querySelector(".lanes")!;
+  const seen = new Set<string>();
+  let previous: HTMLElement | undefined;
+  for (const view of sessions) {
+    const segments = laneSegments(view.history, now(), HOUR_MS);
+    if (segments.length === 0) continue;
+    seen.add(view.id);
+    let lane = lanes.get(view.id);
+    if (!lane) {
+      lane = el("div", "lane");
+      const name = el("span", "name");
+      lane.append(name, el("span", "bar"));
+      lane.addEventListener("click", () => harbour.jump(view.id));
+      lanes.set(view.id, lane);
+    }
+    const name = lane.querySelector(".name")!;
+    if (name.textContent !== view.title) name.textContent = view.title;
+    lane.title = view.title;
+    const bar = lane.querySelector(".bar")!;
+    while (bar.childNodes.length > segments.length) bar.lastChild!.remove();
+    segments.forEach((segment, i) => {
+      const node = (bar.childNodes[i] ?? bar.appendChild(el("i", ""))) as HTMLElement;
+      node.className = `seg state-${segment.state}`;
+      node.style.left = `${segment.left.toFixed(2)}%`;
+      node.style.width = `${Math.max(0.4, segment.width).toFixed(2)}%`;
+    });
+    if (lane.previousElementSibling !== (previous ?? null) || lane.parentElement !== list) list.insertBefore(lane, previous ? previous.nextSibling : list.firstChild);
+    previous = lane;
+  }
+  for (const [id, lane] of lanes) {
+    if (seen.has(id)) continue;
+    lane.remove();
+    lanes.delete(id);
+  }
+  timeline.classList.toggle("hidden", seen.size === 0);
+}
+
 function render(): void {
   if (!beam.isConnected) root.prepend(beam);
   if (!meters.isConnected) beam.append(meters);
@@ -286,7 +338,11 @@ function render(): void {
     section.remove();
     groupsEl.delete(key);
   }
+  renderTimeline();
+  root.append(timeline);
 }
+
+let tickCount = 0;
 
 function tick(): void {
   if (document.visibilityState !== "visible") return;
@@ -296,6 +352,7 @@ function tick(): void {
   }
   renderBeam();
   if (usage) renderMeters();
+  if (tickCount++ % 5 === 0) renderTimeline();
 }
 
 window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
