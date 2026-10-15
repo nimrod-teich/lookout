@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BEAM, groupSessions, hostChip, layoutBlips, secondLine } from "../../src/webview/model";
+import { groupSessions, HARBOUR, hostChip, layoutBoats, secondLine, waterline } from "../../src/webview/model";
 import { view } from "../vscode/helpers";
 
 describe("groupSessions", () => {
@@ -42,30 +42,43 @@ describe("card text", () => {
   });
 });
 
-describe("layoutBlips", () => {
-  const distance = (b: { x: number; y: number }) => Math.hypot(b.x - BEAM.originX, b.y - BEAM.originY);
+describe("waterline", () => {
+  it("rises with the 5-hour usage and clamps", () => {
+    expect(waterline(undefined)).toBe(HARBOUR.seaTop);
+    expect(waterline(0)).toBe(HARBOUR.seaTop);
+    expect(waterline(50)).toBe((HARBOUR.seaTop + HARBOUR.seaTopFull) / 2);
+    expect(waterline(100)).toBe(HARBOUR.seaTopFull);
+    expect(waterline(250)).toBe(HARBOUR.seaTopFull);
+    expect(waterline(-5)).toBe(HARBOUR.seaTop);
+  });
+});
 
-  it("sends each state to its own side and keeps every blip inside the strip", () => {
+describe("layoutBoats", () => {
+  const water = HARBOUR.seaTop;
+
+  it("floats every boat on the water, by lane, and keeps it inside the harbour", () => {
     const now = 60 * 60_000;
-    const blips = layoutBlips(
+    const boats = layoutBoats(
       [view({ id: "w", state: "waiting", since: now - 60_000 }), view({ id: "b", state: "working", since: now - 60_000 }), view({ id: "i", state: "idle", since: now - 60_000 })],
       now,
+      water,
     );
-    const byId = Object.fromEntries(blips.map((b) => [b.id, b]));
-    expect(byId.w!.x).toBeLessThan(BEAM.originX);
-    expect(byId.b!.x).toBeGreaterThan(BEAM.originX);
-    expect(byId.i!.x).toBeGreaterThan(byId.b!.x);
-    for (const blip of blips) {
-      expect(blip.x).toBeGreaterThanOrEqual(0);
-      expect(blip.x).toBeLessThanOrEqual(BEAM.width);
-      expect(blip.y).toBeGreaterThanOrEqual(0);
-      expect(blip.y).toBeLessThan(BEAM.originY);
+    const byId = Object.fromEntries(boats.map((b) => [b.id, b]));
+    expect(byId.w!.y).toBeLessThan(byId.b!.y);
+    expect(byId.b!.y).toBeLessThan(byId.i!.y);
+    for (const boat of boats) {
+      expect(boat.y).toBeGreaterThan(water);
+      expect(boat.y).toBeLessThan(HARBOUR.height);
+      expect(boat.x).toBeGreaterThanOrEqual(HARBOUR.nearX);
+      expect(boat.x).toBeLessThanOrEqual(HARBOUR.farX);
+      expect(boat.bearing).toBeGreaterThan(0);
+      expect(boat.bearing).toBeLessThan(90);
     }
   });
 
-  it("puts a session farther out the longer it has been in its state, up to the edge", () => {
+  it("puts a session farther from the shore the longer it has been in its state, up to the far edge", () => {
     const now = 10 * 3_600_000;
-    const [fresh, minute, hour, day] = layoutBlips(
+    const [fresh, minute, hour, day] = layoutBoats(
       [
         view({ id: "fresh", state: "working", since: now }),
         view({ id: "minute", state: "working", since: now - 60_000 }),
@@ -73,19 +86,27 @@ describe("layoutBlips", () => {
         view({ id: "day", state: "working", since: now - 86_400_000 }),
       ],
       now,
+      water,
     );
-    expect(distance(fresh!)).toBeCloseTo(BEAM.minRadius, 0);
-    expect(distance(minute!)).toBeGreaterThan(distance(fresh!));
-    expect(distance(hour!)).toBeGreaterThan(distance(minute!));
-    expect(distance(day!)).toBeCloseTo(BEAM.maxRadius, 0);
-    expect(layoutBlips([view({ since: undefined })], now).map(distance)[0]).toBeCloseTo(BEAM.minRadius, 0);
+    expect(fresh!.x).toBeCloseTo(HARBOUR.nearX, 0);
+    expect(minute!.x).toBeGreaterThan(fresh!.x);
+    expect(hour!.x).toBeGreaterThan(minute!.x);
+    expect(day!.x).toBeCloseTo(HARBOUR.farX, 0);
   });
 
-  it("spreads the sessions of one state across its sector", () => {
-    const blips = layoutBlips([view({ id: "a", state: "working" }), view({ id: "b", state: "working" }), view({ id: "c", state: "working" })], 0);
-    const xs = blips.map((b) => b.x);
-    expect(xs[0]).toBeLessThan(xs[1]!);
-    expect(xs[1]).toBeLessThan(xs[2]!);
-    expect(blips.map((b) => b.title)).toEqual(["Wire the cache", "Wire the cache", "Wire the cache"]);
+  it("labels the sessions that need the user, at most two", () => {
+    const now = 5 * 60_000;
+    const boats = layoutBoats(
+      [view({ id: "a", state: "waiting", title: "First", since: now - 3 * 60_000 }), view({ id: "b", state: "waiting", title: "Second", since: now - 3 * 60_000 }), view({ id: "c", state: "waiting", title: "Third" }), view({ id: "d", state: "working", title: "Busy" })],
+      now,
+      water,
+    );
+    expect(boats.map((b) => b.label)).toEqual(["First · 3m", "Second · 3m", undefined, undefined]);
+  });
+
+  it("follows the tide", () => {
+    const low = layoutBoats([view({ state: "working" })], 0, waterline(0))[0]!;
+    const high = layoutBoats([view({ state: "working" })], 0, waterline(100))[0]!;
+    expect(high.y).toBeLessThan(low.y);
   });
 });

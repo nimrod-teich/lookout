@@ -1,12 +1,12 @@
 /// <reference lib="dom" />
 import { formatElapsed, formatTokens, shortModel } from "../core/format";
 import type { SessionView } from "../core/types";
-import { BEAM, groupSessions, hostChip, layoutBlips, secondLine } from "./model";
+import { Harbour } from "./harbour";
+import { groupSessions, hostChip, secondLine } from "./model";
 import type { BoardUsage, FromBoard, ToBoard } from "./protocol";
 
 declare function acquireVsCodeApi(): { postMessage(message: FromBoard): void };
 
-const SVG = "http://www.w3.org/2000/svg";
 const vscode = acquireVsCodeApi();
 const root = document.getElementById("root")!;
 
@@ -17,18 +17,11 @@ let clockOffset = 0;
 
 const cards = new Map<string, HTMLElement>();
 const groupsEl = new Map<string, HTMLElement>();
-const blips = new Map<string, SVGGElement>();
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.className = className;
   if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] {
-  const node = document.createElementNS(SVG, tag);
-  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
   return node;
 }
 
@@ -67,63 +60,16 @@ function chips(view: SessionView): string[] {
   return out;
 }
 
-// The beam strip: the lighthouse, its sweeping beam, and one blip per session.
+// The harbour: the lighthouse, its beam, and the sessions as boats.
 
 const beam = el("div", "beam");
-const beamSvg = svg("svg", { viewBox: `0 0 ${BEAM.width} ${BEAM.height}`, preserveAspectRatio: "xMidYMax meet" });
-beamSvg.setAttribute("aria-hidden", "true");
-{
-  const defs = svg("defs");
-  const gradient = svg("radialGradient", { id: "light", cx: BEAM.originX, cy: BEAM.originY, r: BEAM.maxRadius + 12, gradientUnits: "userSpaceOnUse" });
-  gradient.append(svg("stop", { offset: "0", "stop-color": "currentColor", "stop-opacity": "0.55" }));
-  gradient.append(svg("stop", { offset: "1", "stop-color": "currentColor", "stop-opacity": "0" }));
-  defs.append(gradient);
-  beamSvg.append(defs);
-  // Faint rings mark 1 minute, 10 minutes and an hour.
-  const rings = svg("g", { class: "rings" });
-  for (const minutes of [1, 10, 60]) {
-    const t = Math.log10(1 + minutes) / Math.log10(241);
-    const r = BEAM.minRadius + (BEAM.maxRadius - BEAM.minRadius) * t;
-    rings.append(svg("path", { d: `M ${BEAM.originX - r} ${BEAM.originY} A ${r} ${r} 0 0 1 ${BEAM.originX + r} ${BEAM.originY}` }));
-  }
-  beamSvg.append(rings);
-  const sweep = svg("g", { class: "sweep" });
-  const reach = BEAM.maxRadius + 14;
-  sweep.append(svg("path", { d: `M ${BEAM.originX} ${BEAM.originY} L ${BEAM.originX - reach * 0.32} ${BEAM.originY - reach} L ${BEAM.originX + reach * 0.32} ${BEAM.originY - reach} Z`, fill: "url(#light)" }));
-  beamSvg.append(sweep);
-  beamSvg.append(svg("g", { class: "blips" }));
-  const tower = svg("g", { class: "tower" });
-  tower.append(svg("path", { class: "body", d: `M ${BEAM.originX - 4} ${BEAM.height} L ${BEAM.originX - 2.5} ${BEAM.originY + 1} H ${BEAM.originX + 2.5} L ${BEAM.originX + 4} ${BEAM.height} Z` }));
-  tower.append(svg("circle", { class: "lamp", cx: BEAM.originX, cy: BEAM.originY - 1, r: 2.6 }));
-  beamSvg.append(tower);
-}
-beam.append(beamSvg);
+const harbour = new Harbour((id) => vscode.postMessage({ type: "jump", id }));
+beam.append(harbour.element);
 const legend = el("div", "legend");
 beam.append(legend);
 
 function renderBeam(): void {
-  const layout = layoutBlips(sessions, now());
-  const list = beamSvg.querySelector(".blips")!;
-  const seen = new Set<string>();
-  for (const blip of layout) {
-    seen.add(blip.id);
-    let node = blips.get(blip.id);
-    if (!node) {
-      node = svg("g", { class: "blip" });
-      node.append(svg("circle", { class: "halo", r: 7 }), svg("circle", { class: "dot", r: 3.2 }), svg("title"));
-      node.addEventListener("click", () => vscode.postMessage({ type: "jump", id: blip.id }));
-      blips.set(blip.id, node);
-      list.append(node);
-    }
-    node.setAttribute("class", `blip state-${blip.state}`);
-    node.setAttribute("transform", `translate(${blip.x} ${blip.y})`);
-    node.querySelector("title")!.textContent = blip.title;
-  }
-  for (const [id, node] of blips) {
-    if (seen.has(id)) continue;
-    node.remove();
-    blips.delete(id);
-  }
+  harbour.update(sessions, usage?.meters.find((m) => m.key === "session")?.percent, now());
   const counts = { waiting: 0, done: 0, working: 0, idle: 0 };
   for (const group of groupSessions(sessions)) counts[group.key] = group.views.length;
   legend.textContent = "";
@@ -223,7 +169,7 @@ function createCard(view: SessionView): HTMLElement {
     vscode.postMessage({ type: "seen", id: view.id });
   });
   card.append(seen);
-  card.addEventListener("click", () => vscode.postMessage({ type: "jump", id: view.id }));
+  card.addEventListener("click", () => harbour.jump(view.id));
   return card;
 }
 
