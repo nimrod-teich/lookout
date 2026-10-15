@@ -13,4 +13,10 @@ export interface BoardUsage {
 export type ToBoard = { type: "sessions"; sessions: SessionView[]; now: number; usage?: BoardUsage };
 
 /** Webview → extension. */
-export type FromBoard = { type: "ready" } | { type: "jump"; id: string } | { type: "seen"; id: string } | { type: "seenAll" } | { type: "refreshUsage" };
+export type FromBoard =
+  | { type: "ready" }
+  | { type: "jump"; id: string }
+  | { type: "rename"; id: string }
+  | { type: "seen"; id: string }
+  | { type: "seenAll" }
+  | { type: "refreshUsage" };

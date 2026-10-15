@@ -1,19 +1,25 @@
 // Pure helpers for the board; no DOM here so they can be tested under Node.
 import type { SessionView, State } from "../core/types";
 
+export type GroupKey = "waiting" | "done" | "working" | "idle";
+
 export interface Group {
-  key: "waiting" | "done" | "working" | "idle";
+  key: GroupKey;
   label: string;
   views: SessionView[];
 }
 
-const GROUP_OF: Record<State, Group["key"]> = { waiting: "waiting", done: "done", working: "working", unknown: "idle", idle: "idle" };
-const LABELS: Record<Group["key"], string> = { waiting: "Needs you", done: "Finished", working: "Working", idle: "Idle" };
-const ORDER: Group["key"][] = ["waiting", "done", "working", "idle"];
+export function isGroupKey(value: unknown): value is GroupKey {
+  return value === "waiting" || value === "done" || value === "working" || value === "idle";
+}
+
+const GROUP_OF: Record<State, GroupKey> = { waiting: "waiting", done: "done", working: "working", unknown: "idle", idle: "idle" };
+const LABELS: Record<GroupKey, string> = { waiting: "Needs you", done: "Finished", working: "Working", idle: "Idle" };
+const ORDER: GroupKey[] = ["waiting", "done", "working", "idle"];
 
 /** The sessions by group, in display order, without empty groups. The input is already sorted. */
 export function groupSessions(views: readonly SessionView[]): Group[] {
-  const groups = new Map<Group["key"], SessionView[]>();
+  const groups = new Map<GroupKey, SessionView[]>();
   for (const view of views) {
     const key = GROUP_OF[view.state];
     const list = groups.get(key) ?? [];
@@ -52,38 +58,6 @@ export function secondLine(view: SessionView): string | undefined {
   }
 }
 
-export interface LaneSegment {
-  state: State;
-  /** Percent of the lane's width. */
-  left: number;
-  width: number;
-}
-
-/** The current state always gets at least this much of the lane, so a state entered seconds ago is visible. */
-const MIN_CURRENT_WIDTH = 2;
-
-/** The last hour of a session as coloured segments across a lane; nothing before Lookout first saw it. */
-export function laneSegments(points: readonly { state: State; at: number }[] | undefined, now: number, windowMs: number): LaneSegment[] {
-  if (!points || points.length === 0) return [];
-  const start = now - windowMs;
-  const segments: LaneSegment[] = [];
-  for (let i = 0; i < points.length; i++) {
-    const from = Math.max(start, points[i]!.at);
-    const to = Math.min(now, points[i + 1]?.at ?? now);
-    if (to <= from) continue;
-    segments.push({ state: points[i]!.state, left: ((from - start) / windowMs) * 100, width: ((to - from) / windowMs) * 100 });
-  }
-  const current = segments.at(-1);
-  if (current && current.width < MIN_CURRENT_WIDTH) {
-    const grow = MIN_CURRENT_WIDTH - current.width;
-    current.left = Math.max(0, current.left - grow);
-    current.width = MIN_CURRENT_WIDTH;
-    const before = segments.at(-2);
-    if (before) before.width = Math.max(0, current.left - before.left);
-  }
-  return segments;
-}
-
 /** Bar heights for the pulse, 0..1, scaled to the busiest minute. */
 export function pulseBars(pulse: readonly number[] | undefined): number[] {
   if (!pulse || pulse.length === 0) return [];
@@ -113,7 +87,7 @@ export const HARBOUR = {
 };
 
 /** How far below the waterline each group's boats float. */
-const LANES: Record<Group["key"], number> = { waiting: 8, working: 17, done: 26, idle: 35 };
+const LANES: Record<GroupKey, number> = { waiting: 8, working: 17, done: 26, idle: 35 };
 /** Boats of one lane stay at least this far apart, so sessions started together stay visible. */
 const MIN_GAP = 11;
 /** The far edge of the harbour means this long in a state. */

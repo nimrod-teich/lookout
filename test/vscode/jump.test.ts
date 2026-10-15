@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { claudeTabLabel } from "../../src/vscode/agents/claudePanel";
-import { jumpToSession, revealed } from "../../src/vscode/jump";
+import { jumpToSession, renameSession, revealed } from "../../src/vscode/jump";
 import { notifyFinished, notifyWaiting } from "../../src/vscode/notifications";
 import { Terminals } from "../../src/vscode/terminals";
 import { isWatched } from "../../src/vscode/watch";
@@ -193,4 +193,40 @@ describe("notifications", () => {
     expect(await notifyFinished(view())).toBe(true);
     expect(messages("info")).toEqual(['"Wire the cache" needs you: permission prompt', '"Wire the cache" finished.']);
   });
+});
+
+describe("renameSession", () => {
+  const RENAME = "claude-vscode.renameSessionTab";
+
+  it("reveals the session, waits for its tab to be in front, then opens the agent's rename", async () => {
+    const group = stub.addClaudeGroup(["Other", "Wire the cache"]);
+    stub.commands.set(CLAUDE_OPEN, () => stub.activate(group.tabs[1]!));
+    stub.commands.set(RENAME, () => undefined);
+    expect(await renameSession(view(), await terminals(), fakeLog())).toBe(true);
+    expect(commandCalls()).toEqual([CLAUDE_OPEN, RENAME]);
+  });
+
+  it("asks for the rename after a short wait even when the tab never reports active", async () => {
+    stub.commands.set(CLAUDE_OPEN, () => undefined);
+    stub.commands.set(RENAME, () => undefined);
+    const started = Date.now();
+    expect(await renameSession(view(), await terminals(), fakeLog())).toBe(true);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1400);
+    expect(commandCalls()).toEqual([CLAUDE_OPEN, RENAME]);
+  }, 10_000);
+
+  it("explains instead of renaming sessions outside this window's panel", async () => {
+    stub.commands.set(CLAUDE_OPEN, () => undefined);
+    const t = await terminals();
+    expect(await renameSession(view({ host: "terminal", terminalPid: 70 }), t, fakeLog())).toBe(false);
+    expect(await renameSession(view({ host: "window", windowLabel: "api" }), t, fakeLog())).toBe(false);
+    expect(commandCalls()).toEqual([]);
+    expect(messages("info")).toEqual(['"Wire the cache" runs in a terminal; rename it there with /rename.', '"Wire the cache" runs in the window "api". Lookout renames sessions hosted in this window.']);
+  });
+
+  it("warns when the agent's rename is missing", async () => {
+    stub.commands.set(CLAUDE_OPEN, () => undefined);
+    expect(await renameSession(view(), await terminals(), fakeLog())).toBe(false);
+    expect(messages("warning")[0]).toContain("could not open the rename");
+  }, 10_000);
 });

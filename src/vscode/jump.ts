@@ -39,3 +39,25 @@ export async function jumpToSession(view: SessionView, terminals: Terminals, log
   }
   return result;
 }
+
+/**
+ * Lets the user rename a session through its agent. Only sessions in this
+ * window's agent panel can be renamed from here: the agent's rename works on
+ * the tab it owns.
+ */
+export async function renameSession(view: SessionView, terminals: Terminals, log: Log): Promise<boolean> {
+  if (view.host !== "panel") {
+    void vscode.window.showInformationMessage(
+      view.host === "terminal"
+        ? `"${view.title}" runs in a terminal; rename it there with /rename.`
+        : `"${view.title}" runs ${whereItRuns(view)}. Lookout renames sessions hosted in this window.`,
+    );
+    return false;
+  }
+  const adapter = panelAdapter(view.agent);
+  if (!adapter || !(await adapter.rename(view, log))) {
+    void vscode.window.showWarningMessage(`Lookout could not open the rename for "${view.title}".`);
+    return false;
+  }
+  return true;
+}

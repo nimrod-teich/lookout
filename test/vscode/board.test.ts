@@ -6,7 +6,7 @@ import { view } from "./helpers";
 import { createWebviewView, stub } from "./stub-vscode";
 
 function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
-  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn() };
+  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn() };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
   board.resolveWebviewView(webviewView as never);
@@ -64,12 +64,16 @@ describe("Board", () => {
     webviewView.receive({ type: "jump", id: "00000000-0000-4000-8000-000000000002" });
     webviewView.receive({ type: "seen", id: shown.id });
     webviewView.receive({ type: "seen", id: 42 });
+    webviewView.receive({ type: "rename", id: shown.id });
+    webviewView.receive({ type: "rename", id: "nope" });
     webviewView.receive({ type: "seenAll" });
     webviewView.receive("garbage");
     webviewView.receive(null);
     expect(actions.jump).toHaveBeenCalledTimes(1);
     expect(actions.jump).toHaveBeenCalledWith(shown);
     expect(actions.markSeen).toHaveBeenCalledTimes(1);
+    expect(actions.rename).toHaveBeenCalledTimes(1);
+    expect(actions.rename).toHaveBeenCalledWith(shown);
     expect(actions.markAllSeen).toHaveBeenCalledTimes(1);
   });
 

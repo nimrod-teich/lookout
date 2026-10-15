@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contextPercent, groupSessions, HARBOUR, hostChip, laneSegments, layoutBoats, pulseBars, secondLine, waterline } from "../../src/webview/model";
+import { contextPercent, groupSessions, HARBOUR, hostChip, layoutBoats, pulseBars, secondLine, waterline } from "../../src/webview/model";
 import { view } from "../vscode/helpers";
 
 describe("groupSessions", () => {
@@ -132,46 +132,5 @@ describe("card telemetry", () => {
     expect(contextPercent(view({ contextTokens: 1_200_000, contextWindow: 1_000_000 }))).toBe(100);
     expect(contextPercent(view({ contextTokens: 150_000 }))).toBeUndefined();
     expect(contextPercent(view({ contextWindow: 200_000 }))).toBeUndefined();
-  });
-});
-
-describe("laneSegments", () => {
-  const HOUR = 60 * 60_000;
-  const MIN = 60_000;
-
-  it("turns the points into segments across the window, clipped to it", () => {
-    const now = 10 * HOUR;
-    const segments = laneSegments(
-      [
-        { state: "idle", at: now - 90 * MIN },
-        { state: "working", at: now - 30 * MIN },
-        { state: "waiting", at: now - 6 * MIN },
-      ],
-      now,
-      HOUR,
-    );
-    expect(segments.map((s) => [s.state, Math.round(s.left), Math.round(s.width)])).toEqual([
-      ["idle", 0, 50],
-      ["working", 50, 40],
-      ["waiting", 90, 10],
-    ]);
-  });
-
-  it("keeps the current state visible even when it was entered seconds ago", () => {
-    const now = 10 * HOUR;
-    const segments = laneSegments([{ state: "waiting", at: now - 30 * MIN }, { state: "working", at: now - 15_000 }], now, HOUR);
-    expect(segments.map((s) => s.state)).toEqual(["waiting", "working"]);
-    expect(segments[1]!.width).toBe(2);
-    expect(segments[0]!.left + segments[0]!.width).toBeCloseTo(segments[1]!.left, 5);
-    expect(segments[1]!.left + segments[1]!.width).toBeCloseTo(100, 5);
-  });
-
-  it("leaves the time before Lookout saw the session empty", () => {
-    const now = 10 * HOUR;
-    const segments = laneSegments([{ state: "working", at: now - 15 * MIN }], now, HOUR);
-    expect(segments.map((s) => [s.state, Math.round(s.left), Math.round(s.width)])).toEqual([["working", 75, 25]]);
-    expect(laneSegments([], now, HOUR)).toEqual([]);
-    expect(laneSegments(undefined, now, HOUR)).toEqual([]);
-    expect(laneSegments([{ state: "idle", at: now + MIN }], now, HOUR)).toEqual([]);
   });
 });

@@ -2,15 +2,24 @@
 import { formatElapsed, formatTokens, shortModel } from "../core/format";
 import type { SessionView } from "../core/types";
 import { Harbour } from "./harbour";
-import { contextPercent, groupSessions, hostChip, laneSegments, pulseBars, secondLine } from "./model";
+import { contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type GroupKey } from "./model";
 import type { BoardUsage, FromBoard, ToBoard } from "./protocol";
 
-declare function acquireVsCodeApi(): { postMessage(message: FromBoard): void };
+declare function acquireVsCodeApi(): {
+  postMessage(message: FromBoard): void;
+  getState(): { hidden?: string[] } | undefined;
+  setState(state: { hidden?: string[] }): void;
+};
 
 const vscode = acquireVsCodeApi();
 const root = document.getElementById("root")!;
 
+/** Every session the extension sent. */
+let allSessions: SessionView[] = [];
+/** The sessions after the legend filters. */
 let sessions: SessionView[] = [];
+/** State groups the user hid through the legend; kept across reloads. */
+const hidden = new Set<GroupKey>((vscode.getState()?.hidden ?? []).filter(isGroupKey));
 let usage: BoardUsage | undefined;
 /** The extension's clock minus ours, so elapsed times agree with the status bar. */
 let clockOffset = 0;
@@ -69,10 +78,23 @@ beam.append(harbour.element);
 const legend = el("div", "legend");
 beam.append(legend);
 
+function applyFilters(): void {
+  sessions = allSessions.filter((view) => !hidden.has(groupSessions([view])[0]!.key));
+}
+
+function toggleGroup(key: GroupKey): void {
+  if (hidden.has(key)) hidden.delete(key);
+  else hidden.add(key);
+  vscode.setState({ hidden: [...hidden] });
+  applyFilters();
+  render();
+}
+
+/** The legend counts every session; a click hides that group from the board. */
 function renderBeam(): void {
   harbour.update(sessions, usage?.meters.find((m) => m.key === "session")?.percent, now());
   const counts = { waiting: 0, done: 0, working: 0, idle: 0 };
-  for (const group of groupSessions(sessions)) counts[group.key] = group.views.length;
+  for (const group of groupSessions(allSessions)) counts[group.key] = group.views.length;
   legend.textContent = "";
   for (const [key, label] of [
     ["waiting", "need you"],
@@ -80,9 +102,13 @@ function renderBeam(): void {
     ["working", "working"],
     ["idle", "idle"],
   ] as const) {
-    if (!counts[key]) continue;
-    const item = el("span", `legend-item state-${key}`);
+    if (!counts[key] && !hidden.has(key)) continue;
+    const item = el("button", `legend-item state-${key}${hidden.has(key) ? " off" : ""}`);
+    item.type = "button";
+    item.title = hidden.has(key) ? `Show ${label}` : `Hide ${label}`;
+    item.setAttribute("aria-pressed", String(!hidden.has(key)));
     item.append(el("i", "swatch"), el("b", "", String(counts[key])), el("span", "", ` ${label}`));
+    item.addEventListener("click", () => toggleGroup(key));
     legend.append(item);
   }
 }
@@ -122,8 +148,11 @@ function renderMeters(): void {
       const through = 1 - Math.min(1, Math.max(0, (meter.resetsAt - now()) / meter.windowMs));
       tick.style.left = `${Math.round(through * 100)}%`;
       tick.classList.remove("hidden");
+      const pace = meter.percent > through * 100 + 5 ? "ahead of the window, which means a faster pace than even use" : meter.percent < through * 100 - 5 ? "behind the window, which means a slower pace than even use" : "level with the window";
+      row.title = `${meter.percent}% used; the line marks ${Math.round(through * 100)}% of the window gone. The fill is ${pace}.`;
     } else {
       tick.classList.add("hidden");
+      row.title = `${meter.percent}% used`;
     }
     row.querySelector(".percent")!.textContent = `${meter.percent}%`;
     row.querySelector(".reset")!.textContent = resetText(meter.resetsAt);
@@ -167,14 +196,23 @@ function createCard(view: SessionView): HTMLElement {
   const ring = el("span", "ring");
   ring.append(el("span", "ring-value"));
   card.append(ring);
-  const seen = el("span", "seen", "✓");
+  const actions = el("span", "actions");
+  const rename = el("span", "action rename", "✎");
+  rename.title = "Rename session";
+  rename.setAttribute("role", "button");
+  rename.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "rename", id: view.id });
+  });
+  const seen = el("span", "action seen", "✓");
   seen.title = "Mark as seen";
   seen.setAttribute("role", "button");
   seen.addEventListener("click", (event) => {
     event.stopPropagation();
     vscode.postMessage({ type: "seen", id: view.id });
   });
-  card.append(seen);
+  actions.append(rename, seen);
+  card.append(actions);
   card.addEventListener("click", () => harbour.jump(view.id));
   return card;
 }
@@ -218,58 +256,6 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   });
 }
 
-// The last hour: one lane per session, coloured by state.
-
-const HOUR_MS = 60 * 60_000;
-const timeline = el("section", "group timeline");
-{
-  const heading = el("h2", "heading");
-  heading.append(el("span", "label", "Last hour"));
-  timeline.append(heading, el("div", "lanes"));
-  const axis = el("div", "axis");
-  for (const tick of ["-60m", "-30m", "now"]) axis.append(el("span", "", tick));
-  timeline.append(axis);
-}
-const lanes = new Map<string, HTMLElement>();
-
-function renderTimeline(): void {
-  const list = timeline.querySelector(".lanes")!;
-  const seen = new Set<string>();
-  let previous: HTMLElement | undefined;
-  for (const view of sessions) {
-    const segments = laneSegments(view.history, now(), HOUR_MS);
-    if (segments.length === 0) continue;
-    seen.add(view.id);
-    let lane = lanes.get(view.id);
-    if (!lane) {
-      lane = el("div", "lane");
-      const name = el("span", "name");
-      lane.append(name, el("span", "bar"));
-      lane.addEventListener("click", () => harbour.jump(view.id));
-      lanes.set(view.id, lane);
-    }
-    const name = lane.querySelector(".name")!;
-    if (name.textContent !== view.title) name.textContent = view.title;
-    lane.title = view.title;
-    const bar = lane.querySelector(".bar")!;
-    while (bar.childNodes.length > segments.length) bar.lastChild!.remove();
-    segments.forEach((segment, i) => {
-      const node = (bar.childNodes[i] ?? bar.appendChild(el("i", ""))) as HTMLElement;
-      node.className = `seg state-${segment.state}`;
-      node.style.left = `${segment.left.toFixed(2)}%`;
-      node.style.width = `${Math.max(0.4, segment.width).toFixed(2)}%`;
-    });
-    if (lane.previousElementSibling !== (previous ?? null) || lane.parentElement !== list) list.insertBefore(lane, previous ? previous.nextSibling : list.firstChild);
-    previous = lane;
-  }
-  for (const [id, lane] of lanes) {
-    if (seen.has(id)) continue;
-    lane.remove();
-    lanes.delete(id);
-  }
-  timeline.classList.toggle("hidden", seen.size === 0);
-}
-
 function render(): void {
   if (!beam.isConnected) root.prepend(beam);
   if (!meters.isConnected) beam.append(meters);
@@ -281,11 +267,11 @@ function render(): void {
     for (const group of groupsEl.values()) group.remove();
     groupsEl.clear();
     cards.clear();
-    if (!root.querySelector(".nothing")) {
-      const nothing = el("div", "nothing");
-      nothing.append(el("p", "big", "Nothing on the horizon"), el("p", "small", "Sessions appear here as soon as an agent starts."));
-      root.append(nothing);
-    }
+    root.querySelector(".nothing")?.remove();
+    const nothing = el("div", "nothing");
+    if (allSessions.length > 0) nothing.append(el("p", "big", "Everything is hidden"), el("p", "small", "Click a state in the legend to show it again."));
+    else nothing.append(el("p", "big", "Nothing on the horizon"), el("p", "small", "Sessions appear here as soon as an agent starts."));
+    root.append(nothing);
     return;
   }
   root.querySelector(".nothing")?.remove();
@@ -338,11 +324,7 @@ function render(): void {
     section.remove();
     groupsEl.delete(key);
   }
-  renderTimeline();
-  root.append(timeline);
 }
-
-let tickCount = 0;
 
 function tick(): void {
   if (document.visibilityState !== "visible") return;
@@ -352,15 +334,15 @@ function tick(): void {
   }
   renderBeam();
   if (usage) renderMeters();
-  if (tickCount++ % 5 === 0) renderTimeline();
 }
 
 window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   const message = event.data;
   if (message.type !== "sessions") return;
-  sessions = message.sessions;
+  allSessions = message.sessions;
   usage = message.usage;
   clockOffset = message.now - Date.now();
+  applyFilters();
   render();
 });
 

@@ -17,14 +17,11 @@
   } else {
     document.body.className = "vscode-dark";
   }
-  window.acquireVsCodeApi = () => ({ postMessage: (m) => console.log("to extension:", JSON.stringify(m)) });
+  window.acquireVsCodeApi = () => ({ postMessage: (m) => console.log("to extension:", JSON.stringify(m)), getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean) }), setState: () => {} });
   window.addEventListener("load", async () => {
     const fixture = await (await fetch(`fixtures/${params.get("fixture") ?? "busy"}.json`)).json();
     const now = Date.now();
-    for (const s of fixture.sessions) {
-      if (typeof s.since === "number" && s.since < 1e9) s.since = now - s.since;
-      for (const h of s.history ?? []) h.at = now + h.at * 60_000;
-    }
+    for (const s of fixture.sessions) if (typeof s.since === "number" && s.since < 1e9) s.since = now - s.since;
     const usage = fixture.usage;
     if (usage) {
       usage.fetchedAt = now - usage.fetchedAt;

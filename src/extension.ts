@@ -6,7 +6,7 @@ import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
 import { Controller } from "./vscode/controller";
-import { jumpToSession, revealed } from "./vscode/jump";
+import { jumpToSession, renameSession, revealed } from "./vscode/jump";
 import { createLog } from "./vscode/log";
 import { notifyFinished, notifyWaiting } from "./vscode/notifications";
 import { pickSession } from "./vscode/quickPick";
@@ -49,6 +49,9 @@ export function activate(context: vscode.ExtensionContext): void {
       return usage && { ...usage, canRefresh: controller.canRefreshUsage };
     },
     jump,
+    rename: async (view) => {
+      await renameSession(view, terminals, log);
+    },
     markSeen: (id) => controller.markSeen(id),
     markAllSeen: () => controller.markAllSeen(),
     refreshUsage: () => void controller.refreshUsage(),

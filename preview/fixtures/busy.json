@@ -60,17 +60,7 @@
         3,
         0
       ],
-      "contextWindow": 200000,
-      "history": [
-        {
-          "state": "working",
-          "at": -50
-        },
-        {
-          "state": "waiting",
-          "at": -3
-        }
-      ]
+      "contextWindow": 200000
     },
     {
       "id": "2",
@@ -104,21 +94,7 @@
         0,
         0
       ],
-      "contextWindow": 200000,
-      "history": [
-        {
-          "state": "idle",
-          "at": -70
-        },
-        {
-          "state": "working",
-          "at": -40
-        },
-        {
-          "state": "done",
-          "at": -12
-        }
-      ]
+      "contextWindow": 200000
     },
     {
       "id": "3",
@@ -151,25 +127,7 @@
         3,
         4
       ],
-      "contextWindow": 1000000,
-      "history": [
-        {
-          "state": "idle",
-          "at": -55
-        },
-        {
-          "state": "working",
-          "at": -30
-        },
-        {
-          "state": "idle",
-          "at": -18
-        },
-        {
-          "state": "working",
-          "at": -4
-        }
-      ]
+      "contextWindow": 1000000
     },
     {
       "id": "4",
@@ -203,13 +161,7 @@
         0,
         2
       ],
-      "contextWindow": 1000000,
-      "history": [
-        {
-          "state": "working",
-          "at": -90
-        }
-      ]
+      "contextWindow": 1000000
     },
     {
       "id": "5",
@@ -242,13 +194,7 @@
         1,
         2
       ],
-      "contextWindow": 200000,
-      "history": [
-        {
-          "state": "working",
-          "at": -0.5
-        }
-      ]
+      "contextWindow": 200000
     },
     {
       "id": "6",
@@ -281,17 +227,7 @@
         0,
         0
       ],
-      "contextWindow": 1000000,
-      "history": [
-        {
-          "state": "working",
-          "at": -80
-        },
-        {
-          "state": "idle",
-          "at": -46
-        }
-      ]
+      "contextWindow": 1000000
     },
     {
       "id": "7",
@@ -304,8 +240,7 @@
       "cwd": "/work/api",
       "host": "elsewhere",
       "agents": 0,
-      "pulse": [],
-      "history": []
+      "pulse": []
     }
   ]
 }
