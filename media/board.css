@@ -31,6 +31,129 @@ body {
   border-bottom: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
+/* The card over the scene for the boat under the pointer; night colours like the scene. */
+.hover-card {
+  --accent: var(--idle);
+  --caret: 50%;
+  position: absolute;
+  z-index: 2;
+  padding: 7px 10px 6px 12px;
+  border-radius: 7px;
+  background: #0a1521;
+  border: 1px solid rgba(160, 200, 230, 0.22);
+  border-left: 3px solid var(--accent);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  color: #e6f0f7;
+  font-size: calc(var(--vscode-font-size) - 1px);
+  line-height: 1.35;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+}
+
+.hover-card.shown {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.hover-card.below {
+  transform: translateY(-4px);
+}
+
+.hover-card.below.shown {
+  transform: translateY(0);
+}
+
+/* The caret, pointing down at the boat (or up when the card is below it). */
+.hover-card::after {
+  content: "";
+  position: absolute;
+  left: var(--caret);
+  bottom: -6px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  background: #0a1521;
+  border-right: 1px solid rgba(160, 200, 230, 0.22);
+  border-bottom: 1px solid rgba(160, 200, 230, 0.22);
+  transform: rotate(45deg);
+}
+
+.hover-card.below::after {
+  bottom: auto;
+  top: -6px;
+  transform: rotate(-135deg);
+}
+
+.hover-card.tone-working {
+  --accent: var(--working);
+}
+
+.hover-card.tone-waiting {
+  --accent: var(--waiting);
+}
+
+.hover-card.tone-done {
+  --accent: var(--done);
+}
+
+.hover-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hover-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.hover-status .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.hover-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family);
+  font-size: calc(var(--vscode-font-size) - 2px);
+}
+
+.hover-meta {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9fb6c8;
+  font-size: calc(var(--vscode-font-size) - 2px);
+}
+
+.hover-hint {
+  margin-top: 4px;
+  color: #6f8699;
+  font-size: calc(var(--vscode-font-size) - 3px);
+}
+
+body.vscode-reduce-motion .hover-card {
+  transition: none;
+}
+
+/* The card the hovered boat belongs to. */
+.card.linked {
+  border-color: color-mix(in srgb, var(--ink) 35%, transparent);
+  background: var(--vscode-list-hoverBackground);
+}
+
 /* A night scene whatever the theme: the colours below are its own. */
 .harbour {
   display: block;
@@ -97,6 +220,18 @@ body {
 
 .harbour .boat {
   cursor: pointer;
+}
+
+.harbour .boat .hit {
+  fill: transparent;
+}
+
+.harbour .boat.hover .lamp {
+  r: 4.6;
+}
+
+.harbour .boat.hover .halo {
+  opacity: 0.8;
 }
 
 .harbour .boat .lamp {
@@ -240,40 +375,40 @@ body {
 
 /* Usage meters ------------------------------------------------------------ */
 
+/* One grid for all rows, so every bar starts at the same x. */
 .meters {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
   margin: 0 12px 8px;
   padding-top: 8px;
   border-top: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+  font-size: calc(var(--vscode-font-size) - 2px);
+  color: var(--muted);
 }
 
 .meters.hidden,
-.meter .tick.hidden,
 .foot .link.hidden {
   display: none;
 }
 
 .meter {
-  display: grid;
-  grid-template-columns: minmax(28px, auto) 1fr 36px;
-  align-items: center;
-  column-gap: 8px;
-  font-size: calc(var(--vscode-font-size) - 2px);
-  color: var(--muted);
+  display: contents;
 }
 
 .meter .label {
   white-space: nowrap;
+  padding-top: 2px;
 }
 
 .meter .bar {
   position: relative;
-  height: 5px;
+  height: 6px;
   border-radius: 3px;
   background: color-mix(in srgb, var(--ink) 12%, transparent);
-  overflow: visible;
+  overflow: hidden;
 }
 
 .meter .fill {
@@ -282,25 +417,16 @@ body {
   top: 0;
   bottom: 0;
   border-radius: 3px;
-  background: var(--working);
-  transition: width 400ms ease;
+  background: var(--done);
+  transition: width 400ms ease, background 400ms ease;
 }
 
-.meter.warn .fill {
+.meter.mid .fill {
   background: var(--waiting);
 }
 
 .meter.high .fill {
   background: var(--vscode-errorForeground, #f14c4c);
-}
-
-.meter .tick {
-  position: absolute;
-  top: -2px;
-  bottom: -2px;
-  width: 1px;
-  background: var(--ink);
-  opacity: 0.6;
 }
 
 .meter .percent {
@@ -309,9 +435,10 @@ body {
   color: var(--ink);
 }
 
+/* Under the bar, aligned with it. */
 .meter .reset {
   grid-column: 2 / 4;
-  margin-top: -1px;
+  margin: -1px 0 4px;
   font-size: calc(var(--vscode-font-size) - 3px);
 }
 
@@ -324,11 +451,10 @@ body {
 }
 
 .foot {
+  grid-column: 1 / 4;
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
+  justify-content: flex-end;
   font-size: calc(var(--vscode-font-size) - 3px);
-  color: var(--muted);
 }
 
 .foot .link {
@@ -654,14 +780,16 @@ body {
 .actions {
   flex: none;
   align-self: flex-start;
-  display: none;
+  display: flex;
   gap: 2px;
   margin-left: -4px;
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
 
 .card:hover .actions,
 .card:focus-within .actions {
-  display: flex;
+  opacity: 1;
 }
 
 .action {

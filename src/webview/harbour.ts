@@ -36,7 +36,11 @@ export class Harbour {
   private timer: ReturnType<typeof setInterval> | undefined;
   private readonly reduceMotion: boolean;
 
-  constructor(private readonly onJump: (id: string) => void) {
+  constructor(
+    private readonly onJump: (id: string) => void,
+    /** Called with the boat under the pointer, in SVG units, and with nothing when it leaves. */
+    private readonly onHover: (boat: Boat | undefined) => void = () => {},
+  ) {
     this.reduceMotion = document.body.classList.contains("vscode-reduce-motion");
     const root = svg("svg", { viewBox: `0 0 ${HARBOUR.width} ${HARBOUR.height}`, preserveAspectRatio: "xMidYMax slice" }, "harbour");
     root.setAttribute("aria-hidden", "true");
@@ -97,18 +101,27 @@ export class Harbour {
       let entry = this.boats.get(boat.id);
       if (!entry) {
         const node = svg("g", {}, "boat");
-        node.append(svg("rect", { x: -1, y: 5, width: 2, height: 16, rx: 1 }, "reflection"), svg("circle", { r: 7, filter: "url(#soft)" }, "halo"), svg("circle", { r: 3.2 }, "lamp"), svg("title"));
+        // The hit area is wider than the lamp, so the pointer finds the boat easily.
+        node.append(svg("rect", { x: -1, y: 5, width: 2, height: 16, rx: 1 }, "reflection"), svg("circle", { r: 7, filter: "url(#soft)" }, "halo"), svg("circle", { r: 3.2 }, "lamp"), svg("circle", { r: 11 }, "hit"));
         const text = svg("text", { x: 9, y: 2.6 }, "label");
         node.append(text);
-        node.addEventListener("click", () => this.jump(boat.id));
+        const id = boat.id;
+        node.addEventListener("click", () => this.jump(id));
+        node.addEventListener("mouseenter", () => {
+          node.classList.add("hover");
+          this.onHover(this.boats.get(id)?.boat);
+        });
+        node.addEventListener("mouseleave", () => {
+          node.classList.remove("hover");
+          this.onHover(undefined);
+        });
         this.boatsLayer.append(node);
         entry = { node, boat };
         this.boats.set(boat.id, entry);
       }
       entry.boat = boat;
-      entry.node.setAttribute("class", `boat state-${boat.state}`);
+      entry.node.setAttribute("class", `boat state-${boat.state}${entry.node.classList.contains("hover") ? " hover" : ""}`);
       entry.node.setAttribute("transform", `translate(${boat.x} ${boat.y})`);
-      entry.node.querySelector("title")!.textContent = boat.title;
       const label = entry.node.querySelector(".label")!;
       label.textContent = boat.label ?? "";
       // A label that would run off the right edge sits on the left of the boat instead.
@@ -118,10 +131,27 @@ export class Harbour {
     }
     for (const [id, entry] of this.boats) {
       if (seen.has(id)) continue;
+      if (entry.node.classList.contains("hover")) this.onHover(undefined);
       entry.node.remove();
       this.boats.delete(id);
     }
     this.light();
+  }
+
+  /** Lights a boat from outside, for the card the pointer is on. */
+  highlight(id: string, on: boolean): void {
+    this.boats.get(id)?.node.classList.toggle("hover", on);
+  }
+
+  boatFor(id: string): Boat | undefined {
+    return this.boats.get(id)?.boat;
+  }
+
+  /** The boat's position in CSS pixels relative to the scene's element. */
+  position(boat: Boat): { x: number; y: number; width: number } {
+    const rect = this.element.getBoundingClientRect();
+    const scale = rect.width / HARBOUR.width;
+    return { x: boat.x * scale, y: boat.y * scale, width: rect.width };
   }
 
   private setWater(water: number, usagePercent: number | undefined): void {

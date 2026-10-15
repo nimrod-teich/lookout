@@ -17,6 +17,7 @@
   } else {
     document.body.className = "vscode-dark";
   }
+  if (params.get("motion") === "0") document.body.classList.add("vscode-reduce-motion");
   window.acquireVsCodeApi = () => ({ postMessage: (m) => console.log("to extension:", JSON.stringify(m)), getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean) }), setState: () => {} });
   window.addEventListener("load", async () => {
     const fixture = await (await fetch(`fixtures/${params.get("fixture") ?? "busy"}.json`)).json();
@@ -28,6 +29,8 @@
       for (const m of usage.meters) if (m.resetsAt) m.resetsAt = now + m.resetsAt;
     }
     window.postMessage({ type: "sessions", sessions: fixture.sessions, now, usage }, "*");
+    const hoverId = params.get("hover");
+    if (hoverId) setTimeout(() => { const boats = [...document.querySelectorAll(".boat")]; const i = fixture.sessions.findIndex((s) => s.id === hoverId); boats[i]?.dispatchEvent(new MouseEvent("mouseenter")); }, 300);
   });
 </script>
 <script src="../dist/board.js"></script>

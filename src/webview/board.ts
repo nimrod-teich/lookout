@@ -73,8 +73,59 @@ function chips(view: SessionView): string[] {
 // The harbour: the lighthouse, its beam, and the sessions as boats.
 
 const beam = el("div", "beam");
-const harbour = new Harbour((id) => vscode.postMessage({ type: "jump", id }));
-beam.append(harbour.element);
+const hover = el("div", "hover-card");
+const harbour = new Harbour(
+  (id) => vscode.postMessage({ type: "jump", id }),
+  (boat) => showHover(boat?.id),
+);
+beam.append(harbour.element, hover);
+
+/** The card the pointer links to, highlighted while a boat is hovered. */
+let linkedCard: HTMLElement | undefined;
+
+/** A card over the scene for the boat under the pointer, with a caret pointing at the boat. */
+function showHover(id: string | undefined): void {
+  const view = id === undefined ? undefined : sessions.find((s) => s.id === id);
+  linkedCard?.classList.remove("linked");
+  linkedCard = undefined;
+  if (!view) {
+    hover.classList.remove("shown");
+    return;
+  }
+  linkedCard = cards.get(view.id);
+  linkedCard?.classList.add("linked");
+  hover.textContent = "";
+  hover.className = `hover-card tone-${view.state}`;
+  hover.append(el("div", "hover-title", view.title));
+  const status = el("div", "hover-status");
+  const elapsed = elapsedText(view);
+  status.append(el("i", "dot"), el("span", "", `${stateTitle(view)}${elapsed ? ` · ${elapsed}` : ""}`));
+  hover.append(status);
+  const second = secondLine(view);
+  if (second) hover.append(el("div", "hover-line", second));
+  const meta = chips(view);
+  if (view.spend) {
+    const tokens = view.spend.input + view.spend.output + view.spend.cacheRead + view.spend.cacheWrite;
+    meta.push(`${formatTokens(tokens)} tokens${view.spend.costUsd === undefined ? "" : ` · ${view.spend.estimated ? "~" : ""}${formatUsd(view.spend.costUsd)}`}`);
+  }
+  hover.append(el("div", "hover-meta", meta.join(" · ")));
+  hover.append(el("div", "hover-hint", "Click to jump"));
+  const boat = harbour.boatFor(view.id);
+  if (!boat) return;
+  const { x, y, width } = harbour.position(boat);
+  const cardWidth = Math.min(236, width - 16);
+  const left = Math.max(8, Math.min(width - cardWidth - 8, x - cardWidth / 2));
+  hover.style.width = `${cardWidth}px`;
+  hover.style.left = `${left}px`;
+  hover.style.setProperty("--caret", `${Math.round(x - left)}px`);
+  // Above the boat when the card fits there, else below it; the caret always points at the boat.
+  const height = hover.offsetHeight;
+  const above = y - 14 - height >= 4;
+  hover.classList.toggle("below", !above);
+  hover.style.top = `${above ? y - 14 - height : y + 14}px`;
+  // Two frames apart, so the transition runs from the hidden state.
+  requestAnimationFrame(() => hover.classList.add("shown"));
+}
 const legend = el("div", "legend");
 beam.append(legend);
 
@@ -123,6 +174,11 @@ function resetText(resetsAt: number | undefined): string {
   return `resets in ${formatElapsed(resetsAt - now())}`;
 }
 
+/** Fill colour by consumption: calm below half, amber from half, red from 80%. */
+function meterLevel(percent: number): "low" | "mid" | "high" {
+  return percent >= 80 ? "high" : percent >= 50 ? "mid" : "low";
+}
+
 function renderMeters(): void {
   meters.classList.toggle("hidden", usage === undefined);
   meters.classList.toggle("stale", usage?.stale === true);
@@ -135,27 +191,16 @@ function renderMeters(): void {
     if (!row) {
       row = el("div", "meter");
       const bar = el("span", "bar");
-      bar.append(el("span", "fill"), el("span", "tick"));
+      bar.append(el("span", "fill"));
       row.append(el("span", "label"), bar, el("span", "percent"), el("span", "reset"));
       meterRows.set(meter.key, row);
     }
-    row.className = `meter ${meter.percent >= 95 ? "high" : meter.percent >= 80 ? "warn" : ""}`;
+    row.className = `meter ${meterLevel(meter.percent)}`;
     row.querySelector(".label")!.textContent = meter.label;
     (row.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
-    const tick = row.querySelector(".tick") as HTMLElement;
-    // Where in the window we are: lets the burn rate be read against the fill.
-    if (meter.resetsAt !== undefined && meter.windowMs) {
-      const through = 1 - Math.min(1, Math.max(0, (meter.resetsAt - now()) / meter.windowMs));
-      tick.style.left = `${Math.round(through * 100)}%`;
-      tick.classList.remove("hidden");
-      const pace = meter.percent > through * 100 + 5 ? "ahead of the window, which means a faster pace than even use" : meter.percent < through * 100 - 5 ? "behind the window, which means a slower pace than even use" : "level with the window";
-      row.title = `${meter.percent}% used; the line marks ${Math.round(through * 100)}% of the window gone. The fill is ${pace}.`;
-    } else {
-      tick.classList.add("hidden");
-      row.title = `${meter.percent}% used`;
-    }
     row.querySelector(".percent")!.textContent = `${meter.percent}%`;
     row.querySelector(".reset")!.textContent = resetText(meter.resetsAt);
+    row.title = `${meter.label}: ${meter.percent}% used${meter.resetsAt !== undefined && meter.resetsAt > now() ? `, ${resetText(meter.resetsAt)}` : ""}`;
     if (row.previousElementSibling !== (previous ?? null) || row.parentElement !== meters) meters.insertBefore(row, previous ? previous.nextSibling : meters.firstChild);
     previous = row;
   }
@@ -167,15 +212,14 @@ function renderMeters(): void {
   let foot = meters.querySelector<HTMLElement>(".foot");
   if (!foot) {
     foot = el("div", "foot");
-    foot.append(el("span", "asof"));
     const refresh = el("button", "link", "refresh");
     refresh.type = "button";
+    refresh.title = "Fetch the usage again now";
     refresh.addEventListener("click", () => vscode.postMessage({ type: "refreshUsage" }));
     foot.append(refresh);
     meters.append(foot);
   }
   meters.append(foot);
-  foot.querySelector(".asof")!.textContent = `Usage as of ${formatElapsed(now() - usage.fetchedAt)} ago${usage.stale ? ", stale" : ""}`;
   foot.querySelector(".link")!.classList.toggle("hidden", !usage.canRefresh);
 }
 
@@ -216,6 +260,8 @@ function createCard(view: SessionView): HTMLElement {
   actions.append(rename, seen);
   card.append(actions);
   card.addEventListener("click", () => harbour.jump(view.id));
+  card.addEventListener("mouseenter", () => harbour.highlight(view.id, true));
+  card.addEventListener("mouseleave", () => harbour.highlight(view.id, false));
   return card;
 }
 
