@@ -2,7 +2,7 @@
 import { formatElapsed, formatTokens, shortModel } from "../core/format";
 import type { SessionView } from "../core/types";
 import { Harbour } from "./harbour";
-import { groupSessions, hostChip, secondLine } from "./model";
+import { contextPercent, groupSessions, hostChip, pulseBars, secondLine } from "./model";
 import type { BoardUsage, FromBoard, ToBoard } from "./protocol";
 
 declare function acquireVsCodeApi(): { postMessage(message: FromBoard): void };
@@ -55,7 +55,8 @@ function chips(view: SessionView): string[] {
   const where = hostChip(view);
   if (where) out.push(where);
   if (view.model) out.push(shortModel(view.model));
-  if (view.contextTokens) out.push(`${formatTokens(view.contextTokens)} tokens`);
+  // The ring shows the context when the window is known; the chip covers the rest.
+  if (view.contextTokens && !view.contextWindow) out.push(`${formatTokens(view.contextTokens)} tokens`);
   if (view.agents > 0) out.push(view.agents === 1 ? "1 agent" : `${view.agents} agents`);
   return out;
 }
@@ -159,8 +160,13 @@ function createCard(view: SessionView): HTMLElement {
   row.append(el("span", "title"), el("span", "elapsed"));
   const line = el("span", "line");
   line.append(el("span", "mark"), el("span", "text"));
-  main.append(row, line, el("span", "chips"));
+  const pulse = el("span", "pulse");
+  pulse.title = "Tool calls per minute, last 15 minutes";
+  main.append(row, line, pulse, el("span", "chips"));
   card.append(main);
+  const ring = el("span", "ring");
+  ring.append(el("span", "ring-value"));
+  card.append(ring);
   const seen = el("span", "seen", "✓");
   seen.title = "Mark as seen";
   seen.setAttribute("role", "button");
@@ -185,6 +191,24 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   line.querySelector(".mark")!.textContent = MARKS[view.state];
   line.querySelector(".text")!.textContent = text ?? "";
   line.classList.toggle("empty", text === undefined);
+  const pulse = card.querySelector(".pulse") as HTMLElement;
+  const bars = pulseBars(view.pulse);
+  pulse.classList.toggle("empty", bars.length === 0 || bars.every((b) => b === 0));
+  while (pulse.childNodes.length > bars.length) pulse.lastChild!.remove();
+  bars.forEach((height, i) => {
+    const bar = (pulse.childNodes[i] ?? pulse.appendChild(el("i", "bar"))) as HTMLElement;
+    bar.style.height = `${Math.max(12, Math.round(height * 100))}%`;
+    bar.classList.toggle("quiet", height === 0);
+  });
+  const ring = card.querySelector(".ring") as HTMLElement;
+  const percent = contextPercent(view);
+  ring.classList.toggle("hidden", percent === undefined);
+  if (percent !== undefined) {
+    ring.style.setProperty("--p", String(percent));
+    ring.classList.toggle("warn", percent >= 80);
+    ring.querySelector(".ring-value")!.textContent = `${percent}%`;
+    ring.title = `Context window ${percent}% full (${formatTokens(view.contextTokens ?? 0)} of ${formatTokens(view.contextWindow ?? 0)})`;
+  }
   const chipsEl = card.querySelector(".chips")!;
   const labels = chips(view);
   while (chipsEl.childNodes.length > labels.length) chipsEl.lastChild!.remove();

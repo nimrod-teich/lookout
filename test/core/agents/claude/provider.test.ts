@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClaudeProvider } from "../../../../src/core/agents/claude/provider";
-import { activityOf, agentsOf, applyLine, emptyTranscript, summarizeTool, titleOf, type TranscriptState } from "../../../../src/core/agents/claude/transcript";
+import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseOf, summarizeTool, titleOf, type TranscriptState } from "../../../../src/core/agents/claude/transcript";
 import { appendEntries, FakeProc, sessionId, tempConfigDir, transcriptPath, writeSession } from "../../helpers";
 
 function setup() {
@@ -101,6 +101,35 @@ describe("transcript activity", () => {
   });
 });
 
+describe("pulse and context window", () => {
+  it("counts tool calls per minute over the last 15 minutes, dropping older and future ones", () => {
+    const state = emptyTranscript();
+    const now = Date.parse("2026-10-15T10:15:00Z");
+    const call = (minutesAgo: number) =>
+      applyLine(state, JSON.stringify({ type: "assistant", timestamp: new Date(now - minutesAgo * 60_000).toISOString(), message: { content: [{ type: "tool_use", id: `t${Math.random()}`, name: "Bash", input: {} }] } }));
+    call(20);
+    call(14.5);
+    call(14.2);
+    call(7);
+    call(0.5);
+    call(-1);
+    applyLine(state, JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "no-time", name: "Bash", input: {} }] } }));
+    const pulse = pulseOf(state, now);
+    expect(pulse).toHaveLength(15);
+    expect(pulse[0]).toBe(2);
+    expect(pulse[8]).toBe(1);
+    expect(pulse[14]).toBe(1);
+    expect(pulse.reduce((a, b) => a + b)).toBe(4);
+  });
+
+  it("infers Claude's context window from the model id and the usage", () => {
+    expect(contextWindowOf("claude-fable-5-1[1m]", 1000)).toBe(1_000_000);
+    expect(contextWindowOf("claude-opus-5-5", 150_000)).toBe(200_000);
+    expect(contextWindowOf("claude-opus-5-5", 500_000)).toBe(1_000_000);
+    expect(contextWindowOf(undefined, 500_000)).toBeUndefined();
+  });
+});
+
 describe("ClaudeProvider", () => {
   it("identifies itself", () => {
     const { provider } = setup();
@@ -157,7 +186,8 @@ describe("ClaudeProvider", () => {
     appendEntries(transcriptPath(configDir, "/work/app", id), [
       { type: "assistant", message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t1", name: "Agent", input: { description: "Plan the work" } }], usage: { input_tokens: 5 } } },
     ]);
-    expect(provider.poll(0)[0]).toMatchObject({ activity: "Agent · Plan the work", agents: 1, model: "claude-opus-5-5", contextTokens: 5 });
+    expect(provider.poll(0)[0]).toMatchObject({ activity: "Agent · Plan the work", agents: 1, model: "claude-opus-5-5", contextTokens: 5, contextWindow: 200_000 });
+    expect(provider.poll(0)[0]?.pulse).toHaveLength(15);
 
     writeSession(configDir, proc, { pid: 11, sessionId: id, status: "idle" });
     const idle = provider.poll(0)[0];

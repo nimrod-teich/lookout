@@ -5,7 +5,7 @@ import type { AgentProvider, AgentSession, AgentStatus } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
-import { activityOf, agentsOf, applyLine, emptyTranscript, titleOf, type TranscriptState } from "./transcript";
+import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseOf, titleOf, type TranscriptState } from "./transcript";
 
 export const CLAUDE_CODE = "claude-code";
 
@@ -74,6 +74,8 @@ export class ClaudeProvider implements AgentProvider {
         lastReply: transcript.lastReply,
         model: transcript.model,
         contextTokens: transcript.contextTokens,
+        contextWindow: contextWindowOf(transcript.model, transcript.contextTokens),
+        pulse: pulseOf(transcript, now),
       };
     });
     for (const id of this.tracked.keys()) if (!live.has(id)) this.tracked.delete(id);
