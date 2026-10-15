@@ -639,6 +639,18 @@ body {
   line-height: 16px;
 }
 
+.chip.spend {
+  align-self: flex-start;
+  margin-top: 1px;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.chip.spend.hidden {
+  display: none;
+}
+
 .actions {
   flex: none;
   align-self: flex-start;

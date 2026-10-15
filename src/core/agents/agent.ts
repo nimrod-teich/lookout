@@ -29,6 +29,21 @@ export interface AgentSession {
   contextWindow?: number;
   /** Tool calls per minute over the last 15 minutes, oldest first. */
   pulse?: number[];
+  /** Tokens the session used so far, and what they cost. */
+  spend?: SessionSpend;
+}
+
+export interface SessionSpend {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** USD at list prices; undefined when a model's prices are unknown. */
+  costUsd: number | undefined;
+  /** Part of the total is an estimate rather than the agent's own figure. */
+  estimated: boolean;
+  /** Earlier usage is missing: the transcript was joined late. */
+  partial: boolean;
 }
 
 /**

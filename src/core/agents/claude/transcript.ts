@@ -1,9 +1,25 @@
+import { costOf, type TokenCounts } from "./pricing";
+
 /** A tool call the assistant made that has no result yet. */
 export interface OpenTool {
   id: string;
   name: string;
   /** What the tool works on, e.g. the command or the file. */
   summary?: string;
+}
+
+/** Tokens a session used, by kind, and what they cost. */
+export interface Spend {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** USD; exact from Claude Code's checkpoint plus Lookout's estimate since, or undefined for unknown models. */
+  costUsd: number | undefined;
+  /** Part of the total is Lookout's own estimate at list prices. */
+  estimated: boolean;
+  /** The transcript was joined after Claude Code's last checkpoint, so earlier usage is missing. */
+  partial: boolean;
 }
 
 /** What Lookout knows about a session from its transcript. */
@@ -22,6 +38,14 @@ export interface TranscriptState {
   contextTokens?: number;
   /** When the assistant called tools, newest last; older than `PULSE_WINDOW_MS` is dropped. */
   toolCallTimes: number[];
+  /** Totals from Claude Code's last cost checkpoint, which includes subagents. */
+  checkpoint?: { tokens: TokenCounts; costUsd: number | undefined };
+  /** Usage after the checkpoint, per model, deduplicated by message id. */
+  since: Map<string, TokenCounts>;
+  /** Message ids counted in `since`; a message spans several lines with the same usage. */
+  countedMessages: Set<string>;
+  /** No checkpoint was seen: the state started mid-transcript. */
+  joinedLate: boolean;
 }
 
 /** How far back the pulse looks. */
@@ -33,7 +57,57 @@ const INTERRUPT = "[Request interrupted by user";
 const SUMMARY_MAX = 60;
 
 export function emptyTranscript(): TranscriptState {
-  return { openTools: new Map(), toolCallTimes: [] };
+  return { openTools: new Map(), toolCallTimes: [], since: new Map(), countedMessages: new Set(), joinedLate: false };
+}
+
+const MAX_COUNTED_MESSAGES = 4000;
+
+function zeroTokens(): TokenCounts {
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
+}
+
+function addTokens(into: TokenCounts, from: TokenCounts): void {
+  into.input += from.input;
+  into.output += from.output;
+  into.cacheRead += from.cacheRead;
+  into.cacheWrite5m += from.cacheWrite5m;
+  into.cacheWrite1h += from.cacheWrite1h;
+}
+
+function n(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+/** Claude Code's `cost-state` line: its own totals for the session so far, subagents included. */
+function applyCheckpoint(state: TranscriptState, e: Record<string, unknown>): void {
+  const usage = e.modelUsage;
+  if (typeof usage !== "object" || usage === null) return;
+  const tokens = zeroTokens();
+  for (const raw of Object.values(usage as Record<string, unknown>)) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const m = raw as Record<string, unknown>;
+    // The checkpoint doesn't split cache writes by lifetime; they are counted once, priced by Claude Code itself.
+    addTokens(tokens, { input: n(m.inputTokens), output: n(m.outputTokens), cacheRead: n(m.cacheReadInputTokens), cacheWrite5m: n(m.cacheCreationInputTokens), cacheWrite1h: 0 });
+  }
+  state.checkpoint = { tokens, costUsd: typeof e.totalCostUSD === "number" ? e.totalCostUSD : undefined };
+  state.since.clear();
+  state.countedMessages.clear();
+  state.joinedLate = false;
+}
+
+function applyUsage(state: TranscriptState, message: { id?: unknown; model?: unknown; usage?: Record<string, unknown> }): void {
+  const usage = message.usage;
+  const model = typeof message.model === "string" ? message.model : undefined;
+  const id = typeof message.id === "string" ? message.id : undefined;
+  if (!usage || !model || !id || model.startsWith("<") || state.countedMessages.has(id)) return;
+  state.countedMessages.add(id);
+  if (state.countedMessages.size > MAX_COUNTED_MESSAGES) state.countedMessages.delete(state.countedMessages.values().next().value as string);
+  const creation = usage.cache_creation as Record<string, unknown> | undefined;
+  const write1h = n(creation?.ephemeral_1h_input_tokens);
+  const write5m = creation ? n(creation.ephemeral_5m_input_tokens) : n(usage.cache_creation_input_tokens);
+  const tokens = state.since.get(model) ?? zeroTokens();
+  addTokens(tokens, { input: n(usage.input_tokens), output: n(usage.output_tokens), cacheRead: n(usage.cache_read_input_tokens), cacheWrite5m: write5m, cacheWrite1h: write1h });
+  state.since.set(model, tokens);
 }
 
 function firstLine(text: string, max = SUMMARY_MAX): string | undefined {
@@ -98,14 +172,14 @@ function blocksOf(message: unknown): Block[] {
 }
 
 function applyAssistant(state: TranscriptState, e: Record<string, unknown>): void {
-  const message = e.message as { model?: unknown; usage?: Record<string, unknown> } | undefined;
+  const message = e.message as { id?: unknown; model?: unknown; usage?: Record<string, unknown> } | undefined;
   const model = str(message?.model);
   if (model && !model.startsWith("<")) state.model = model;
   const usage = message?.usage;
   if (usage) {
-    const n = (k: string) => (typeof usage[k] === "number" ? (usage[k] as number) : 0);
-    const tokens = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+    const tokens = n(usage.input_tokens) + n(usage.cache_read_input_tokens) + n(usage.cache_creation_input_tokens);
     if (tokens > 0) state.contextTokens = tokens;
+    applyUsage(state, message!);
   }
   const at = typeof e.timestamp === "string" ? Date.parse(e.timestamp) : NaN;
   for (const block of blocksOf(e.message)) {
@@ -163,6 +237,9 @@ export function applyLine(state: TranscriptState, line: string): void {
     case "last-prompt":
       if (typeof e.lastPrompt === "string") state.lastPrompt = e.lastPrompt;
       return;
+    case "cost-state":
+      applyCheckpoint(state, e);
+      return;
   }
   // Subagent entries carry their own cwd and tools; only the main chain is the session.
   if (e.isSidechain === true) return;
@@ -209,6 +286,29 @@ export function contextWindowOf(model: string | undefined, contextTokens: number
   if (!model) return undefined;
   if (model.includes("[1m]") || (contextTokens !== undefined && contextTokens > 200_000)) return 1_000_000;
   return 200_000;
+}
+
+/** The session's spend: Claude Code's checkpoint plus what the main transcript added since. */
+export function spendOf(state: TranscriptState): Spend | undefined {
+  if (!state.checkpoint && state.since.size === 0) return undefined;
+  const total = state.checkpoint ? { ...state.checkpoint.tokens } : zeroTokens();
+  let cost: number | undefined = state.checkpoint ? state.checkpoint.costUsd : 0;
+  let estimated = false;
+  for (const [model, tokens] of state.since) {
+    addTokens(total, tokens);
+    estimated = true;
+    const part = costOf(model, tokens);
+    cost = cost === undefined || part === undefined ? undefined : cost + part;
+  }
+  return {
+    input: total.input,
+    output: total.output,
+    cacheRead: total.cacheRead,
+    cacheWrite: total.cacheWrite5m + total.cacheWrite1h,
+    costUsd: cost,
+    estimated,
+    partial: state.joinedLate,
+  };
 }
 
 /** Subagents in flight. */

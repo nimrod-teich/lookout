@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
-import { JsonlTail } from "../../jsonlTail";
+import { findLastLine, JsonlTail } from "../../jsonlTail";
 import type { ProcessTable } from "../../proc";
 import type { AgentProvider, AgentSession, AgentStatus } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
-import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseOf, titleOf, type TranscriptState } from "./transcript";
+import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseOf, spendOf, titleOf, type TranscriptState } from "./transcript";
 
 export const CLAUDE_CODE = "claude-code";
 
@@ -13,6 +13,11 @@ export const CLAUDE_CODE = "claude-code";
 const PANEL_ENTRYPOINT = "claude-vscode";
 /** A session has no transcript until its first prompt; look again this often. */
 const TRANSCRIPT_LOOKUP_MS = 5000;
+/** How far back the first read looks for Claude Code's last cost checkpoint. */
+const CHECKPOINT_SEARCH_BYTES = 64 * 1024 * 1024;
+/** Reading from a checkpoint farther back than this would be slow; the spend is then partial. */
+const CHECKPOINT_READ_BYTES = 24 * 1024 * 1024;
+const BACKFILL_BYTES = 1024 * 1024;
 
 interface Tracked {
   tail?: JsonlTail;
@@ -76,6 +81,7 @@ export class ClaudeProvider implements AgentProvider {
         contextTokens: transcript.contextTokens,
         contextWindow: contextWindowOf(transcript.model, transcript.contextTokens),
         pulse: pulseOf(transcript, now),
+        spend: spendOf(transcript),
       };
     });
     for (const id of this.tracked.keys()) if (!live.has(id)) this.tracked.delete(id);
@@ -101,7 +107,7 @@ export class ClaudeProvider implements AgentProvider {
     }
     if (!tracked.tail && now >= tracked.nextLookupAt) {
       const transcript = findTranscript(this.configDir, file.cwd, file.sessionId);
-      if (transcript) tracked.tail = new JsonlTail(transcript);
+      if (transcript) tracked.tail = this.openTranscript(transcript, tracked.state);
       else tracked.nextLookupAt = now + TRANSCRIPT_LOOKUP_MS;
     }
     const read = tracked.tail?.read();
@@ -110,5 +116,24 @@ export class ClaudeProvider implements AgentProvider {
       for (const line of read.lines) applyLine(tracked.state, line);
     }
     return tracked.state;
+  }
+
+  /**
+   * Starts reading at Claude Code's last cost checkpoint, so the spend is
+   * complete, unless that is too far back; then the last megabyte is read and
+   * the spend is marked partial.
+   */
+  private openTranscript(file: string, state: TranscriptState): JsonlTail {
+    let size = 0;
+    try {
+      size = fs.statSync(file).size;
+    } catch {
+      // Opening the tail reports the missing file.
+    }
+    const checkpoint = findLastLine(file, '"type":"cost-state"', CHECKPOINT_SEARCH_BYTES);
+    if (checkpoint !== undefined && size - checkpoint <= CHECKPOINT_READ_BYTES) return new JsonlTail(file, { startAt: checkpoint });
+    if (size <= BACKFILL_BYTES) return new JsonlTail(file, { startAt: 0 });
+    state.joinedLate = true;
+    return new JsonlTail(file, { backfillBytes: BACKFILL_BYTES });
   }
 }

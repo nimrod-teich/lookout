@@ -60,7 +60,16 @@
         3,
         0
       ],
-      "contextWindow": 200000
+      "contextWindow": 200000,
+      "spend": {
+        "input": 2966,
+        "output": 574592,
+        "cacheRead": 98506308,
+        "cacheWrite": 2062623,
+        "costUsd": 93.4,
+        "estimated": false,
+        "partial": false
+      }
     },
     {
       "id": "2",
@@ -94,7 +103,16 @@
         0,
         0
       ],
-      "contextWindow": 200000
+      "contextWindow": 200000,
+      "spend": {
+        "input": 120,
+        "output": 18000,
+        "cacheRead": 2400000,
+        "cacheWrite": 90000,
+        "costUsd": 1.12,
+        "estimated": true,
+        "partial": false
+      }
     },
     {
       "id": "3",
@@ -127,7 +145,16 @@
         3,
         4
       ],
-      "contextWindow": 1000000
+      "contextWindow": 1000000,
+      "spend": {
+        "input": 400,
+        "output": 120000,
+        "cacheRead": 30000000,
+        "cacheWrite": 500000,
+        "costUsd": 19.8,
+        "estimated": true,
+        "partial": false
+      }
     },
     {
       "id": "4",
@@ -161,7 +188,16 @@
         0,
         2
       ],
-      "contextWindow": 1000000
+      "contextWindow": 1000000,
+      "spend": {
+        "input": 666,
+        "output": 301785,
+        "cacheRead": 48574605,
+        "cacheWrite": 1314969,
+        "costUsd": 24.07,
+        "estimated": true,
+        "partial": false
+      }
     },
     {
       "id": "5",
@@ -194,7 +230,16 @@
         1,
         2
       ],
-      "contextWindow": 200000
+      "contextWindow": 200000,
+      "spend": {
+        "input": 50,
+        "output": 2000,
+        "cacheRead": 100000,
+        "cacheWrite": 60000,
+        "costUsd": 0.42,
+        "estimated": true,
+        "partial": false
+      }
     },
     {
       "id": "6",
@@ -227,7 +272,16 @@
         0,
         0
       ],
-      "contextWindow": 1000000
+      "contextWindow": 1000000,
+      "spend": {
+        "input": 913,
+        "output": 40000,
+        "cacheRead": 9000000,
+        "cacheWrite": 300000,
+        "costUsd": null,
+        "estimated": true,
+        "partial": true
+      }
     },
     {
       "id": "7",

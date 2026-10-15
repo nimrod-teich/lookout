@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { formatElapsed, formatTokens, shortModel } from "../core/format";
+import { formatElapsed, formatTokens, formatUsd, shortModel } from "../core/format";
 import type { SessionView } from "../core/types";
 import { Harbour } from "./harbour";
 import { contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type GroupKey } from "./model";
@@ -191,7 +191,9 @@ function createCard(view: SessionView): HTMLElement {
   line.append(el("span", "mark"), el("span", "text"));
   const pulse = el("span", "pulse");
   pulse.title = "Tool calls per minute, last 15 minutes";
-  main.append(row, line, pulse, el("span", "chips"));
+  const chipsEl = el("span", "chips");
+  const spend = el("span", "chip spend");
+  main.append(row, line, pulse, chipsEl, spend);
   card.append(main);
   const ring = el("span", "ring");
   ring.append(el("span", "ring-value"));
@@ -246,6 +248,21 @@ function updateCard(card: HTMLElement, view: SessionView): void {
     ring.classList.toggle("warn", percent >= 80);
     ring.querySelector(".ring-value")!.textContent = `${percent}%`;
     ring.title = `Context window ${percent}% full (${formatTokens(view.contextTokens ?? 0)} of ${formatTokens(view.contextWindow ?? 0)})`;
+  }
+  const spendEl = card.querySelector(".spend") as HTMLElement;
+  const spend = view.spend;
+  spendEl.classList.toggle("hidden", spend === undefined);
+  if (spend) {
+    const tokens = spend.input + spend.output + spend.cacheRead + spend.cacheWrite;
+    const cost = spend.costUsd === undefined ? "" : ` · ${spend.estimated ? "~" : ""}${formatUsd(spend.costUsd)}`;
+    spendEl.textContent = `${spend.partial ? "≥ " : ""}${formatTokens(tokens)} tokens${cost}`;
+    spendEl.title = [
+      `Tokens this session: ${formatTokens(spend.input)} input, ${formatTokens(spend.output)} output, ${formatTokens(spend.cacheRead)} cache read, ${formatTokens(spend.cacheWrite)} cache write.`,
+      spend.costUsd === undefined ? "No price for this model." : `API list price: ${formatUsd(spend.costUsd)}${spend.estimated ? ", part of it Lookout's estimate since the agent's last checkpoint (subagents since then not counted)" : ", the agent's own figure"}.`,
+      spend.partial ? "Earlier usage is missing: Lookout joined this transcript late." : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
   const chipsEl = card.querySelector(".chips")!;
   const labels = chips(view);

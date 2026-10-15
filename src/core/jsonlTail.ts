@@ -4,6 +4,56 @@ const NEWLINE = 0x0a;
 /** A line longer than this is skipped instead of buffered. */
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
 
+export interface TailOptions {
+  /** How far before the end the first read starts, when `startAt` is not given. */
+  backfillBytes?: number;
+  /** Byte offset of a line start to read from on the first read. */
+  startAt?: number;
+}
+
+/**
+ * Offset of the start of the last line containing `needle`, reading the file
+ * backwards in chunks, or undefined when none is found within `maxBytes`
+ * of the end. The needle must not contain a newline.
+ */
+export function findLastLine(file: string, needle: string, maxBytes: number): number | undefined {
+  let fd: number;
+  let size: number;
+  try {
+    fd = fs.openSync(file, "r");
+    size = fs.fstatSync(fd).size;
+  } catch {
+    return undefined;
+  }
+  try {
+    const chunk = 1024 * 1024;
+    let end = size;
+    let carry: Buffer = Buffer.alloc(0);
+    const stop = Math.max(0, size - maxBytes);
+    while (end > stop) {
+      const start = Math.max(stop, end - chunk);
+      const buffer = Buffer.alloc(end - start);
+      fs.readSync(fd, buffer, 0, buffer.length, start);
+      const data = Buffer.concat([buffer, carry]);
+      // Lines in this window, except the first, which may continue before `start`.
+      let lineEnd = data.length;
+      for (let i = data.length - 1; i >= 0; i--) {
+        if (data[i] !== NEWLINE) continue;
+        if (data.subarray(i + 1, lineEnd).includes(needle)) return start + i + 1;
+        lineEnd = i;
+      }
+      if (start === 0 && data.subarray(0, lineEnd).includes(needle)) return 0;
+      carry = data.subarray(0, lineEnd);
+      end = start;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export interface TailRead {
   /** Complete lines appended since the previous read. */
   lines: string[];
@@ -24,10 +74,17 @@ export class JsonlTail {
   /** The bytes up to the next newline belong to a line whose start was not read. */
   private skipPartial = false;
 
+  private readonly backfillBytes: number;
+  private startAt: number | undefined;
+
   constructor(
     private readonly file: string,
-    private readonly backfillBytes = 1024 * 1024,
-  ) {}
+    options: TailOptions | number = {},
+  ) {
+    const opts = typeof options === "number" ? { backfillBytes: options } : options;
+    this.backfillBytes = opts.backfillBytes ?? 1024 * 1024;
+    this.startAt = opts.startAt;
+  }
 
   /** null when the file cannot be read. */
   read(): TailRead | null {
@@ -41,8 +98,11 @@ export class JsonlTail {
     const first = this.offset < 0;
     const reset = !first && (st.size < this.offset || identity !== this.identity);
     if (first || reset) {
-      this.offset = Math.max(0, st.size - this.backfillBytes);
-      this.skipPartial = this.offset > 0;
+      const explicit = first && this.startAt !== undefined && this.startAt <= st.size ? this.startAt : undefined;
+      this.offset = explicit ?? Math.max(0, st.size - this.backfillBytes);
+      // An explicit start is a line start; a computed one lands mid-line.
+      this.skipPartial = explicit === undefined && this.offset > 0;
+      this.startAt = undefined;
       this.carry = Buffer.alloc(0);
       this.identity = identity;
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countStates, describeLocation, describeState, formatElapsed, formatTokens, shortModel } from "../../src/core/format";
+import { countStates, describeLocation, describeState, formatElapsed, formatTokens, formatUsd, shortModel } from "../../src/core/format";
 import { view } from "../vscode/helpers";
 
 describe("format", () => {
@@ -38,5 +38,9 @@ describe("format", () => {
     expect(shortModel("claude-fable-5-1[1m]")).toBe("Fable 5.1");
     expect(shortModel("claude-opus-5-5")).toBe("Opus 5.5");
     expect(shortModel("gpt-6")).toBe("gpt-6");
+  });
+
+  it("formats money", () => {
+    expect([formatUsd(0.004), formatUsd(0.42), formatUsd(9.99), formatUsd(117.47), formatUsd(1234)]).toEqual(["$0.00", "$0.42", "$9.99", "$117", "$1.2k"]);
   });
 });
