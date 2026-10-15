@@ -39,8 +39,8 @@ function writeSession(fields: Record<string, unknown>): void {
   fs.writeFileSync(path.join(configDir, "sessions", `${child.pid}.json`), JSON.stringify(record));
 }
 
-function statusText(item = "sessions"): string | undefined {
-  return stub.ops.filter(([target, action]) => target === `statusBar:lookout.${item}` && action === "set:text").at(-1)?.[2] as string | undefined;
+function statusText(): string | undefined {
+  return stub.ops.filter(([target, action]) => target === "statusBar:lookout.status" && action === "set:text").at(-1)?.[2] as string | undefined;
 }
 
 function infoMessages(): string[] {
@@ -109,7 +109,7 @@ describe("the extension", () => {
     expect(statusText()).toBe("$(lookout-lighthouse) 1 idle");
 
     child.kill();
-    await vi.waitFor(() => expect(stub.ops.some(([target, action]) => target === "statusBar:lookout.sessions" && action === "hide")).toBe(true), WAIT);
+    await vi.waitFor(() => expect(stub.ops.some(([target, action]) => target === "statusBar:lookout.status" && action === "hide")).toBe(true), WAIT);
 
     for (const subscription of subscriptions.splice(0)) subscription.dispose();
     expect(fs.existsSync(registry)).toBe(false);
@@ -121,7 +121,7 @@ describe("the extension", () => {
       JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now(), utilization: { five_hour: { utilization: 18 }, seven_day: { utilization: 31 } } } }),
     );
     activate(context());
-    await vi.waitFor(() => expect(statusText("usage")).toBe("$(lookout-lighthouse) 5h 18% · wk 31%"), WAIT);
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) 5h 18% · wk 31%"), WAIT);
   }, 60_000);
 
   it("restores finished marks from the workspace state", async () => {

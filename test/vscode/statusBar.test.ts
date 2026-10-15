@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StatusBar } from "../../src/vscode/statusBar";
+import type { SessionView } from "../../src/core/types";
+import type { Usage } from "../../src/vscode/controller";
+import { StatusBar, type StatusBarInput } from "../../src/vscode/statusBar";
 import { view } from "./helpers";
 import { stub, type Op } from "./stub-vscode";
 
-const ITEM = "statusBar:lookout.sessions";
+const ITEM = "statusBar:lookout.status";
+const L = "$(lookout-lighthouse)";
 
 function itemOps(): Op[] {
   return stub.ops.filter(([target]) => target === ITEM);
@@ -11,6 +14,23 @@ function itemOps(): Op[] {
 
 function lastSet(prop: string): unknown {
   return itemOps().filter(([, action]) => action === `set:${prop}`).at(-1)?.[2];
+}
+
+function usage(overrides: Partial<Usage> = {}): Usage {
+  return {
+    fetchedAt: 0,
+    stale: false,
+    meters: [
+      { key: "session", label: "5h", percent: 18, resetsAt: 2 * 3_600_000, windowMs: 5 * 3_600_000 },
+      { key: "weekly_all", label: "Week", percent: 31 },
+      { key: "weekly_scoped:Fable", label: "Week · Fable", percent: 84 },
+    ],
+    ...overrides,
+  };
+}
+
+function input(views: SessionView[], overrides: Partial<StatusBarInput> = {}): StatusBarInput {
+  return { views, usage: undefined, enabled: true, showUsage: true, canRefreshUsage: true, ...overrides };
 }
 
 describe("StatusBar", () => {
@@ -28,89 +48,123 @@ describe("StatusBar", () => {
     vi.useRealTimers();
   });
 
-  it("stays hidden and silent when there are no sessions", () => {
-    bar.render([], true);
-    bar.render([], true);
+  it("stays hidden and silent with no sessions and no usage", () => {
+    bar.render(input([]));
+    bar.render(input([]));
     vi.advanceTimersByTime(1000);
     expect(itemOps()).toEqual([]);
   });
 
   it("shows working, waiting and finished counts with a warning background", () => {
-    bar.render(
-      [view({ state: "waiting", needs: "permission prompt" }), view({ id: "b", state: "working" }), view({ id: "c", state: "working" }), view({ id: "d", state: "done" })],
-      true,
-    );
-    expect(lastSet("text")).toBe("$(lookout-lighthouse) ⠋ 2  $(bell-dot) 1  $(check) 1");
+    bar.render(input([view({ state: "waiting", needs: "permission prompt" }), view({ id: "b", state: "working" }), view({ id: "c", state: "working" }), view({ id: "d", state: "done" })]));
+    expect(lastSet("text")).toBe(`${L} ⠋ 2  $(bell-dot) 1  $(check) 1`);
     expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.warningBackground" });
     expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 2 working, 1 waiting for you, 1 finished, 0 idle" });
     expect(itemOps().at(-1)).toEqual([ITEM, "show"]);
   });
 
   it("shows the idle count when nothing is active", () => {
-    bar.render([view(), view({ id: "b" }), view({ id: "c", state: "unknown" })], true);
-    expect(lastSet("text")).toBe("$(lookout-lighthouse) $(question) 1  2 idle");
+    bar.render(input([view(), view({ id: "b" }), view({ id: "c", state: "unknown" })]));
+    expect(lastSet("text")).toBe(`${L} $(question) 1  2 idle`);
     expect(itemOps().some(([, action]) => action === "set:backgroundColor")).toBe(false);
   });
 
+  it("puts the usage under the same lighthouse, with every limit in the hover", () => {
+    bar.render(input([view({ state: "working" })], { usage: usage() }), 3 * 60_000);
+    expect(lastSet("text")).toBe(`${L} ⠋ 1   5h 18% · wk 31%`);
+    expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 1 working, 0 waiting for you, 0 finished, 0 idle. Usage 5h 18% · wk 31%" });
+    const tip = (lastSet("tooltip") as { value: string }).value;
+    expect(tip).toContain("**Claude usage**");
+    expect(tip).toContain("5h: 18% · resets in 1h 57m");
+    expect(tip).toContain("Week · Fable: 84%");
+    expect(tip).toContain("As of 3m ago");
+    expect(tip).toContain("Click to jump to a session");
+  });
+
+  it("shows the usage alone when no session runs, and nothing when usage is off", () => {
+    bar.render(input([], { usage: usage() }));
+    expect(lastSet("text")).toBe(`${L} 5h 18% · wk 31%`);
+    expect((lastSet("tooltip") as { value: string }).value).toContain("No agent sessions running.");
+    stub.ops.length = 0;
+    bar.render(input([], { usage: usage(), showUsage: false }));
+    expect(itemOps()).toEqual([[ITEM, "hide"]]);
+    bar.render(input([view()], { usage: usage(), showUsage: false }));
+    expect(lastSet("text")).toBe(`${L} 1 idle`);
+    expect((lastSet("tooltip") as { value: string }).value).not.toContain("Claude usage");
+  });
+
+  it("turns red when a limit is nearly used up, unless the numbers are stale or a session waits", () => {
+    const high = usage({ meters: [{ key: "session", label: "5h", percent: 97 }] });
+    bar.render(input([view()], { usage: high }), 0);
+    expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.errorBackground" });
+    bar.render(input([view()], { usage: { ...high, stale: true } }), 0);
+    expect(lastSet("backgroundColor")).toBeUndefined();
+    expect((lastSet("tooltip") as { value: string }).value).toMatch(/As of 0s ago \\?\(stale\\?\)/);
+    bar.render(input([view({ state: "waiting" })], { usage: high }), 0);
+    expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.warningBackground" });
+  });
+
   it("animates the spinner by rewriting only the text, once per frame, while a session works", () => {
-    bar.render([view({ state: "working" })], true);
+    bar.render(input([view({ state: "working" })]));
     stub.ops.length = 0;
     vi.advanceTimersByTime(300);
     expect(itemOps()).toEqual([
-      [ITEM, "set:text", "$(lookout-lighthouse) ⠙ 1"],
-      [ITEM, "set:text", "$(lookout-lighthouse) ⠹ 1"],
-      [ITEM, "set:text", "$(lookout-lighthouse) ⠸ 1"],
+      [ITEM, "set:text", `${L} ⠙ 1`],
+      [ITEM, "set:text", `${L} ⠹ 1`],
+      [ITEM, "set:text", `${L} ⠸ 1`],
     ]);
   });
 
   it("stops the spinner when nothing works, when hidden, and when disposed", () => {
-    bar.render([view({ state: "working" })], true);
-    bar.render([view({ state: "waiting" })], true);
+    bar.render(input([view({ state: "working" })]));
+    bar.render(input([view({ state: "waiting" })]));
     stub.ops.length = 0;
     vi.advanceTimersByTime(500);
     expect(itemOps()).toEqual([]);
 
-    bar.render([view({ state: "working" })], true);
-    bar.render([view({ state: "working" })], false);
+    bar.render(input([view({ state: "working" })]));
+    bar.render(input([view({ state: "working" })], { enabled: false }));
     stub.ops.length = 0;
     vi.advanceTimersByTime(500);
     expect(itemOps()).toEqual([]);
 
-    bar.render([view({ state: "working" })], true);
+    bar.render(input([view({ state: "working" })]));
     bar.dispose();
     stub.ops.length = 0;
     vi.advanceTimersByTime(500);
     expect(itemOps().filter(([, action]) => action === "set:text")).toEqual([]);
   });
 
-  it("writes nothing when the same idle sessions are rendered again", () => {
-    const views = [view()];
-    bar.render(views, true);
+  it("writes nothing when the same input is rendered again, and only what changed otherwise", () => {
+    bar.render(input([view()], { usage: usage() }), 0);
     stub.ops.length = 0;
-    bar.render(views, true);
-    bar.render([view()], true);
+    bar.render(input([view()], { usage: usage() }), 0);
     expect(itemOps()).toEqual([]);
+    bar.render(input([view({ title: "Renamed" })], { usage: usage() }), 0);
+    expect(itemOps().map(([, action]) => action)).toEqual(["set:tooltip"]);
+    stub.ops.length = 0;
+    bar.render(input([view({ state: "waiting", title: "Renamed" })], { usage: usage() }), 0);
+    expect(itemOps().map(([, action]) => action)).toEqual(["set:text", "set:accessibilityInformation", "set:tooltip", "set:backgroundColor"]);
   });
 
-  it("writes only the properties that changed", () => {
-    bar.render([view()], true);
+  it("refreshes the elapsed times in the hover once a minute while shown", () => {
+    vi.setSystemTime(0);
+    bar.render(input([view({ state: "idle", since: 0 })]));
     stub.ops.length = 0;
-    bar.render([view({ title: "Renamed" })], true);
+    vi.advanceTimersByTime(59_000);
+    expect(itemOps()).toEqual([]);
+    vi.advanceTimersByTime(1_000);
     expect(itemOps().map(([, action]) => action)).toEqual(["set:tooltip"]);
-
+    expect((lastSet("tooltip") as { value: string }).value).toContain("Idle for 1m");
+    bar.render(input([]));
     stub.ops.length = 0;
-    bar.render([view({ state: "waiting", title: "Renamed" })], true);
-    expect(itemOps().map(([, action]) => action)).toEqual(["set:text", "set:accessibilityInformation", "set:tooltip", "set:backgroundColor"]);
-
-    stub.ops.length = 0;
-    bar.render([view({ title: "Renamed" })], true);
-    expect(lastSet("backgroundColor")).toBeUndefined();
-    expect(itemOps().filter(([, action]) => action === "set:backgroundColor")).toHaveLength(1);
+    vi.advanceTimersByTime(120_000);
+    expect(itemOps()).toEqual([]);
   });
 
   it("escapes markdown in titles and shows where each session runs and for how long", () => {
     const now = 12 * 60_000;
-    bar.render([view({ state: "waiting", title: "fix *the* #build", needs: "permission prompt", worktree: "hotfix" }), view({ id: "b", state: "done" })], true, now);
+    bar.render(input([view({ state: "waiting", title: "fix *the* #build", needs: "permission prompt", worktree: "hotfix" }), view({ id: "b", state: "done" })]), now);
     const tip = lastSet("tooltip") as { value: string; supportThemeIcons: boolean };
     expect(tip.supportThemeIcons).toBe(true);
     expect(tip.value).toContain("$(bell-dot) **fix \\*the\\* \\#build**");
@@ -119,35 +173,17 @@ describe("StatusBar", () => {
     expect(tip.value).toContain("app · Finished 12m ago");
   });
 
-  it("refreshes the elapsed times in the hover once a minute while shown", () => {
-    vi.setSystemTime(0);
-    bar.render([view({ state: "idle", since: 0 })], true);
+  it("hides once when disabled or when everything ends, and shows again later", () => {
+    bar.render(input([view()]));
     stub.ops.length = 0;
-    vi.advanceTimersByTime(59_000);
-    expect(itemOps()).toEqual([]);
-    vi.advanceTimersByTime(1_000);
-    expect(itemOps().map(([, action]) => action)).toEqual(["set:tooltip"]);
-    expect((lastSet("tooltip") as { value: string }).value).toContain("Idle for 1m");
-
-    bar.render([], true);
-    stub.ops.length = 0;
-    vi.advanceTimersByTime(120_000);
-    expect(itemOps()).toEqual([]);
-  });
-
-  it("hides once when disabled or when the last session ends, and shows again later", () => {
-    bar.render([view()], true);
-    stub.ops.length = 0;
-    bar.render([view()], false);
-    bar.render([view()], false);
+    bar.render(input([view()], { enabled: false }));
+    bar.render(input([view()], { enabled: false }));
     expect(itemOps()).toEqual([[ITEM, "hide"]]);
-
     stub.ops.length = 0;
-    bar.render([view()], true);
+    bar.render(input([view()]));
     expect(itemOps()).toEqual([[ITEM, "show"]]);
-
     stub.ops.length = 0;
-    bar.render([], true);
+    bar.render(input([]));
     expect(itemOps()).toEqual([[ITEM, "hide"]]);
   });
 });

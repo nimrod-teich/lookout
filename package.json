@@ -78,7 +78,7 @@
         "lookout.statusBar.showUsage": {
           "type": "boolean",
           "default": true,
-          "description": "Show the 5-hour and weekly usage in the status bar."
+          "description": "Show the 5-hour and weekly usage in the status bar item."
         },
         "lookout.usage.refresh": {
           "type": "string",
