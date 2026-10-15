@@ -27,6 +27,8 @@ const WINDOWS: Record<string, { label: string; windowMs: number }> = {
 };
 /** Older than this, the numbers are shown as stale. */
 export const STALE_MS = HOUR;
+/** A file modified this recently is parsed again on every read: a coarse clock can give two rewrites one mtime. */
+const SETTLE_MS = 2_000;
 
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
@@ -113,7 +115,7 @@ export class UsageCache {
       return (this.snapshot = undefined);
     }
     const signature = `${st.mtimeMs}:${st.size}:${st.ino}`;
-    if (signature === this.signature) return this.snapshot;
+    if (signature === this.signature && Date.now() - st.mtimeMs > SETTLE_MS) return this.snapshot;
     try {
       this.snapshot = parseUsageCache(JSON.parse(fs.readFileSync(this.file, "utf8")));
       this.signature = signature;

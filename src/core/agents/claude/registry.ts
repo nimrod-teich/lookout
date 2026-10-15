@@ -8,10 +8,17 @@ const SESSION_FILE = /^(\d+)\.json$/;
 const HIDDEN_KINDS: readonly string[] = ["daemon", "daemon-worker"];
 /** A session records its start a moment after its process starts, never this long before. */
 const START_SLACK_MS = 10_000;
+/**
+ * A file modified this recently is read again on every scan: on filesystems
+ * with a coarse clock, two rewrites can share an mtime and a size.
+ */
+const SETTLE_MS = 2_000;
 
 interface CachedFile {
   mtimeMs: number;
   size: number;
+  /** The bytes the record was parsed from; the same bytes keep the same verdict. */
+  text: string;
   parsed: SessionFile;
   /** The process that wrote this version of the file is gone; only a rewrite revives it. */
   dead: boolean;
@@ -64,16 +71,23 @@ export class SessionRegistry {
       return null;
     }
     const cached = this.files.get(name);
-    if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) return cached;
-    let parsed: SessionFile | null = null;
+    const settled = Date.now() - st.mtimeMs > SETTLE_MS;
+    if (cached && settled && cached.mtimeMs === st.mtimeMs && cached.size === st.size) return cached;
+    let text: string | undefined;
     try {
-      parsed = parseSessionFile(fs.readFileSync(file, "utf8"));
+      text = fs.readFileSync(file, "utf8");
     } catch {
       // Unreadable right now; fall through to the last good record.
     }
+    if (text !== undefined && cached && text === cached.text) {
+      cached.mtimeMs = st.mtimeMs;
+      cached.size = st.size;
+      return cached;
+    }
+    const parsed = text === undefined ? null : parseSessionFile(text);
     // A torn read keeps the last good record and is retried on the next scan.
-    if (!parsed) return cached ?? null;
-    const fresh = { mtimeMs: st.mtimeMs, size: st.size, parsed, dead: false };
+    if (!parsed || text === undefined) return cached ?? null;
+    const fresh = { mtimeMs: st.mtimeMs, size: st.size, text, parsed, dead: false };
     this.files.set(name, fresh);
     return fresh;
   }
