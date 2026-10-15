@@ -11,4 +11,5 @@ First release.
 - **Notifications.** A notification with a Jump button when a session starts to wait for you (`lookout.notifications.waiting`, on by default) or finishes a turn (`lookout.notifications.done`, off by default).
 - **Usage.** The 5-hour and weekly limits in the status bar and on the board, from Claude Code's cache. `Lookout: Refresh Usage` has Claude Code fetch them again; `lookout.usage.refresh` can make that automatic or turn it off.
 - **Agents.** Claude Code: sessions in the VS Code panel and in integrated terminals. Sessions in another VS Code window are listed with that window's name.
+- **Icon.** The lighthouse is the mark everywhere: the activity bar, and the two status bar items through an icon font the extension ships.
 - **Platforms.** Linux, WSL, Linux remotes, and Windows.

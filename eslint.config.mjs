@@ -16,4 +16,8 @@ export default tseslint.config(
     files: ["esbuild.mjs"],
     languageOptions: { globals: { process: "readonly" } },
   },
+  {
+    files: ["fantasticon.config.cjs"],
+    languageOptions: { globals: { module: "writable" } },
+  },
 );

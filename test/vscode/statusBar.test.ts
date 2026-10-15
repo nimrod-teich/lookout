@@ -40,7 +40,7 @@ describe("StatusBar", () => {
       [view({ state: "waiting", needs: "permission prompt" }), view({ id: "b", state: "working" }), view({ id: "c", state: "working" }), view({ id: "d", state: "done" })],
       true,
     );
-    expect(lastSet("text")).toBe("$(telescope) ⠋ 2  $(bell-dot) 1  $(check) 1");
+    expect(lastSet("text")).toBe("$(lookout-lighthouse) ⠋ 2  $(bell-dot) 1  $(check) 1");
     expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.warningBackground" });
     expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 2 working, 1 waiting for you, 1 finished, 0 idle" });
     expect(itemOps().at(-1)).toEqual([ITEM, "show"]);
@@ -48,7 +48,7 @@ describe("StatusBar", () => {
 
   it("shows the idle count when nothing is active", () => {
     bar.render([view(), view({ id: "b" }), view({ id: "c", state: "unknown" })], true);
-    expect(lastSet("text")).toBe("$(telescope) $(question) 1  2 idle");
+    expect(lastSet("text")).toBe("$(lookout-lighthouse) $(question) 1  2 idle");
     expect(itemOps().some(([, action]) => action === "set:backgroundColor")).toBe(false);
   });
 
@@ -57,9 +57,9 @@ describe("StatusBar", () => {
     stub.ops.length = 0;
     vi.advanceTimersByTime(300);
     expect(itemOps()).toEqual([
-      [ITEM, "set:text", "$(telescope) ⠙ 1"],
-      [ITEM, "set:text", "$(telescope) ⠹ 1"],
-      [ITEM, "set:text", "$(telescope) ⠸ 1"],
+      [ITEM, "set:text", "$(lookout-lighthouse) ⠙ 1"],
+      [ITEM, "set:text", "$(lookout-lighthouse) ⠹ 1"],
+      [ITEM, "set:text", "$(lookout-lighthouse) ⠸ 1"],
     ]);
   });
 

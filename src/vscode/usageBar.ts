@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { formatElapsed } from "../core/format";
 import type { Usage } from "./controller";
+import { BRAND_ICON } from "./icons";
 
 const WARN_AT = 80;
 const ERROR_AT = 95;
@@ -12,12 +13,12 @@ function resetText(resetsAt: number | undefined, now: number): string {
 }
 
 function text(usage: Usage | undefined): string {
-  if (!usage) return "$(dashboard) usage";
+  if (!usage) return `${BRAND_ICON} usage`;
   const session = usage.meters.find((m) => m.key === "session");
   const week = usage.meters.find((m) => m.key === "weekly_all");
   const parts = [session && `5h ${session.percent}%`, week && `wk ${week.percent}%`].filter(Boolean);
   if (parts.length === 0) for (const meter of usage.meters.slice(0, 2)) parts.push(`${meter.label} ${meter.percent}%`);
-  return `$(dashboard) ${parts.join(" · ")}`;
+  return `${BRAND_ICON} ${parts.join(" · ")}`;
 }
 
 function tooltip(usage: Usage | undefined, canRefresh: boolean, now: number): vscode.MarkdownString {
