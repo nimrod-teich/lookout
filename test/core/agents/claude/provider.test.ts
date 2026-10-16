@@ -152,10 +152,12 @@ describe("ClaudeProvider", () => {
     writeSession(configDir, proc, { pid: 12, sessionId: sessionId(2), status: "waiting", waitingFor: "permission prompt" });
     writeSession(configDir, proc, { pid: 13, sessionId: sessionId(3), status: "idle" });
     writeSession(configDir, proc, { pid: 14, sessionId: sessionId(4), status: "shell", entrypoint: "cli" });
-    writeSession(configDir, proc, { pid: 15, sessionId: sessionId(5), status: undefined });
+    writeSession(configDir, proc, { pid: 15, sessionId: sessionId(5), status: undefined, startedAt: -120_000 });
+    // Just started, nothing recorded yet: idle rather than unknown.
+    writeSession(configDir, proc, { pid: 16, sessionId: sessionId(6), status: undefined, startedAt: -5_000 });
 
     const byPid = new Map(provider.poll(0).map((s) => [s.pid, s]));
-    expect([11, 12, 13, 14, 15].map((pid) => byPid.get(pid)?.status)).toEqual(["working", "waiting", "idle", "idle", "unknown"]);
+    expect([11, 12, 13, 14, 15, 16].map((pid) => byPid.get(pid)?.status)).toEqual(["working", "waiting", "idle", "idle", "unknown", "idle"]);
     expect(byPid.get(12)?.needs).toBe("permission prompt");
     expect(byPid.get(11)?.needs).toBeUndefined();
     expect(byPid.get(11)).toMatchObject({ agent: "claude-code", panel: true, since: 2_000, agents: 0 });

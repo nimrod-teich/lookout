@@ -32,7 +32,10 @@ interface Tracked {
   history?: HistoryIndex;
 }
 
-function statusOf(file: SessionFile): AgentStatus {
+/** A process in its first minute has not written its state yet; it is idle, not unknown. */
+const STARTING_MS = 60_000;
+
+function statusOf(file: SessionFile, now: number): AgentStatus {
   switch (file.status) {
     case "busy":
       return "working";
@@ -42,7 +45,7 @@ function statusOf(file: SessionFile): AgentStatus {
     case "shell":
       return "idle";
     default:
-      return "unknown";
+      return file.startedAt !== undefined && now - file.startedAt < STARTING_MS ? "idle" : "unknown";
   }
 }
 
@@ -86,7 +89,7 @@ export class ClaudeProvider implements AgentProvider {
     const sessions = files.map((file): AgentSession => {
       live.add(file.sessionId);
       const transcript = this.readTranscript(file, now);
-      const status = statusOf(file);
+      const status = statusOf(file, now);
       return {
         agent: this.id,
         id: file.sessionId,
