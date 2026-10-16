@@ -29,9 +29,9 @@
   window.acquireVsCodeApi = () => ({
     postMessage: (m) => {
       console.log("to extension:", JSON.stringify(m));
-      if (m.type === "search") setTimeout(() => window.postMessage({ type: "search", query: m.query, results: fakeSearch(m.query, fixtureSessions) }, "*"), 100);
+      if (m.type === "search") setTimeout(() => window.postMessage({ type: "search", query: m.query, results: fakeSearch(m.query, fixtureSessions), pending: 0 }, "*"), 100);
     },
-    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean) }),
+    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), earlier: params.get("earlier") === "1" }),
     setState: () => {},
   });
   window.addEventListener("load", async () => {
@@ -43,8 +43,9 @@
       usage.fetchedAt = now - usage.fetchedAt;
       for (const m of usage.meters) if (m.resetsAt) m.resetsAt = now + m.resetsAt;
     }
-    fixtureSessions = fixture.sessions;
-    window.postMessage({ type: "sessions", sessions: fixture.sessions, now, usage }, "*");
+    for (const p of fixture.past ?? []) if (p.modifiedAt < 1e12) p.modifiedAt = now - p.modifiedAt;
+    fixtureSessions = [...fixture.sessions, ...(fixture.past ?? [])];
+    window.postMessage({ type: "sessions", sessions: fixture.sessions, past: fixture.past ?? [], now, usage }, "*");
     const q = params.get("q");
     if (q) setTimeout(() => { const input = document.querySelector(".search input"); input.value = q; input.dispatchEvent(new Event("input")); }, 200);
     const hoverId = params.get("hover");

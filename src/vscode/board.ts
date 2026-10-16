@@ -1,22 +1,26 @@
 import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import { countStates } from "../core/format";
-import type { SearchResult } from "../core/history";
-import type { SessionView } from "../core/types";
+import type { SearchOutcome } from "../core/agents/agent";
+import type { PastView, SessionView } from "../core/types";
 import type { BoardUsage, FromBoard, ToBoard } from "../webview/protocol";
 
 export const BOARD_VIEW = "lookout.board";
 
 export interface BoardActions {
   sessions(): readonly SessionView[];
+  /** The sessions that are not running, newest first. */
+  past(): readonly PastView[];
+  /** Resumes a past session in the agent's panel. */
+  resume(id: string): void;
   usage(): BoardUsage | undefined;
   refreshUsage(): void;
   jump(view: SessionView): Promise<void>;
   rename(view: SessionView): Promise<void>;
   markSeen(id: string): void;
   markAllSeen(): void;
-  /** Searches the live sessions' conversations. */
-  search(query: string): SearchResult[];
+  /** Searches the live and the past sessions' conversations. */
+  search(query: string): SearchOutcome;
   /** Shows a session's conversation in the findings tab, at one message or at the newest match. */
   openHit(query: string, id: string, index: number | undefined): void;
 }
@@ -55,7 +59,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
     if (this.view) {
       this.view.badge = attention > 0 ? { value: attention, tooltip: `${counts.waiting} need you, ${counts.done} finished` } : undefined;
       if (this.view.visible) {
-        const message: ToBoard = { type: "sessions", sessions: [...sessions], now: Date.now(), usage: this.actions.usage() };
+        const message: ToBoard = { type: "sessions", sessions: [...sessions], past: [...this.actions.past()], now: Date.now(), usage: this.actions.usage() };
         void this.view.webview.postMessage(message);
       }
     }
@@ -91,8 +95,15 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         return;
       case "search": {
         if (typeof message.query !== "string") return;
-        const results: ToBoard = { type: "search", query: message.query, results: this.actions.search(message.query) };
+        const outcome = this.actions.search(message.query);
+        const results: ToBoard = { type: "search", query: message.query, results: outcome.results, pending: outcome.pending };
         void this.view?.webview.postMessage(results);
+        return;
+      }
+      case "resume": {
+        // Only a session the board was shown.
+        const view = this.actions.past().find((p) => p.id === message.id);
+        if (view) this.actions.resume(view.id);
         return;
       }
     }

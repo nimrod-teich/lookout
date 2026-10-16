@@ -256,7 +256,7 @@ describe("ClaudeProvider", () => {
     ]);
     appendEntries(transcriptPath(configDir, "/work/app", second), [{ type: "user", message: { content: "Rename the changelog" } }]);
     provider.poll(0);
-    const results = provider.search("Billing webhook", 5);
+    const { results } = provider.search("Billing webhook", 5, 1000);
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ id: first, count: 2 });
     expect(results[0]?.hits.map((hit) => [hit.role, hit.snippet])).toEqual([
@@ -268,16 +268,44 @@ describe("ClaudeProvider", () => {
       [12, 19],
     ]);
     expect(results[0]?.hits.map((hit) => hit.index)).toEqual([1, 0]);
-    expect(provider.search("   ", 5)).toEqual([]);
+    expect(provider.search("   ", 5, 1000)).toEqual({ results: [], pending: 0 });
     expect(provider.history(first)?.map((m) => m.role)).toEqual(["you", "agent"]);
     expect(provider.history(sessionId(9))).toBeUndefined();
 
     appendEntries(transcriptPath(configDir, "/work/app", second), [{ type: "assistant", message: { content: [{ type: "text", text: "Billing is not my job here" }] } }]);
-    expect(provider.search("billing", 1).map((r) => r.id).sort()).toEqual([first, second]);
+    expect(provider.search("billing", 1, 1000).results.map((r) => r.id).sort()).toEqual([first, second]);
 
     proc.procs.delete(11);
     provider.poll(0);
-    expect(provider.search("billing", 1).map((r) => r.id)).toEqual([second]);
+    expect(provider.search("billing", 1, 1000).results.map((r) => r.id)).toEqual([second]);
+  });
+
+  it("lists the past sessions of the given folders, searches them within a budget, and hands out their conversations", () => {
+    const { configDir, proc, provider } = setup();
+    const live = sessionId(1);
+    const old = sessionId(2);
+    const archived = sessionId(3);
+    writeSession(configDir, proc, { pid: 11, sessionId: live, cwd: "/work/app" });
+    appendEntries(transcriptPath(configDir, "/work/app", live), [{ type: "ai-title", aiTitle: "Running" }]);
+    appendEntries(transcriptPath(configDir, "/work/app", old), [
+      { type: "ai-title", aiTitle: "Old billing work" },
+      { type: "user", message: { content: "Rewrite the billing webhook" } },
+      { type: "assistant", message: { content: [{ type: "text", text: "Done: the billing webhook is rewritten." }] } },
+    ]);
+    appendEntries(transcriptPath(configDir, "/work/app", archived), [{ type: "user", message: { content: "billing, archived" } }]);
+    provider.poll(0);
+    const past = provider.past(["/work/app"], new Set([live, archived]));
+    expect(past.map((p) => [p.id, p.title, p.cwd, p.agent])).toEqual([[old, "Old billing work", "/work/app", "claude-code"]]);
+    // No time to read: both conversations, the live and the past, are reported pending and come back on the next search.
+    expect(provider.search("billing", 3, 0)).toEqual({ results: [], pending: 2 });
+    const { results, pending } = provider.search("billing", 3, 1000);
+    expect(pending).toBe(0);
+    expect(results.map((r) => [r.id, r.count])).toEqual([[old, 2]]);
+    expect(provider.history(old)?.map((m) => m.role)).toEqual(["you", "agent"]);
+    expect(provider.history(archived)).toBeUndefined();
+    // Gone from the list, gone from memory.
+    expect(provider.past(["/work/app"], new Set([live, archived, old]))).toEqual([]);
+    expect(provider.history(old)).toBeUndefined();
   });
 
   it("drops a session when its process exits", () => {

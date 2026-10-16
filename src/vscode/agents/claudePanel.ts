@@ -91,4 +91,16 @@ async function rename(view: SessionView, log: Log): Promise<boolean> {
   }
 }
 
-export const claudePanel: PanelAdapter = { reveal, isActive, rename };
+/** The same command, for a session no process runs: Claude Code resumes it in a new tab. */
+async function resume(id: string, log: Log): Promise<boolean> {
+  if (!UUID.test(id)) return false;
+  try {
+    await vscode.commands.executeCommand(CLAUDE_OPEN, id, undefined, undefined, undefined, undefined, { programmatic: "pin-to-panel" });
+    return true;
+  } catch (err) {
+    log.errorOnce(`${CLAUDE_OPEN} failed to resume a session: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
+export const claudePanel: PanelAdapter = { reveal, isActive, rename, resume };

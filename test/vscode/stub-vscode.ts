@@ -354,6 +354,8 @@ export const extensions = {
 
 export const workspace = {
   name: "stub-workspace",
+  workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
+  onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
   getConfiguration: (section: string) => ({
     get: (key: string, fallback?: unknown) => stub.config[`${section}.${key}`] ?? fallback,
   }),

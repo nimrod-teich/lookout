@@ -2,8 +2,9 @@ import * as fs from "node:fs";
 import { HistoryIndex, termsOf, type HistoryMessage, type SearchResult } from "../../history";
 import { findLastLine, JsonlTail, readLineAt } from "../../jsonlTail";
 import { messageOf } from "./history";
+import { PastTranscripts } from "./past";
 import type { ProcessTable } from "../../proc";
-import type { AgentProvider, AgentSession, AgentStatus } from "../agent";
+import type { AgentProvider, AgentSession, AgentStatus, PastSession, SearchOutcome } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
@@ -66,11 +67,17 @@ export class ClaudeProvider implements AgentProvider {
   private readonly registry: SessionRegistry;
   private readonly tracked = new Map<string, Tracked>();
 
+  private readonly pastTranscripts: PastTranscripts;
+  /** Transcript file by id, for the past sessions last listed. */
+  private pastFiles = new Map<string, string>();
+  private readonly pastIndexes = new Map<string, HistoryIndex>();
+
   constructor(
     private readonly configDir: string,
     proc: ProcessTable,
   ) {
     this.registry = new SessionRegistry(sessionsDir(configDir), proc);
+    this.pastTranscripts = new PastTranscripts(configDir);
   }
 
   poll(now: number): AgentSession[] {
@@ -104,31 +111,61 @@ export class ClaudeProvider implements AgentProvider {
     return sessions;
   }
 
-  /** Searches the live sessions' transcripts; each is read into memory on its first search, then only what was appended. */
-  search(query: string, limit: number): SearchResult[] {
+  past(cwds: readonly string[], exclude: ReadonlySet<string>): PastSession[] {
+    const list = this.pastTranscripts.list(cwds, exclude);
+    this.pastFiles = new Map(list.map((p) => [p.id, p.file]));
+    for (const id of [...this.pastIndexes.keys()]) if (!this.pastFiles.has(id)) this.pastIndexes.delete(id);
+    return list.map((p) => ({ agent: this.id, id: p.id, cwd: p.cwd, title: p.title, modifiedAt: p.modifiedAt }));
+  }
+
+  /**
+   * Searches the live and the past sessions' transcripts. Each is read into
+   * memory on its first search, then only what was appended; a first read
+   * happens only while the budget allows, the live sessions first.
+   */
+  search(query: string, limit: number, budgetMs: number): SearchOutcome {
     const terms = termsOf(query);
-    if (terms.length === 0) return [];
+    if (terms.length === 0) return { results: [], pending: 0 };
+    const started = Date.now();
     const results: SearchResult[] = [];
-    for (const [id, tracked] of this.tracked) {
-      const index = this.indexOf(tracked);
+    let pending = 0;
+    for (const id of [...this.tracked.keys(), ...this.pastFiles.keys()]) {
+      const index = this.indexFor(id);
       if (!index) continue;
+      if (!index.ready && Date.now() - started >= budgetMs) {
+        pending++;
+        continue;
+      }
+      index.refresh();
       const { count, hits } = index.search(terms, limit);
       if (count > 0) results.push({ id, count, hits });
     }
-    return results;
+    return { results, pending };
   }
 
   history(id: string): HistoryMessage[] | undefined {
-    const tracked = this.tracked.get(id);
-    return tracked && this.indexOf(tracked)?.messages;
+    const index = this.indexFor(id);
+    if (!index) return undefined;
+    index.refresh();
+    return index.messages;
   }
 
-  /** The session's messages, read up to date; nothing until its transcript is found. */
-  private indexOf(tracked: Tracked): HistoryIndex | undefined {
-    if (!tracked.file) return undefined;
-    tracked.history ??= new HistoryIndex(tracked.file, messageOf);
-    tracked.history.refresh();
-    return tracked.history;
+  /** The session's conversation index, live or past; nothing until its transcript is known. */
+  private indexFor(id: string): HistoryIndex | undefined {
+    const tracked = this.tracked.get(id);
+    if (tracked) {
+      if (!tracked.file) return undefined;
+      tracked.history ??= new HistoryIndex(tracked.file, messageOf);
+      return tracked.history;
+    }
+    const file = this.pastFiles.get(id);
+    if (!file) return undefined;
+    let index = this.pastIndexes.get(id);
+    if (!index) {
+      index = new HistoryIndex(file, messageOf);
+      this.pastIndexes.set(id, index);
+    }
+    return index;
   }
 
   /** Session files are rewritten in place on every state change, which the directory watch reports. */

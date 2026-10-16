@@ -15,4 +15,6 @@ export interface PanelAdapter {
    * this window hosts. Resolves false when the agent's rename could not be reached.
    */
   rename(view: SessionView, log: Log): Promise<boolean>;
+  /** Opens a session that is not running in the agent's panel, where the agent resumes it. Resolves false when it could not. */
+  resume(id: string, log: Log): Promise<boolean>;
 }
