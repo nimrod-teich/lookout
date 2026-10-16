@@ -3,12 +3,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/nimrod-teich/lookout/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/nimrod-teich/lookout/ci.yml?branch=main&style=flat-square&label=CI&labelColor=0A2436" alt="CI status"></a>
-  <a href="https://github.com/nimrod-teich/lookout/releases"><img src="https://img.shields.io/github/package-json/v/nimrod-teich/lookout?style=flat-square&label=version&labelColor=0A2436&color=FFB000" alt="Version"></a>
+  <img src="https://img.shields.io/badge/version-0.1.0-FFB000?style=flat-square&labelColor=0A2436" alt="Version 0.1.0">
   <img src="https://img.shields.io/badge/VS%20Code-1.94%2B-17607F?style=flat-square&labelColor=0A2436" alt="VS Code 1.94 or newer">
-  <img src="https://img.shields.io/badge/runs%20on-Linux%20%7C%20WSL%20%7C%20SSH%20%7C%20Windows-17607F?style=flat-square&labelColor=0A2436" alt="Runs on Linux, WSL, SSH remotes and Windows">
+  <img src="https://img.shields.io/badge/runs%20on-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL%20%7C%20remotes-17607F?style=flat-square&labelColor=0A2436" alt="Runs on Linux, macOS, Windows, WSL and remote hosts">
   <img src="https://img.shields.io/badge/telemetry-none-17607F?style=flat-square&labelColor=0A2436" alt="No telemetry">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/nimrod-teich/lookout?style=flat-square&labelColor=0A2436&color=17607F" alt="MIT license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-17607F?style=flat-square&labelColor=0A2436" alt="MIT license"></a>
 </p>
 
 <p align="center"><b>Every AI coding agent session at a glance: what is working, what needs you, and where.</b></p>
@@ -110,10 +109,10 @@ Updating an installed copy restarts the extension host, which ends the agent ses
 ### Requirements
 
 - VS Code 1.94 or newer.
-- The extension runs where the agent runs: Linux, WSL, a Linux remote (SSH, container), or Windows.
+- The extension runs where the agent runs: Linux, macOS or Windows, including WSL and remote hosts (SSH, containers), since it lives on the remote side there.
 - A recent version of a [supported agent](#supported-agents).
 
-Windows support is new. Its process handling is tested on Windows in CI; it has not been run against a live agent session on Windows.
+Windows and macOS support is new. The process handling is tested on both in CI; neither has been run against a live agent session yet.
 
 ## Commands and settings
 
