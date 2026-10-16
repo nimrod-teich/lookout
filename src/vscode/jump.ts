@@ -33,7 +33,7 @@ function whereItRuns(view: SessionView): string {
 export async function jumpToSession(view: SessionView, terminals: Terminals, log: Log): Promise<JumpResult> {
   const result = await reveal(view, terminals, log);
   if (result === "refused-not-here") {
-    void vscode.window.showInformationMessage(`"${view.title}" runs ${whereItRuns(view)}. Lookout jumps to sessions hosted in this window.`);
+    void vscode.window.showInformationMessage(`"${view.title}" runs ${whereItRuns(view)}. Lookout jumps to sessions in the VS Code windows on this machine.`);
   } else if (result === "failed") {
     void vscode.window.showWarningMessage(`Lookout could not find the tab or terminal for "${view.title}".`);
   }

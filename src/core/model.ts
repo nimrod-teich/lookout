@@ -1,5 +1,6 @@
 import type { AgentSession, PastSession } from "./agents/agent";
 import type { Host, PastView, SessionView, State } from "./types";
+import type { OtherWindow } from "./windows";
 
 const WORKTREE = /^(.*)[\\/]\.claude[\\/]worktrees[\\/]([^\\/]+)/;
 const STATE_ORDER: Record<State, number> = { waiting: 0, done: 1, working: 2, unknown: 3, idle: 4 };
@@ -29,22 +30,30 @@ export interface WindowContext {
   hostPid: number;
   /** Shell pids of the window's integrated terminals. */
   terminalPids: ReadonlySet<number>;
-  /** Extension host pids of the other VS Code windows on this host, with their names. */
-  windows: ReadonlyMap<number, string>;
+  /** Extension host pids of the other VS Code windows on this host, with their names and terminals. */
+  windows: ReadonlyMap<number, OtherWindow>;
 }
 
 interface Location {
   host: Host;
   terminalPid?: number;
   windowLabel?: string;
+  windowPid?: number;
 }
 
 function locate(session: AgentSession, ancestors: readonly number[], ctx: WindowContext): Location {
   if (session.panel && ancestors.includes(ctx.hostPid)) return { host: "panel" };
   const terminalPid = ancestors.find((pid) => ctx.terminalPids.has(pid));
   if (terminalPid !== undefined) return { host: "terminal", terminalPid };
-  const windowPid = ancestors.find((pid) => pid !== ctx.hostPid && ctx.windows.has(pid));
-  if (windowPid !== undefined) return { host: "window", windowLabel: ctx.windows.get(windowPid) };
+  // Another window's: in its panel, under its extension host, or in one of its terminals; placed as that window places it.
+  for (const pid of ancestors) {
+    if (pid === ctx.hostPid) continue;
+    const window = ctx.windows.get(pid);
+    if (window && session.panel) return { host: "window", windowLabel: window.label, windowPid: pid };
+    for (const [windowPid, other] of ctx.windows) {
+      if (windowPid !== ctx.hostPid && other.terminals.includes(pid)) return { host: "window", windowLabel: other.label, windowPid };
+    }
+  }
   return { host: "elsewhere" };
 }
 

@@ -16,8 +16,8 @@ describe("WindowRegistry", () => {
     registry.register(100, "me");
     new WindowRegistry(dir, proc).register(200, "other");
     proc.procs.set(100, {}).set(200, {});
-    expect([...registry.read(100, 0)]).toEqual([[200, "other"]]);
-    expect([...new WindowRegistry(dir, proc).read(200, 0)]).toEqual([[100, "me"]]);
+    expect([...registry.read(100, 0)]).toEqual([[200, { label: "other", terminals: [] }]]);
+    expect([...new WindowRegistry(dir, proc).read(200, 0)]).toEqual([[100, { label: "me", terminals: [] }]]);
   });
 
   it("removes the record of a window whose process is gone", () => {
@@ -27,7 +27,21 @@ describe("WindowRegistry", () => {
     expect(fs.existsSync(path.join(dir, "200.json"))).toBe(false);
     proc.procs.set(300, {});
     fs.writeFileSync(path.join(dir, "300.json"), '{"pid":300,"label":"late"}');
-    expect([...registry.read(100, 10_000)]).toEqual([[300, "late"]]);
+    expect([...registry.read(100, 10_000)]).toEqual([[300, { label: "late", terminals: [] }]]);
+  });
+
+  it("publishes each window's terminals, and their changes", () => {
+    const { dir, proc, registry } = setup();
+    proc.procs.set(200, {});
+    const other = new WindowRegistry(dir, proc);
+    other.register(200, "other", new Set([77, 71]));
+    expect(registry.read(100, 0).get(200)).toEqual({ label: "other", terminals: [71, 77] });
+    other.register(200, "other", [71]);
+    expect(registry.read(100, 10_000).get(200)).toEqual({ label: "other", terminals: [71] });
+    // Only the record itself is left behind: written whole under another name first.
+    expect(fs.readdirSync(dir)).toEqual(["200.json"]);
+    fs.writeFileSync(path.join(dir, "200.json"), '{"pid":200,"label":"other","terminals":[71,"x",-3,2.5]}');
+    expect(registry.read(100, 20_000).get(200)).toEqual({ label: "other", terminals: [71] });
   });
 
   it("ignores files that are not window records", () => {

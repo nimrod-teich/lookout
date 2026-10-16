@@ -46,6 +46,39 @@ export const runCommand: Runner = (command, timeoutMs) =>
     });
   });
 
+/** Runs a program like `runCommand`, and keeps what it writes to stdout (up to 1 MB). */
+export type CapturingRunner = (command: Command, timeoutMs: number) => Promise<RunResult & { output: string }>;
+
+export const runCapturing: CapturingRunner = (command, timeoutMs) =>
+  new Promise((resolve) => {
+    const started = Date.now();
+    let output = "";
+    const done = (failure?: string) => resolve({ ok: failure === undefined, failure, ms: Date.now() - started, output });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command.file, command.args, { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    } catch {
+      done("could not start");
+      return;
+    }
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      if (output.length < 1024 * 1024) output += chunk;
+    });
+    const timer = setTimeout(() => {
+      child.kill();
+      done("timed out");
+    }, timeoutMs);
+    child.on("error", () => {
+      clearTimeout(timer);
+      done("could not start");
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      done(code === 0 ? undefined : `exit ${code ?? "by signal"}`);
+    });
+  });
+
 export interface NotifierHost {
   run: Runner;
   exists(file: string): boolean;
@@ -61,6 +94,22 @@ const defaultHost: NotifierHost = {
   pathEnv: process.env.PATH,
   systemRoot: process.env.SystemRoot,
 };
+
+/** Windows PowerShell, on Windows or reached from WSL while interop is on: its path, or undefined. */
+export function findPowershell(desktop: Desktop | undefined, host: Pick<NotifierHost, "exists" | "pathEnv" | "systemRoot"> = defaultHost): string | undefined {
+  if (desktop === "windows") {
+    const powershell = path.win32.join(host.systemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+    return host.exists(powershell) ? powershell : undefined;
+  }
+  if (desktop === "wsl") {
+    // Windows programs run from WSL only while interop is on.
+    const interop = host.exists("/proc/sys/fs/binfmt_misc/WSLInterop") || host.exists("/proc/sys/fs/binfmt_misc/WSLInterop-late");
+    const onPath = (host.pathEnv ?? "").split(":").map((dir) => path.posix.join(dir, "powershell.exe")).find((file) => host.exists(file));
+    const powershell = onPath ?? "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+    return interop && host.exists(powershell) ? powershell : undefined;
+  }
+  return undefined;
+}
 
 /** What the desktop offers, found once. */
 interface Tools {
@@ -115,16 +164,10 @@ export class OsNotifier {
       }
       case "macos":
         return { ok: this.host.exists("/usr/bin/osascript") };
-      case "windows": {
-        const powershell = path.win32.join(this.host.systemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-        return { ok: this.host.exists(powershell), powershell };
-      }
+      case "windows":
       case "wsl": {
-        // Windows programs run from WSL only while interop is on.
-        const interop = this.host.exists("/proc/sys/fs/binfmt_misc/WSLInterop") || this.host.exists("/proc/sys/fs/binfmt_misc/WSLInterop-late");
-        const onPath = (this.host.pathEnv ?? "").split(":").map((dir) => path.posix.join(dir, "powershell.exe")).find((file) => this.host.exists(file));
-        const powershell = onPath ?? "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
-        return { ok: interop && this.host.exists(powershell), powershell };
+        const powershell = findPowershell(this.desktop, this.host);
+        return { ok: powershell !== undefined, powershell };
       }
       default:
         return { ok: false };

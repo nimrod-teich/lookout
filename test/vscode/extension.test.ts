@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { JumpMailbox } from "../../src/core/jumpMailbox";
 import { scopeOf } from "../../src/core/usageAlerts";
 import { activate } from "../../src/extension";
 import { createWebviewView, stub } from "./stub-vscode";
@@ -91,7 +92,7 @@ describe("the extension", () => {
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
     activate(context());
     const registry = path.join(configDir, "global-storage", "windows", `${process.pid}.json`);
-    expect(JSON.parse(fs.readFileSync(registry, "utf8"))).toEqual({ pid: process.pid, label: "stub-workspace" });
+    expect(JSON.parse(fs.readFileSync(registry, "utf8"))).toEqual({ pid: process.pid, label: "stub-workspace", terminals: [] });
     await vi.waitFor(() => expect(statusText()).toMatch(/^\$\(lookout-lighthouse\) [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
 
     // Jump: the picker offers the session; choosing it calls the Claude command with its id.
@@ -357,6 +358,68 @@ describe("the extension", () => {
       expect(runs()).toBe(1);
     }, 60_000);
   });
+
+  it("answers another window's jump: brings the session forward, comes to the front, and says so", async () => {
+    writeSession({ status: "idle", statusUpdatedAt: Date.now() });
+    activate(context());
+    await placed();
+    stub.focused = false;
+    stub.commands.set("workbench.action.focusWindow", () => {
+      stub.focused = true;
+      stub.focusChange.fire();
+    });
+    stub.ops.length = 0;
+    const windows = path.join(configDir, "global-storage", "windows");
+    const mail = new JumpMailbox(windows);
+    mail.send(process.pid, { sessionId: SESSION, fromPid: 4242 }, Date.now());
+    let answer: unknown;
+    await vi.waitFor(() => {
+      answer ??= mail.takeReplies(4242, Date.now())[0];
+      expect(answer).toMatchObject({ sessionId: SESSION, fromPid: process.pid, found: true, raised: true });
+    }, WAIT);
+    expect(stub.ops.some(([target, command, args]) => target === "commands" && command === CLAUDE_OPEN && (args as unknown[])[0] === SESSION)).toBe(true);
+    expect(stub.ops.some(([target, command]) => target === "commands" && command === "workbench.action.focusWindow")).toBe(true);
+  }, 60_000);
+
+  it("jumps to a session in another window's terminal through that window, and says when it could not come forward", async () => {
+    // The other window: the test runner's parent stands in for its extension host, and a "shell" of
+    // its terminals runs the session. It publishes that shell, so this window can place the session.
+    const other = process.ppid;
+    const shell = spawn(process.execPath, ["-e", 'const c = require("child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(c.pid); setInterval(() => {}, 1000);'], { stdio: ["ignore", "pipe", "ignore"] });
+    try {
+      const sessionPid = await new Promise<number>((resolve) => shell.stdout!.once("data", (chunk: Buffer) => resolve(Number(String(chunk).trim()))));
+      const windows = path.join(configDir, "global-storage", "windows");
+      fs.mkdirSync(windows, { recursive: true });
+      fs.writeFileSync(path.join(windows, `${other}.json`), JSON.stringify({ pid: other, label: "api", terminals: [shell.pid] }));
+      const record = { pid: sessionPid, sessionId: SESSION, cwd: "/work/app", startedAt: Date.now(), kind: "interactive", entrypoint: "cli", status: "idle", statusUpdatedAt: Date.now() };
+      fs.writeFileSync(path.join(configDir, "sessions", `${sessionPid}.json`), JSON.stringify(record));
+      activate(context());
+      const mail = new JumpMailbox(windows);
+      // The other window answers: shown, but it could not come to the front.
+      const answering = setInterval(() => {
+        for (const request of mail.takeRequests(other, Date.now())) mail.reply(request.fromPid, { sessionId: request.sessionId, fromPid: other, found: true, raised: false }, Date.now());
+      }, 50);
+      try {
+        // What the jump list offered, for the report when the session is not where it should be.
+        let offered: unknown;
+        stub.quickPick = (items) => {
+          offered = (items as { label: string; description?: string; detail?: string }[]).map(({ label, description, detail }) => ({ label, description, detail }));
+          return items[0];
+        };
+        await vi.waitFor(async () => {
+          await stub.commands.get("lookout.jump")!();
+          // The key that switches between one application's windows: ⌘` on a Mac.
+          const key = process.platform === "darwin" ? "⌘`" : "Alt+Tab";
+          expect({ offered, said: infoMessages().at(-1) }).toMatchObject({ said: `Opened "Empty session" in window "api"; switch with ${key}.` });
+        }, WAIT);
+      } finally {
+        clearInterval(answering);
+        process.kill(sessionPid);
+      }
+    } finally {
+      shell.kill();
+    }
+  }, 60_000);
 
   it("restores finished marks from the workspace state", async () => {
     saved["lookout.done"] = [SESSION];

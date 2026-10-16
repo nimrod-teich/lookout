@@ -63,10 +63,27 @@ describe("Monitor", () => {
   it("names the other VS Code window a session runs in", () => {
     const { proc, monitor } = setup([session({ id: "other", pid: 11 }), session({ id: "mine", pid: 12 })]);
     proc.procs.set(11, { ppid: 4242 }).set(12, { ppid: HOST });
-    const views = monitor.poll({ hostPid: HOST, terminalPids: new Set(), windows: new Map([[4242, "other-project"], [HOST, "me"]]) });
+    const views = monitor.poll({ hostPid: HOST, terminalPids: new Set(), windows: new Map([[4242, { label: "other-project", terminals: [] }], [HOST, { label: "me", terminals: [] }]]) });
     expect(views[0]).toMatchObject({ host: "window", windowLabel: "other-project" });
     expect(views[1]).toMatchObject({ host: "panel" });
     expect(views[1]?.windowLabel).toBeUndefined();
+  });
+
+  it("names the other window a session runs in by the shells of its terminals, and says where to send a jump", () => {
+    const { proc, monitor } = setup([session({ id: "term", pid: 11, panel: false }), session({ id: "panel", pid: 12 })]);
+    proc.procs.set(11, { ppid: 70 }).set(70, { ppid: 9000 }).set(9000, { ppid: 1 }).set(12, { ppid: 4242 });
+    const windows = new Map([[4242, { label: "other-project", terminals: [70] }], [5151, { label: "third", terminals: [80] }]]);
+    const views = monitor.poll({ hostPid: HOST, terminalPids: new Set(), windows });
+    expect(views.find((v) => v.id === "term")).toMatchObject({ host: "window", windowLabel: "other-project", windowPid: 4242 });
+    expect(views.find((v) => v.id === "term")?.terminalPid).toBeUndefined();
+    expect(views.find((v) => v.id === "panel")).toMatchObject({ host: "window", windowLabel: "other-project", windowPid: 4242 });
+    // Not in a panel, under another window's extension host: that window does not count it as its own, so neither does this one.
+    const { proc: proc2, monitor: monitor2 } = setup([session({ id: "spawned", pid: 13, panel: false })]);
+    proc2.procs.set(13, { ppid: 4242 });
+    expect(monitor2.poll({ hostPid: HOST, terminalPids: new Set(), windows })[0]).toMatchObject({ host: "elsewhere" });
+    // A shell no window publishes is outside VS Code, as before.
+    const unknown = monitor.poll({ hostPid: HOST, terminalPids: new Set(), windows: new Map([[4242, { label: "other-project", terminals: [] }]]) });
+    expect(unknown.find((v) => v.id === "term")).toMatchObject({ host: "elsewhere" });
   });
 
   it("fills in the view from the agent's session", () => {
