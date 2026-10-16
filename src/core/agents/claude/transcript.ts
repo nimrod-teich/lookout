@@ -269,8 +269,12 @@ export function activityOf(state: TranscriptState): string | undefined {
   return tools.length > 1 ? `${label} +${tools.length - 1}` : label;
 }
 
-/** Tool calls per minute over the last 15 minutes, oldest first. */
-export function pulseOf(state: TranscriptState, now: number): number[] {
+/**
+ * Tool calls per minute over the last 15 minutes, oldest first. A session
+ * younger than that gets only the minutes since `since`, so its bars start at
+ * the left and fill rightwards as it ages.
+ */
+export function pulseOf(state: TranscriptState, now: number, since?: number): number[] {
   const bins = new Array<number>(PULSE_BINS).fill(0);
   const binMs = PULSE_WINDOW_MS / PULSE_BINS;
   const start = now - PULSE_WINDOW_MS;
@@ -278,7 +282,9 @@ export function pulseOf(state: TranscriptState, now: number): number[] {
     if (at < start || at > now) continue;
     bins[Math.min(PULSE_BINS - 1, Math.floor((at - start) / binMs))]!++;
   }
-  return bins;
+  if (since === undefined || since <= start) return bins;
+  const keep = Math.max(1, Math.min(PULSE_BINS, Math.floor((now - since) / binMs) + 1));
+  return bins.slice(PULSE_BINS - keep);
 }
 
 /** Claude's context window for a model id: 1M for the `[1m]` variants, or when the usage already passed 200k. */

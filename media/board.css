@@ -717,7 +717,8 @@ body.vscode-reduce-motion .hover-card {
 /* Context ring: how full the window is. */
 .ring {
   flex: none;
-  align-self: center;
+  align-self: flex-end;
+  margin-bottom: 1px;
   position: relative;
   width: 30px;
   height: 30px;

@@ -91,7 +91,7 @@ export class ClaudeProvider implements AgentProvider {
         model: transcript.model,
         contextTokens: transcript.contextTokens,
         contextWindow: contextWindowOf(transcript.model, transcript.contextTokens),
-        pulse: pulseOf(transcript, now),
+        pulse: pulseOf(transcript, now, file.startedAt),
         spend: spendOf(transcript),
       };
     });
