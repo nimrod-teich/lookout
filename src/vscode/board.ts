@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import { countStates } from "../core/format";
+import type { SearchResult } from "../core/history";
 import type { SessionView } from "../core/types";
 import type { BoardUsage, FromBoard, ToBoard } from "../webview/protocol";
 
@@ -14,6 +15,8 @@ export interface BoardActions {
   rename(view: SessionView): Promise<void>;
   markSeen(id: string): void;
   markAllSeen(): void;
+  /** Searches the live sessions' conversations. */
+  search(query: string): SearchResult[];
 }
 
 /** The session board in the activity bar: one card per session, grouped by state. */
@@ -79,6 +82,12 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
       case "refreshUsage":
         this.actions.refreshUsage();
         return;
+      case "search": {
+        if (typeof message.query !== "string") return;
+        const results: ToBoard = { type: "search", query: message.query, results: this.actions.search(message.query) };
+        void this.view?.webview.postMessage(results);
+        return;
+      }
     }
   }
 

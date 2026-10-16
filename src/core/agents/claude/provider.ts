@@ -1,5 +1,7 @@
 import * as fs from "node:fs";
+import { HistoryIndex, termsOf, type SearchResult } from "../../history";
 import { findLastLine, JsonlTail, readLineAt } from "../../jsonlTail";
+import { messageOf } from "./history";
 import type { ProcessTable } from "../../proc";
 import type { AgentProvider, AgentSession, AgentStatus } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
@@ -23,6 +25,10 @@ interface Tracked {
   tail?: JsonlTail;
   state: TranscriptState;
   nextLookupAt: number;
+  /** The transcript file, once found. */
+  file?: string;
+  /** Its messages, built on the first search. */
+  history?: HistoryIndex;
 }
 
 function statusOf(file: SessionFile): AgentStatus {
@@ -98,6 +104,21 @@ export class ClaudeProvider implements AgentProvider {
     return sessions;
   }
 
+  /** Searches the live sessions' transcripts; each is read into memory on its first search, then only what was appended. */
+  search(query: string, limit: number): SearchResult[] {
+    const terms = termsOf(query);
+    if (terms.length === 0) return [];
+    const results: SearchResult[] = [];
+    for (const [id, tracked] of this.tracked) {
+      if (!tracked.file) continue;
+      tracked.history ??= new HistoryIndex(tracked.file, messageOf);
+      tracked.history.refresh();
+      const { count, hits } = tracked.history.search(terms, limit);
+      if (count > 0) results.push({ id, count, hits });
+    }
+    return results;
+  }
+
   /** Session files are rewritten in place on every state change, which the directory watch reports. */
   watch(listener: () => void): { dispose(): void } | undefined {
     try {
@@ -117,8 +138,10 @@ export class ClaudeProvider implements AgentProvider {
     }
     if (!tracked.tail && now >= tracked.nextLookupAt) {
       const transcript = findTranscript(this.configDir, file.cwd, file.sessionId);
-      if (transcript) tracked.tail = this.openTranscript(transcript, tracked.state);
-      else tracked.nextLookupAt = now + TRANSCRIPT_LOOKUP_MS;
+      if (transcript) {
+        tracked.file = transcript;
+        tracked.tail = this.openTranscript(transcript, tracked.state);
+      } else tracked.nextLookupAt = now + TRANSCRIPT_LOOKUP_MS;
     }
     const read = tracked.tail?.read();
     if (read) {

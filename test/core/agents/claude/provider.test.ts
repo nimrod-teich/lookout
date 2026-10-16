@@ -242,6 +242,41 @@ describe("ClaudeProvider", () => {
     expect(provider.poll(0)[0]?.title).toBe("Resumed");
   });
 
+  it("searches the conversations of the live sessions, newest matches first, and forgets a session that ended", () => {
+    const { configDir, proc, provider } = setup();
+    const first = sessionId(1);
+    const second = sessionId(2);
+    writeSession(configDir, proc, { pid: 11, sessionId: first, cwd: "/work/app" });
+    writeSession(configDir, proc, { pid: 12, sessionId: second, cwd: "/work/app" });
+    appendEntries(transcriptPath(configDir, "/work/app", first), [
+      { type: "user", timestamp: "2026-10-16T10:00:00Z", message: { content: "Please fix the billing webhook" } },
+      { type: "assistant", timestamp: "2026-10-16T10:00:05Z", message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "grep billing" } }] } },
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "billing.ts: webhook handler" }] } },
+      { type: "assistant", timestamp: "2026-10-16T10:01:00Z", message: { content: [{ type: "text", text: "The billing webhook now retries twice." }] } },
+    ]);
+    appendEntries(transcriptPath(configDir, "/work/app", second), [{ type: "user", message: { content: "Rename the changelog" } }]);
+    provider.poll(0);
+    const results = provider.search("Billing webhook", 5);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ id: first, count: 2 });
+    expect(results[0]?.hits.map((hit) => [hit.role, hit.snippet])).toEqual([
+      ["agent", "The billing webhook now retries twice."],
+      ["you", "Please fix the billing webhook"],
+    ]);
+    expect(results[0]?.hits[0]?.ranges).toEqual([
+      [4, 11],
+      [12, 19],
+    ]);
+    expect(provider.search("   ", 5)).toEqual([]);
+
+    appendEntries(transcriptPath(configDir, "/work/app", second), [{ type: "assistant", message: { content: [{ type: "text", text: "Billing is not my job here" }] } }]);
+    expect(provider.search("billing", 1).map((r) => r.id).sort()).toEqual([first, second]);
+
+    proc.procs.delete(11);
+    provider.poll(0);
+    expect(provider.search("billing", 1).map((r) => r.id)).toEqual([second]);
+  });
+
   it("drops a session when its process exits", () => {
     const { configDir, proc, provider } = setup();
     writeSession(configDir, proc, { pid: 11, sessionId: sessionId(1) });

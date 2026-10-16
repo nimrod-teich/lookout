@@ -6,7 +6,7 @@ import { view } from "./helpers";
 import { createWebviewView, stub } from "./stub-vscode";
 
 function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
-  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn() };
+  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => (query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [])) };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
   board.resolveWebviewView(webviewView as never);
@@ -83,6 +83,14 @@ describe("Board", () => {
     expect(webviewView.posted[0]).toMatchObject({ type: "sessions", usage });
     webviewView.receive({ type: "refreshUsage" });
     expect(actions.refreshUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a search with the results for that query, and ignores a query that is not a string", () => {
+    const { actions, webviewView } = setup([view()]);
+    webviewView.receive({ type: "search", query: "cache" });
+    webviewView.receive({ type: "search", query: 42 });
+    expect(actions.search).toHaveBeenCalledTimes(1);
+    expect(webviewView.posted.at(-1)).toEqual({ type: "search", query: "cache", results: [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] });
   });
 
   it("stops sending after the view is disposed", () => {

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { AgentProvider } from "../core/agents/agent";
 import { ClaudeProvider } from "../core/agents/claude/provider";
+import type { SearchResult } from "../core/history";
 import { Attention } from "../core/attention";
 import { sortViews } from "../core/model";
 import { Monitor } from "../core/monitor";
@@ -21,6 +22,8 @@ const POLL_MS = 1000;
 /** A burst of file changes becomes one poll. */
 const DEBOUNCE_MS = 50;
 const DONE_KEY = "lookout.done";
+/** Matches shown per session. */
+const SEARCH_HITS = 3;
 
 export interface ControllerHost {
   /** Pid of the extension host, which an agent panel's sessions descend from. */
@@ -162,6 +165,13 @@ export class Controller implements vscode.Disposable {
         this.refreshing = undefined;
       });
     return this.refreshing;
+  }
+
+  /** Searches the conversations of the live sessions. */
+  search(query: string): SearchResult[] {
+    const results: SearchResult[] = [];
+    for (const provider of this.providers) results.push(...(provider.search?.(query, SEARCH_HITS) ?? []));
+    return results;
   }
 
   /** The user looked at this session. */

@@ -55,6 +55,7 @@ export function activate(context: vscode.ExtensionContext): void {
     markSeen: (id) => controller.markSeen(id),
     markAllSeen: () => controller.markAllSeen(),
     refreshUsage: () => void controller.refreshUsage(),
+    search: (query) => controller.search(query),
   });
   const render = () => {
     statusBar.render({
