@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activate } from "../../src/extension";
-import { stub } from "./stub-vscode";
+import { createWebviewView, stub } from "./stub-vscode";
 
 // The whole extension against a real process: a child of this test process
 // plays a Claude Code panel session, so the real process table places it in
@@ -41,6 +41,19 @@ function writeSession(fields: Record<string, unknown>): void {
 
 function statusText(): string | undefined {
   return stub.ops.filter(([target, action]) => target === "statusBar:lookout.status" && action === "set:text").at(-1)?.[2] as string | undefined;
+}
+
+/**
+ * Waits until the session is placed in this window's panel: on platforms that
+ * list processes in the background, that takes until the list arrives.
+ */
+async function placed(): Promise<void> {
+  stub.commands.set(CLAUDE_OPEN, () => undefined);
+  stub.quickPick = (items) => items[0];
+  await vi.waitFor(async () => {
+    await stub.commands.get("lookout.jump")!();
+    expect(stub.ops.some(([target, command, args]) => target === "commands" && command === CLAUDE_OPEN && (args as unknown[])[0] === SESSION)).toBe(true);
+  }, WAIT);
 }
 
 function infoMessages(): string[] {
@@ -83,7 +96,8 @@ describe("the extension", () => {
     // The session asks for permission while its tab is not in front: one notification.
     writeSession({ status: "waiting", waitingFor: "permission prompt", statusUpdatedAt: Date.now() });
     await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(bell-dot) 1"), WAIT);
-    expect(infoMessages().filter((m) => m.includes("needs you"))).toEqual(['"Empty tab" needs you: permission prompt']);
+    // No tool call in the transcript to name: announced after two seconds' grace, with the agent's own word.
+    await vi.waitFor(() => expect(infoMessages().filter((m) => m.includes("needs you"))).toEqual(['"Empty tab" needs you: Permission prompt']), WAIT);
 
     // It works again, then finishes unwatched: marked finished, no notification by default.
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
@@ -113,6 +127,73 @@ describe("the extension", () => {
 
     for (const subscription of subscriptions.splice(0)) subscription.dispose();
     expect(fs.existsSync(registry)).toBe(false);
+  }, 90_000);
+
+  it("names what a prompt asks even when the transcript lags, and announces a question typed at the end of a turn", async () => {
+    const transcript = path.join(configDir, "projects", "-work-app", `${SESSION}.jsonl`);
+    const append = (...entries: unknown[]) => fs.appendFileSync(transcript, entries.map((e) => `${JSON.stringify(e)}\n`).join(""));
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    append({ type: "user", cwd: "/work/app", message: { content: "run the tests" } });
+    writeSession({ status: "busy", statusUpdatedAt: Date.now() });
+    activate(context());
+    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await placed();
+
+    // Claude Code records the wait first; the tool call reaches the transcript a moment later.
+    writeSession({ status: "waiting", waitingFor: "permission prompt", statusUpdatedAt: Date.now() });
+    setTimeout(() => append({ type: "assistant", cwd: "/work/app", message: { id: "m1", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "npm test" } }] } }), 300);
+    await vi.waitFor(() => expect(infoMessages().filter((m) => m.includes("needs you"))).toEqual(['"Empty tab" needs you: Permission · Bash: npm test']), WAIT);
+
+    // Allowed; the turn ends on a question.
+    append(
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } },
+      { type: "assistant", cwd: "/work/app", timestamp: "2026-10-16T10:00:00.000Z", message: { id: "m2", content: [{ type: "text", text: "Tests pass. Want me to open the PR?" }] } },
+    );
+    writeSession({ status: "busy", statusUpdatedAt: Date.now() });
+    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    writeSession({ status: "idle", statusUpdatedAt: Date.now() });
+    await vi.waitFor(() => expect(infoMessages()).toContain('"Empty tab" asked you a question: Tests pass. Want me to open the PR?'), WAIT);
+    expect(statusText()).toBe("$(lookout-lighthouse) $(bell-dot) 1");
+
+    // Dismissed from its card: idle, and remembered for a reload.
+    const board = stub.webviewProviders.get("lookout.board") as { resolveWebviewView(view: unknown): void };
+    const boardView = createWebviewView();
+    board.resolveWebviewView(boardView);
+    boardView.receive({ type: "dismiss", id: SESSION });
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) 1 idle"), WAIT);
+    expect(saved["lookout.dismissed"]).toEqual({ [SESSION]: String(Date.parse("2026-10-16T10:00:00.000Z")) });
+  }, 90_000);
+
+  it("announces a finished turn after its grace, a question under the finished setting, and follows a change of setting", async () => {
+    stub.config["lookout.notifications.waiting"] = false;
+    stub.config["lookout.notifications.done"] = true;
+    const transcript = path.join(configDir, "projects", "-work-app", `${SESSION}.jsonl`);
+    const append = (...entries: unknown[]) => fs.appendFileSync(transcript, entries.map((e) => `${JSON.stringify(e)}\n`).join(""));
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    append({ type: "user", cwd: "/work/app", message: { content: "update the changelog" } });
+    writeSession({ status: "busy", statusUpdatedAt: Date.now() });
+    activate(context());
+    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await placed();
+
+    append({ type: "assistant", cwd: "/work/app", message: { id: "m1", content: [{ type: "text", text: "Done. The changelog lists the fix." }] } });
+    writeSession({ status: "idle", statusUpdatedAt: Date.now() });
+    await vi.waitFor(() => expect(infoMessages()).toContain('"Empty tab" finished.'), WAIT);
+
+    // A turn that ends on a question is a finished turn too: announced although waiting notifications are off.
+    append({ type: "user", cwd: "/work/app", message: { content: "and the release notes" } });
+    writeSession({ status: "busy", statusUpdatedAt: Date.now() });
+    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    append({ type: "assistant", cwd: "/work/app", timestamp: "2026-10-16T11:00:00.000Z", message: { id: "m2", content: [{ type: "text", text: "Written. Want me to open the PR?" }] } });
+    writeSession({ status: "idle", statusUpdatedAt: Date.now() });
+    await vi.waitFor(() => expect(infoMessages()).toContain('"Empty tab" asked you a question: Written. Want me to open the PR?'), WAIT);
+    expect(infoMessages().filter((m) => m.endsWith("finished."))).toHaveLength(1);
+    expect(statusText()).toBe("$(lookout-lighthouse) $(bell-dot) 1");
+
+    // Typed questions off: the same turn is simply finished.
+    stub.config["lookout.state.typedQuestions"] = false;
+    stub.configChange.fire({ affectsConfiguration: () => true });
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1"), WAIT);
   }, 90_000);
 
   it("shows the usage Claude Code cached", async () => {

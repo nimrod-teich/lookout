@@ -1,0 +1,15 @@
+{
+  "pid": 4242,
+  "sessionId": "00000000-0000-4000-8000-0000000000f1",
+  "cwd": "/work/app",
+  "startedAt": 1792170024540,
+  "procStart": "424200",
+  "version": "2.1.301",
+  "kind": "interactive",
+  "entrypoint": "cli",
+  "pidDomain": "linux:feedfacefeedfacefeedfacefeedface:pid:[4026531836]",
+  "status": "waiting",
+  "waitingFor": "permission prompt",
+  "updatedAt": 1792170034693,
+  "statusUpdatedAt": 1792170034693
+}

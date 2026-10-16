@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contextPercent, groupSessions, HARBOUR, hostChip, layoutBoats, pulseBars, secondLine, waterline } from "../../src/webview/model";
+import { cardLine, contextPercent, groupSessions, HARBOUR, hostChip, layoutBoats, pulseBars, secondLine, waterline } from "../../src/webview/model";
 import { view } from "../vscode/helpers";
 
 describe("groupSessions", () => {
@@ -31,14 +31,20 @@ describe("card text", () => {
     expect(hostChip(view({ host: "elsewhere" }))).toBe("outside VS Code");
   });
 
-  it("picks the second line by state", () => {
-    expect(secondLine(view({ state: "waiting", needs: "permission prompt" }))).toBe("permission prompt");
-    expect(secondLine(view({ state: "waiting" }))).toBe("input needed");
-    expect(secondLine(view({ state: "working", activity: "Bash · npm test" }))).toBe("Bash · npm test");
-    expect(secondLine(view({ state: "working" }))).toBe("thinking");
-    expect(secondLine(view({ state: "done", lastReply: "All green." }))).toBe("All green.");
-    expect(secondLine(view({ state: "idle" }))).toBeUndefined();
-    expect(secondLine(view({ state: "unknown", lastReply: "x" }))).toBeUndefined();
+  it("picks the second line by state, with the kind of ask as its label", () => {
+    const now = 30 * 60_000;
+    expect(cardLine(view({ state: "waiting", reason: { kind: "permission", ask: "Bash: npm test", raw: "permission prompt" } }), now)).toEqual({ label: "Permission", text: "Bash: npm test", options: undefined });
+    expect(cardLine(view({ state: "waiting", reason: { kind: "permission", ask: "permission prompt", raw: "permission prompt" } }), now)).toEqual({ label: "Permission", text: undefined, options: undefined });
+    expect(cardLine(view({ state: "waiting", reason: { kind: "question", ask: "Which color?", options: ["Red", "Blue"] } }), now)).toEqual({ label: "Question", text: "Which color?", options: ["Red", "Blue"] });
+    expect(cardLine(view({ state: "waiting", reason: { kind: "typed", ask: "Want me to open the PR?" } }), now)).toMatchObject({ label: "Asked you a question", text: "Want me to open the PR?" });
+    expect(cardLine(view({ state: "waiting" }), now)).toEqual({ text: "input needed" });
+    expect(cardLine(view({ state: "working", activity: "Bash · npm test", lastWriteAt: now - 60_000 }), now)).toEqual({ label: undefined, text: "Bash · npm test" });
+    expect(cardLine(view({ state: "working", lastWriteAt: now - 12 * 60_000 }), now)).toEqual({ label: "quiet 12m", text: "thinking" });
+    expect(cardLine(view({ state: "done", lastReply: "All green." }), now)).toEqual({ text: "All green." });
+    expect(cardLine(view({ state: "idle" }), now)).toEqual({ text: undefined });
+    expect(cardLine(view({ state: "unknown", lastReply: "x", evidence: { source: "session file", note: "it records no state" } }), now)).toEqual({ text: "it records no state" });
+    expect(secondLine(view({ state: "waiting", reason: { kind: "plan", ask: "Cache the specs" } }), now)).toBe("Plan approval · Cache the specs");
+    expect(secondLine(view({ state: "idle" }), now)).toBeUndefined();
   });
 });
 

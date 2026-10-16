@@ -105,6 +105,35 @@ export function parseMarkdown(text: string): Block[] {
   return blocks;
 }
 
+function inlineText(nodes: readonly Inline[]): string {
+  return nodes.map((node) => (node.type === "strong" || node.type === "em" ? inlineText(node.children) : node.text)).join("");
+}
+
+/** A block's words without its markup; list items are joined with "; ". */
+export function blockText(block: Block): string {
+  switch (block.type) {
+    case "paragraph":
+    case "heading":
+    case "quote":
+      return inlineText(block.children);
+    case "code":
+      return block.text;
+    case "list":
+      return block.items.map((item) => (item.sub ? `${inlineText(item.children)}; ${blockText(item.sub)}` : inlineText(item.children))).join("; ");
+    case "rule":
+      return "";
+  }
+}
+
+/** A message's words without its Markdown, whitespace collapsed. */
+export function plainText(text: string): string {
+  return parseMarkdown(text)
+    .map(blockText)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function indentOf(line: string): number {
   return /^\s*/.exec(line)![0].length;
 }

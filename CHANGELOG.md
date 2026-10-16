@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0
+
+- **Why a session needs you.** A waiting session says what kind of wait it is and quotes the ask: a permission with the tool and its command or file (`Bash: npm test`), a question with its answers, a plan to approve, or another dialog with the agent's own word for it. The cards, the jump list, the status bar's hover and the notification all show it. A session of this window whose last reply asks you something is counted as needing you too, after the prompts, on a dashed card marked "asked you a question", until it works again or you dismiss it with the card's ✓ (`lookout.state.typedQuestions`, on by default); it is announced once, like a prompt, when you were not looking.
+- **Where a state comes from.** A card's hover says whether its state comes from the session file, the transcript or the process, and how old that is. A session file that records no state, or cannot be read, leaves the session "State unknown". A working session whose transcript has been silent for more than 10 minutes reads "Working, quiet 12m": its card stops moving, and the status bar counts it with a clock instead of the spinner.
+
 ## 0.1.0
 
 First release.

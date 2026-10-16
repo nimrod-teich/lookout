@@ -22,6 +22,10 @@ interface CachedFile {
   parsed: SessionFile;
   /** The process that wrote this version of the file is gone; only a rewrite revives it. */
   dead: boolean;
+  /** The file was rewritten, settled, and still does not parse: the record above is out of date. */
+  unreadable: boolean;
+  /** When the file that does not parse was written. */
+  unreadableAt?: number;
 }
 
 /**
@@ -54,7 +58,7 @@ export class SessionRegistry {
       if (!cached || cached.dead || cached.parsed.pid !== Number(match[1])) continue;
       if (!this.isLive(cached)) continue;
       // A resumed session leaves its id in older files; the newest live one wins.
-      const file = cached.parsed;
+      const file: SessionFile = { ...cached.parsed, writtenAt: cached.unreadable ? cached.unreadableAt : cached.mtimeMs, unreadable: cached.unreadable || undefined };
       const other = byId.get(file.sessionId);
       if (!other || freshness(file) > freshness(other)) byId.set(file.sessionId, file);
     }
@@ -82,12 +86,20 @@ export class SessionRegistry {
     if (text !== undefined && cached && text === cached.text) {
       cached.mtimeMs = st.mtimeMs;
       cached.size = st.size;
+      cached.unreadable = false;
       return cached;
     }
     const parsed = text === undefined ? null : parseSessionFile(text);
-    // A torn read keeps the last good record and is retried on the next scan.
-    if (!parsed || text === undefined) return cached ?? null;
-    const fresh = { mtimeMs: st.mtimeMs, size: st.size, text, parsed, dead: false };
+    // A torn read keeps the last good record and is retried on the next scan;
+    // a file that still does not parse once it settled says nothing current.
+    if (!parsed || text === undefined) {
+      if (cached && text !== undefined) {
+        cached.unreadable = settled;
+        cached.unreadableAt = Math.round(st.mtimeMs);
+      }
+      return cached ?? null;
+    }
+    const fresh = { mtimeMs: st.mtimeMs, size: st.size, text, parsed, dead: false, unreadable: false };
     this.files.set(name, fresh);
     return fresh;
   }

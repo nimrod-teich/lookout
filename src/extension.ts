@@ -74,6 +74,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     markSeen: (id) => controller.markSeen(id),
     markAllSeen: () => controller.markAllSeen(),
+    dismiss: (id) => controller.dismiss(id),
     refreshUsage: () => void controller.refreshUsage(),
     search: (query) => controller.search(query),
     openHit: (query, id, index) => {
@@ -104,7 +105,9 @@ export function activate(context: vscode.ExtensionContext): void {
     controller.onDidChange(render),
     controller.onDidChange(() => findings.refresh()),
     controller.onDidStartWaiting(async (view) => {
-      if (config.notifyWaiting && (await notifyWaiting(view))) await jump(view);
+      // A turn that ends on a question is a finished turn too.
+      const wanted = config.notifyWaiting || (view.reason?.kind === "typed" && config.notifyDone);
+      if (wanted && (await notifyWaiting(view))) await jump(view);
     }),
     controller.onDidFinish(async (view) => {
       if (config.notifyDone && (await notifyFinished(view))) await jump(view);
@@ -121,6 +124,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const moved = next.claudeConfigDir !== config.claudeConfigDir;
       config = next;
       if (moved) controller.start(config);
+      else controller.configure(config);
       render();
     }),
     vscode.commands.registerCommand(JUMP, async () => {

@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
-import { countStates, describeLocation, describeState, formatElapsed, type Counts } from "../core/format";
+import { countStates, describeLocation, describeState, formatElapsed, quietFor, type Counts } from "../core/format";
 import type { SessionView } from "../core/types";
 import type { UsageMeter } from "../core/usage";
 import type { Usage } from "./controller";
-import { BRAND_ICON, STATE_ICON } from "./icons";
+import { BRAND_ICON, iconFor, STATE_ICON } from "./icons";
 
 /** Braille spinner frames for the "working" count. */
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -24,9 +24,13 @@ export interface StatusBarInput {
   canRefreshUsage: boolean;
 }
 
-function sessionsText(counts: Counts, frame: number): string {
+/** Working sessions whose transcripts have gone quiet show a clock rather than the spinner. */
+const QUIET_ICON = "$(clock)";
+
+function sessionsText(counts: Counts, quiet: number, frame: number): string {
   const parts: string[] = [];
-  if (counts.working) parts.push(`${FRAMES[frame % FRAMES.length]} ${counts.working}`);
+  if (counts.working > quiet) parts.push(`${FRAMES[frame % FRAMES.length]} ${counts.working - quiet}`);
+  if (quiet) parts.push(`${QUIET_ICON} ${quiet}`);
   if (counts.waiting) parts.push(`${STATE_ICON.waiting} ${counts.waiting}`);
   if (counts.done) parts.push(`${STATE_ICON.done} ${counts.done}`);
   if (counts.unknown) parts.push(`${STATE_ICON.unknown} ${counts.unknown}`);
@@ -54,8 +58,8 @@ function usageText(usage: Usage | undefined): string {
   return meter ? `${usageBar(meter.percent)} ${meter.percent}%` : "";
 }
 
-function spokenText(counts: Counts, usage: Usage | undefined): string {
-  const sessions = `Lookout: ${counts.working} working, ${counts.waiting} waiting for you, ${counts.done} finished, ${counts.idle + counts.unknown} idle`;
+function spokenText(counts: Counts, quiet: number, usage: Usage | undefined): string {
+  const sessions = `Lookout: ${counts.working} working${quiet ? ` (${quiet} quiet)` : ""}, ${counts.waiting} waiting for you, ${counts.done} finished, ${counts.idle + counts.unknown} idle`;
   const meter = sessionMeter(usage);
   return meter ? `${sessions}. Usage ${meter.label} ${meter.percent}%` : sessions;
 }
@@ -68,7 +72,7 @@ function resetText(resetsAt: number | undefined, now: number): string {
 function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
   const md = new vscode.MarkdownString("", true);
   for (const view of input.views) {
-    md.appendMarkdown(`${STATE_ICON[view.state]} **`);
+    md.appendMarkdown(`${iconFor(view, now)} **`);
     md.appendText(view.title);
     md.appendMarkdown("**  \n");
     md.appendText(`${describeLocation(view)} · ${describeState(view, now)}`);
@@ -105,6 +109,8 @@ export class StatusBar implements vscode.Disposable {
   private shown = { visible: false, text: "", spoken: "", tooltip: "", background: "", color: "" };
   private input: StatusBarInput = { views: [], usage: undefined, enabled: true, showUsage: true, canRefreshUsage: false };
   private counts: Counts = countStates([]);
+  /** Working sessions that have gone quiet. */
+  private quiet = 0;
   private frame = 0;
   private spinner: ReturnType<typeof setInterval> | undefined;
   private ticker: ReturnType<typeof setInterval> | undefined;
@@ -118,8 +124,9 @@ export class StatusBar implements vscode.Disposable {
   render(input: StatusBarInput, now: number = Date.now()): void {
     this.input = input;
     this.counts = countStates(input.views);
+    this.quiet = input.views.filter((view) => quietFor(view, now) !== undefined).length;
     const visible = input.enabled && (input.views.length > 0 || (input.showUsage && input.usage !== undefined));
-    this.spin(visible && this.counts.working > 0);
+    this.spin(visible && this.counts.working > this.quiet);
     this.tick(visible);
     if (!visible) {
       if (this.shown.visible) this.item.hide();
@@ -127,7 +134,7 @@ export class StatusBar implements vscode.Disposable {
       return;
     }
     this.writeText();
-    const spoken = spokenText(this.counts, input.showUsage ? input.usage : undefined);
+    const spoken = spokenText(this.counts, this.quiet, input.showUsage ? input.usage : undefined);
     if (spoken !== this.shown.spoken) {
       this.item.accessibilityInformation = { label: spoken };
       this.shown.spoken = spoken;
@@ -139,7 +146,9 @@ export class StatusBar implements vscode.Disposable {
       this.item.color = color ? new vscode.ThemeColor(color) : undefined;
       this.shown.color = color;
     }
-    const background = this.counts.waiting > 0 ? "warning" : meter && !input.usage?.stale && meter.percent >= USAGE_ERROR_AT ? "error" : "";
+    // A question Lookout read in a reply counts, but only a prompt the agent reports lights the background.
+    const blocked = input.views.some((view) => view.state === "waiting" && view.reason?.kind !== "typed");
+    const background = blocked ? "warning" : meter && !input.usage?.stale && meter.percent >= USAGE_ERROR_AT ? "error" : "";
     if (background !== this.shown.background) {
       this.item.backgroundColor = background === "warning" ? this.warning : background === "error" ? this.error : undefined;
       this.shown.background = background;
@@ -150,7 +159,7 @@ export class StatusBar implements vscode.Disposable {
 
   private writeText(): void {
     const usage = this.input.showUsage ? usageText(this.input.usage) : "";
-    const sessions = this.input.views.length > 0 ? sessionsText(this.counts, this.frame) : "";
+    const sessions = this.input.views.length > 0 ? sessionsText(this.counts, this.quiet, this.frame) : "";
     const text = `${BRAND_ICON} ${[sessions, usage].filter(Boolean).join("   ")}`;
     if (text !== this.shown.text) this.item.text = this.shown.text = text;
   }
@@ -163,10 +172,15 @@ export class StatusBar implements vscode.Disposable {
     }
   }
 
-  /** Keeps the elapsed times in the hover current while the item is shown. */
+  /** Keeps the elapsed times in the hover, and the quiet count, current while the item is shown. */
   private tick(on: boolean): void {
     if (on && !this.ticker) {
-      this.ticker = setInterval(() => this.writeTooltip(Date.now()), TOOLTIP_MS);
+      this.ticker = setInterval(() => {
+        const now = Date.now();
+        const quiet = this.input.views.filter((view) => quietFor(view, now) !== undefined).length;
+        if (quiet !== this.quiet) this.render(this.input, now);
+        else this.writeTooltip(now);
+      }, TOOLTIP_MS);
     } else if (!on && this.ticker) {
       clearInterval(this.ticker);
       this.ticker = undefined;

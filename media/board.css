@@ -129,6 +129,24 @@ body {
   font-size: calc(var(--vscode-font-size) - 2px);
 }
 
+/* What a waiting session asks gets up to three lines. */
+.hover-card.tone-waiting .hover-line {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+}
+
+.hover-evidence {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9fb6c8;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  font-style: italic;
+}
+
 .hover-meta {
   margin-top: 2px;
   overflow: hidden;
@@ -831,8 +849,110 @@ body.vscode-reduce-motion .hover-card {
   display: none;
 }
 
+/* The kind of ask, or "quiet 12m": a small label before the text. */
+.line .kind {
+  flex: none;
+  align-self: center;
+  font-family: var(--vscode-font-family);
+  font-size: calc(var(--vscode-font-size) - 3px);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.line .kind:empty {
+  display: none;
+}
+
+.state-waiting .line .kind {
+  color: var(--waiting);
+}
+
+/* What a waiting session asks: the kind on its own line, then the quote on up to three. */
+.state-waiting .line {
+  display: grid;
+  grid-template-columns: 1ch minmax(0, 1fr);
+  column-gap: 6px;
+  row-gap: 1px;
+  line-height: 1.4;
+}
+
+.state-waiting .line .kind {
+  grid-column: 2;
+  align-self: auto;
+}
+
 .state-waiting .line .text {
+  grid-column: 2;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  white-space: normal;
   color: var(--ink);
+}
+
+/* Questions, plans and dialogs are prose: the interface font fits more of them. */
+.card.prose .line .text {
+  font-family: var(--vscode-font-family);
+}
+
+/* The answers a question offers. */
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-left: calc(1ch + 6px);
+  font-size: calc(var(--vscode-font-size) - 2px);
+}
+
+.options.hidden {
+  display: none;
+}
+
+.option {
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--waiting) 45%, transparent);
+  border-radius: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 16px;
+}
+
+/* A question Lookout read in a reply: the same group, a dashed outline, a lighter hand. */
+.card.typed {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--waiting) 6%, transparent);
+}
+
+.card.typed .rail {
+  background: repeating-linear-gradient(to bottom, var(--waiting) 0 4px, transparent 4px 7px);
+}
+
+.card.typed .line .mark {
+  font-weight: 400;
+}
+
+.card.typed .line .kind {
+  font-weight: 600;
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: calc(var(--vscode-font-size) - 2px);
+}
+
+/* Working, with nothing written to its transcript for a while: the rail stops moving. */
+.card.quiet .rail {
+  opacity: 0.45;
+}
+
+.card.quiet .rail::after {
+  display: none;
+}
+
+.card.quiet .line .kind {
+  color: var(--muted);
 }
 
 /* Pulse: tool calls per minute, last 15 minutes. */
@@ -974,7 +1094,8 @@ body.vscode-reduce-motion .hover-card {
   color: var(--done);
 }
 
-.state-done .action.seen {
+.state-done .action.seen,
+.card.typed .action.seen {
   display: inline;
 }
 

@@ -1,9 +1,9 @@
 /// <reference lib="dom" />
-import { formatElapsed, formatTokens, formatUsd, shortModel } from "../core/format";
+import { describeEvidence, describeReason, formatElapsed, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
 import { Harbour } from "./harbour";
-import { contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type GroupKey } from "./model";
+import { cardLine, contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type GroupKey } from "./model";
 import type { BoardUsage, FromBoard, ToBoard } from "./protocol";
 
 declare function acquireVsCodeApi(): {
@@ -114,8 +114,11 @@ function showHover(id: string | undefined): void {
   const elapsed = elapsedText(view);
   status.append(el("i", "dot"), el("span", "", `${stateTitle(view)}${elapsed ? ` · ${elapsed}` : ""}`));
   hover.append(status);
-  const second = secondLine(view);
-  if (second) hover.append(el("div", "hover-line", second));
+  const second = secondLine(view, now());
+  // An unknown state's line is the evidence's own note; it is said once, below.
+  if (second && view.state !== "unknown") hover.append(el("div", "hover-line", second));
+  const evidence = describeEvidence(view.evidence, now());
+  if (evidence) hover.append(el("div", "hover-evidence", evidence));
   const meta = chips(view);
   if (view.spend) {
     const tokens = view.spend.input + view.spend.output + view.spend.cacheRead + view.spend.cacheWrite;
@@ -323,12 +326,13 @@ function createCard(view: SessionView): HTMLElement {
   const row = el("span", "row");
   row.append(el("span", "title"), el("span", "elapsed"));
   const line = el("span", "line");
-  line.append(el("span", "mark"), el("span", "text"));
+  line.append(el("span", "mark"), el("span", "kind"), el("span", "text"));
+  const options = el("span", "options hidden");
   const pulse = el("span", "pulse");
   const chipsEl = el("span", "chips");
   const spend = el("span", "chip spend");
   const hitsEl = el("span", "hits hidden");
-  main.append(row, line, pulse, chipsEl, spend, hitsEl);
+  main.append(row, line, options, pulse, chipsEl, spend, hitsEl);
   card.append(main);
   const ring = el("span", "ring");
   ring.append(el("span", "ring-value"));
@@ -346,7 +350,8 @@ function createCard(view: SessionView): HTMLElement {
   seen.setAttribute("role", "button");
   seen.addEventListener("click", (event) => {
     event.stopPropagation();
-    vscode.postMessage({ type: "seen", id: view.id });
+    // On a question read from the reply, the check dismisses that question.
+    vscode.postMessage({ type: card.classList.contains("typed") ? "dismiss" : "seen", id: view.id });
   });
   actions.append(rename, seen);
   card.append(actions);
@@ -358,16 +363,41 @@ function createCard(view: SessionView): HTMLElement {
 
 const MARKS = { waiting: "?", working: "›", done: "✓", idle: "", unknown: "" } as const;
 
+/** The card's hover: state, what it asks, and where the state comes from. */
+function cardTitle(view: SessionView): string {
+  const lines = [`${stateTitle(view)} · ${view.title}`];
+  if (view.state === "waiting") lines.push(describeReason(view.reason));
+  const quiet = quietFor(view, now());
+  if (quiet !== undefined) lines.push(`Nothing written to its transcript for ${formatElapsed(quiet)}.`);
+  const evidence = describeEvidence(view.evidence, now());
+  if (evidence) lines.push(evidence);
+  return lines.join("\n");
+}
+
 function updateCard(card: HTMLElement, view: SessionView): void {
-  card.className = `card state-${view.state} host-${view.host}`;
-  card.title = `${stateTitle(view)} · ${view.title}`;
+  const typed = view.reason?.kind === "typed";
+  const quiet = quietFor(view, now()) !== undefined;
+  const prose = view.state === "waiting" && view.reason !== undefined && view.reason.kind !== "permission";
+  card.className = `card state-${view.state} host-${view.host}${typed ? " typed" : ""}${quiet ? " quiet" : ""}${prose ? " prose" : ""}`;
+  card.title = cardTitle(view);
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = elapsedText(view);
   const line = card.querySelector(".line")!;
-  const text = secondLine(view);
+  const second = cardLine(view, now());
   line.querySelector(".mark")!.textContent = MARKS[view.state];
-  line.querySelector(".text")!.textContent = text ?? "";
-  line.classList.toggle("empty", text === undefined);
+  line.querySelector(".kind")!.textContent = second.label ?? "";
+  line.querySelector(".text")!.textContent = second.text === undefined ? "" : typed ? `“${second.text}”` : second.text;
+  line.classList.toggle("empty", second.text === undefined && second.label === undefined);
+  const options = card.querySelector(".options") as HTMLElement;
+  const answers = second.options ?? [];
+  options.classList.toggle("hidden", answers.length === 0);
+  while (options.childNodes.length > answers.length) options.lastChild!.remove();
+  answers.forEach((answer, i) => {
+    const option = options.childNodes[i] ?? options.appendChild(el("span", "option"));
+    if (option.textContent !== answer) option.textContent = answer;
+  });
+  const seen = card.querySelector(".action.seen") as HTMLElement;
+  seen.title = typed ? "Dismiss the question: the session goes back to idle until it asks another" : "Mark as seen";
   const pulse = card.querySelector(".pulse") as HTMLElement;
   const bars = pulseBars(view.pulse);
   pulse.title = bars.length < 15 ? "Tool calls per minute since the session started" : "Tool calls per minute, last 15 minutes";
@@ -610,7 +640,14 @@ function tick(): void {
   if (document.visibilityState !== "visible") return;
   for (const view of sessions) {
     const card = cards.get(view.id);
-    if (card) card.querySelector(".elapsed")!.textContent = elapsedText(view);
+    if (!card) continue;
+    card.querySelector(".elapsed")!.textContent = elapsedText(view);
+    // The quiet mark and the evidence's age move with the clock.
+    if (view.state === "working") {
+      card.classList.toggle("quiet", quietFor(view, now()) !== undefined);
+      card.querySelector(".line .kind")!.textContent = cardLine(view, now()).label ?? "";
+    }
+    card.title = cardTitle(view);
   }
   for (const view of past) {
     const card = pastCards.get(view.id);

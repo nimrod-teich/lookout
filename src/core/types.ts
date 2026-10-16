@@ -10,6 +10,42 @@ export type State = "waiting" | "done" | "working" | "unknown" | "idle";
  */
 export type Host = "panel" | "terminal" | "window" | "elsewhere";
 
+/**
+ * Why a session needs the user: a permission prompt, a question, a plan to
+ * approve, any other dialog, or a question typed at the end of a turn. The
+ * last is Lookout's own reading of the reply, so it is less certain.
+ */
+export type ReasonKind = "permission" | "question" | "plan" | "dialog" | "typed";
+
+export interface Reason {
+  kind: ReasonKind;
+  /** What the session asks, quoted: Markdown stripped, at most 160 characters. */
+  ask: string;
+  /** The answers a question offers. */
+  options?: string[];
+  /** The agent's own word for the wait, e.g. "permission prompt" or "sandbox request". */
+  raw?: string;
+  /** Only the agent's word is known yet; its transcript may say more a moment later. */
+  tentative?: boolean;
+}
+
+/** Where a session's state comes from, and how old that is. */
+export interface Evidence {
+  source: "session file" | "transcript" | "process";
+  /** Epoch ms the source was written, when known. */
+  at?: number;
+  /** What the source says, when the state needs explaining, e.g. "records no state". */
+  note?: string;
+}
+
+/** A question the agent's last message asks the user. */
+export interface TypedQuestion {
+  /** The question, quoted: Markdown stripped, at most 160 characters. */
+  text: string;
+  /** Epoch ms of the message, when known. */
+  at?: number;
+}
+
 /** What the UI shows for one session. */
 export interface SessionView {
   id: string;
@@ -20,8 +56,14 @@ export interface SessionView {
   state: State;
   /** Epoch ms of the last state change. */
   since?: number;
-  /** Why the session waits for the user, when it does. */
-  needs?: string;
+  /** Why the session needs the user, when it does. */
+  reason?: Reason;
+  /** Where the state comes from. */
+  evidence?: Evidence;
+  /** The question its last message asks, while it is idle. */
+  question?: TypedQuestion;
+  /** Epoch ms the session last wrote to its transcript. */
+  lastWriteAt?: number;
   project: string;
   worktree?: string;
   cwd: string;

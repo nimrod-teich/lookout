@@ -37,7 +37,13 @@
   window.addEventListener("load", async () => {
     const fixture = await (await fetch(`fixtures/${params.get("fixture") ?? "busy"}.json`)).json();
     const now = Date.now();
-    for (const s of fixture.sessions) if (typeof s.since === "number" && s.since < 1e9) s.since = now - s.since;
+    // Times below 1e9 are "this many ms ago".
+    const ago = (t) => (typeof t === "number" && t < 1e9 ? now - t : t);
+    for (const s of fixture.sessions) {
+      s.since = ago(s.since);
+      s.lastWriteAt = ago(s.lastWriteAt);
+      if (s.evidence) s.evidence.at = ago(s.evidence.at);
+    }
     const usage = fixture.usage;
     if (usage) {
       usage.fetchedAt = now - usage.fetchedAt;

@@ -12,7 +12,14 @@ describe("toItem", () => {
       description: "app · fix-x",
       detail: "Working for 7m",
     });
-    expect(toItem(view({ state: "waiting", needs: "permission prompt", host: "terminal" }), now).detail).toBe("Needs you for 7m: permission prompt · terminal");
+    expect(toItem(view({ state: "waiting", reason: { kind: "question", ask: "Which color?", options: ["Red", "Blue"], raw: "input needed" }, host: "terminal" }), now).detail).toBe("Needs you for 7m: Question · Which color? (Red / Blue) · terminal");
+    expect(toItem(view({ state: "waiting", reason: { kind: "typed", ask: "Want me to open the PR?" } }), now)).toMatchObject({ label: "$(comment-discussion) Wire the cache", detail: "Needs you for 7m: Asked you a question · Want me to open the PR?" });
+    expect(toItem(view({ state: "working", since: -6 * 60_000, lastWriteAt: -6 * 60_000 }), now)).toMatchObject({ label: "$(clock) Wire the cache", detail: "Working, quiet 13m" });
+    // Commands are quoted as written: `$(…)` in them is text, not an icon.
+    expect(toItem(view({ state: "waiting", title: "Build $(arch)", reason: { kind: "permission", ask: "Bash: make -j$(nproc)", raw: "permission prompt" } }), now)).toMatchObject({
+      label: "$(bell-dot) Build \\$(arch)",
+      detail: "Needs you for 7m: Permission · Bash: make -j\\$(nproc)",
+    });
     expect(toItem(view({ host: "window", windowLabel: "other" }), now).detail).toBe("Idle for 7m · window: other");
     expect(toItem(view({ host: "window" }), now).detail).toBe("Idle for 7m · another window");
     expect(toItem(view({ host: "elsewhere" }), now).detail).toBe("Idle for 7m · outside VS Code");
@@ -57,10 +64,10 @@ describe("pickSession", () => {
     expect((picker.items[0] as { detail: string }).detail).toBe("Working for 2m");
     expect((picker.activeItems[0] as { view: SessionView }).view.id).toBe("b");
 
-    sessions = [view({ id: "b", state: "waiting", needs: "input needed" })];
+    sessions = [view({ id: "b", state: "waiting", reason: { kind: "dialog", ask: "input needed", raw: "input needed" } })];
     changes.fire();
     expect(picker.items).toHaveLength(1);
-    expect((picker.items[0] as { detail: string }).detail).toBe("Needs you for 2m: input needed");
+    expect((picker.items[0] as { detail: string }).detail).toBe("Needs you for 2m: Input needed");
     expect((picker.activeItems[0] as { view: SessionView }).view.id).toBe("b");
 
     picker.hide();

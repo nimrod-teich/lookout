@@ -8,7 +8,8 @@ import { createWebviewView, stub } from "./stub-vscode";
 const PAST: PastView[] = [{ id: "00000000-0000-4000-8000-000000000009", agent: "claude-code", title: "Old one", project: "app", cwd: "/work/app", modifiedAt: 1 }];
 
 function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
-  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => ({ results: query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [], pending: 0 })), openHit: vi.fn(), past: () => PAST, resume: vi.fn() };
+  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(),
+    dismiss: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => ({ results: query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [], pending: 0 })), openHit: vi.fn(), past: () => PAST, resume: vi.fn() };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
   board.resolveWebviewView(webviewView as never);
@@ -68,6 +69,8 @@ describe("Board", () => {
     webviewView.receive({ type: "seen", id: 42 });
     webviewView.receive({ type: "rename", id: shown.id });
     webviewView.receive({ type: "rename", id: "nope" });
+    webviewView.receive({ type: "dismiss", id: shown.id });
+    webviewView.receive({ type: "dismiss", id: "nope" });
     webviewView.receive({ type: "seenAll" });
     webviewView.receive("garbage");
     webviewView.receive(null);
@@ -77,6 +80,8 @@ describe("Board", () => {
     expect(actions.rename).toHaveBeenCalledTimes(1);
     expect(actions.rename).toHaveBeenCalledWith(shown);
     expect(actions.markAllSeen).toHaveBeenCalledTimes(1);
+    expect(actions.dismiss).toHaveBeenCalledTimes(1);
+    expect(actions.dismiss).toHaveBeenCalledWith(shown.id);
   });
 
   it("sends the usage along with the sessions and relays a refresh request", () => {

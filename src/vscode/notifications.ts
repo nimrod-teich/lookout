@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { describeReason } from "../core/format";
 import type { SessionView } from "../core/types";
 
 const JUMP = "Jump";
@@ -9,7 +10,8 @@ async function offerJump(message: string): Promise<boolean> {
 }
 
 export function notifyWaiting(view: SessionView): Promise<boolean> {
-  return offerJump(`"${view.title}" needs you: ${view.needs ?? "input"}`);
+  if (view.reason?.kind === "typed") return offerJump(`"${view.title}" asked you a question: ${view.reason.ask}`);
+  return offerJump(`"${view.title}" needs you: ${describeReason(view.reason)}`);
 }
 
 export function notifyFinished(view: SessionView): Promise<boolean> {

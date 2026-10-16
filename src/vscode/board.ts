@@ -19,6 +19,8 @@ export interface BoardActions {
   rename(view: SessionView): Promise<void>;
   markSeen(id: string): void;
   markAllSeen(): void;
+  /** Dismisses the question a session's last message asks. */
+  dismiss(id: string): void;
   /** Searches the live and the past sessions' conversations. */
   search(query: string): SearchOutcome;
   /** Shows a session's conversation in the findings tab, at one message or at the newest match. */
@@ -73,12 +75,14 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         return;
       case "jump":
       case "rename":
-      case "seen": {
+      case "seen":
+      case "dismiss": {
         // The webview can only act on sessions it was shown.
         const view = this.actions.sessions().find((s) => s.id === message.id);
         if (!view) return;
         if (message.type === "jump") void this.actions.jump(view);
         else if (message.type === "rename") void this.actions.rename(view);
+        else if (message.type === "dismiss") this.actions.dismiss(view.id);
         else this.actions.markSeen(view.id);
         return;
       }

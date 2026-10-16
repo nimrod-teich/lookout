@@ -8,6 +8,8 @@ export interface Config {
   usageRefresh: RefreshMode;
   notifyWaiting: boolean;
   notifyDone: boolean;
+  /** An idle session whose last message asks the user something counts as needing them. */
+  typedQuestions: boolean;
   /** The Claude Code config directory to read sessions and transcripts from. */
   claudeConfigDir: string;
 }
@@ -37,6 +39,7 @@ export function readConfig(): Config {
     usageRefresh: refreshMode(lookout.get<string>("usage.refresh")),
     notifyWaiting: lookout.get<boolean>("notifications.waiting", true),
     notifyDone: lookout.get<boolean>("notifications.done", false),
+    typedQuestions: lookout.get<boolean>("state.typedQuestions", true),
     claudeConfigDir: resolveConfigDir({
       setting: lookout.get<string>("claudeConfigDir"),
       claudeExtensionEnv: claudeExtensionConfigDir(),

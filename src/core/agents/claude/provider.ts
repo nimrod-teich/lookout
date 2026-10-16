@@ -1,14 +1,17 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { HistoryIndex, termsOf, type HistoryMessage, type SearchResult } from "../../history";
 import { findLastLine, JsonlTail, readLineAt } from "../../jsonlTail";
 import { messageOf } from "./history";
 import { PastTranscripts } from "./past";
 import type { ProcessTable } from "../../proc";
+import type { Evidence } from "../../types";
 import type { AgentProvider, AgentSession, AgentStatus, PastSession, SearchOutcome } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
-import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseOf, spendOf, titleOf, type TranscriptState } from "./transcript";
+import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseOf, spendOf, titleOf, type OpenTool, type TranscriptState } from "./transcript";
+import { planFileTitle, questionOf, reasonOf } from "./waiting";
 
 export const CLAUDE_CODE = "claude-code";
 
@@ -21,6 +24,10 @@ const CHECKPOINT_SEARCH_BYTES = 64 * 1024 * 1024;
 /** Reading from a checkpoint farther back than this would be slow; the spend is then partial. */
 const CHECKPOINT_READ_BYTES = 24 * 1024 * 1024;
 const BACKFILL_BYTES = 1024 * 1024;
+/** Once the main transcript has been silent this long, the subagents' transcripts are looked at too. */
+const SUBAGENT_CHECK_AFTER_MS = 60_000;
+/** A subagent's open tool call sits near the end of its transcript. */
+const SUBAGENT_TAIL_BYTES = 256 * 1024;
 
 interface Tracked {
   tail?: JsonlTail;
@@ -30,12 +37,19 @@ interface Tracked {
   file?: string;
   /** Its messages, built on the first search. */
   history?: HistoryIndex;
+  /** Epoch ms the transcript was last modified. */
+  writtenAt?: number;
 }
 
 /** A process in its first minute has not written its state yet; it is idle, not unknown. */
 const STARTING_MS = 60_000;
 
+function starting(file: SessionFile, now: number): boolean {
+  return file.startedAt !== undefined && now - file.startedAt < STARTING_MS;
+}
+
 function statusOf(file: SessionFile, now: number): AgentStatus {
+  if (file.unreadable) return "unknown";
   switch (file.status) {
     case "busy":
       return "working";
@@ -45,8 +59,17 @@ function statusOf(file: SessionFile, now: number): AgentStatus {
     case "shell":
       return "idle";
     default:
-      return file.startedAt !== undefined && now - file.startedAt < STARTING_MS ? "idle" : "unknown";
+      return starting(file, now) ? "idle" : "unknown";
   }
+}
+
+/** Where a session's status comes from, and how old that is. */
+function evidenceOf(file: SessionFile, now: number): Evidence {
+  const written = file.updatedAt ?? file.writtenAt;
+  if (file.unreadable) return { source: "session file", at: file.writtenAt, note: "it cannot be read" };
+  if (file.status) return { source: "session file", at: written };
+  if (starting(file, now)) return { source: "process", at: file.startedAt, note: "no state recorded yet" };
+  return { source: "session file", at: written, note: "it records no state" };
 }
 
 /** Applies the last title entries of each kind, wherever they are in the file; lines read later override them in order. */
@@ -74,6 +97,10 @@ export class ClaudeProvider implements AgentProvider {
   /** Transcript file by id, for the past sessions last listed. */
   private pastFiles = new Map<string, string>();
   private readonly pastIndexes = new Map<string, HistoryIndex>();
+  /** Plan titles by file, read again when the file changes. */
+  private readonly plans = new Map<string, { mtimeMs: number; title: string | undefined }>();
+  /** The open tool call of the subagent transcript last read, by file version. */
+  private subagentCall: { file: string; mtimeMs: number; tool: OpenTool | undefined } | undefined;
 
   constructor(
     private readonly configDir: string,
@@ -95,7 +122,10 @@ export class ClaudeProvider implements AgentProvider {
         id: file.sessionId,
         pid: file.pid,
         status,
-        needs: status === "waiting" ? (file.needs ?? file.waitingFor) : undefined,
+        reason: status === "waiting" ? reasonOf(file, transcript, { planTitle: (slug) => this.planTitle(slug), subagentTool: () => this.subagentTool(file.sessionId) }) : undefined,
+        evidence: evidenceOf(file, now),
+        question: status === "idle" ? questionOf(transcript) : undefined,
+        lastWriteAt: this.lastWrite(file.sessionId, now),
         since: file.statusUpdatedAt ?? file.startedAt,
         title: titleOf(transcript),
         cwd: transcript.cwd ?? file.cwd,
@@ -199,8 +229,69 @@ export class ClaudeProvider implements AgentProvider {
     if (read) {
       if (read.reset) tracked.state = emptyTranscript();
       for (const line of read.lines) applyLine(tracked.state, line);
+      tracked.writtenAt = Math.round(read.mtimeMs);
     }
     return tracked.state;
+  }
+
+  /**
+   * When the session last wrote to its transcript, or to one of its
+   * subagents' transcripts: a subagent at work leaves the main one silent.
+   */
+  private lastWrite(id: string, now: number): number | undefined {
+    const main = this.tracked.get(id)?.writtenAt;
+    if (main === undefined || now - main < SUBAGENT_CHECK_AFTER_MS) return main;
+    return Math.max(main, this.subagentFiles(id)[0]?.mtimeMs ?? main);
+  }
+
+  /** The subagents' transcripts of a session, newest first. */
+  private subagentFiles(id: string): { file: string; mtimeMs: number }[] {
+    const tracked = this.tracked.get(id);
+    if (!tracked?.file) return [];
+    const dir = path.join(path.dirname(tracked.file), id, "subagents");
+    const files: { file: string; mtimeMs: number }[] = [];
+    try {
+      for (const name of fs.readdirSync(dir)) {
+        if (!name.endsWith(".jsonl")) continue;
+        const file = path.join(dir, name);
+        files.push({ file, mtimeMs: Math.round(fs.statSync(file).mtimeMs) });
+      }
+    } catch {
+      // No subagents, or one just went away.
+    }
+    return files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  }
+
+  /**
+   * The tool call a subagent of this session has open: the subagent that
+   * asked is the one that wrote last, before it stopped to wait.
+   */
+  private subagentTool(id: string): OpenTool | undefined {
+    const newest = this.subagentFiles(id)[0];
+    if (!newest) return undefined;
+    if (this.subagentCall?.file === newest.file && this.subagentCall.mtimeMs === newest.mtimeMs) return this.subagentCall.tool;
+    const state = emptyTranscript();
+    for (const line of new JsonlTail(newest.file, { backfillBytes: SUBAGENT_TAIL_BYTES }).read()?.lines ?? []) applyLine(state, line, true);
+    const tool = [...state.openTools.values()][0];
+    this.subagentCall = { ...newest, tool };
+    return tool;
+  }
+
+  /** The title of the session's plan, from Claude Code's plan file. */
+  private planTitle(slug: string): string | undefined {
+    if (!/^[\w.-]+$/.test(slug)) return undefined;
+    const file = path.join(this.configDir, "plans", `${slug}.md`);
+    let mtimeMs: number;
+    try {
+      mtimeMs = fs.statSync(file).mtimeMs;
+    } catch {
+      return undefined;
+    }
+    const cached = this.plans.get(file);
+    if (cached?.mtimeMs === mtimeMs) return cached.title;
+    const title = planFileTitle(file);
+    this.plans.set(file, { mtimeMs, title });
+    return title;
   }
 
   /**
@@ -220,7 +311,14 @@ export class ClaudeProvider implements AgentProvider {
     // and again on resume just before a checkpoint.
     seedTitles(file, state);
     const checkpoint = findLastLine(file, '"type":"cost-state"', CHECKPOINT_SEARCH_BYTES);
-    if (checkpoint !== undefined && size - checkpoint <= CHECKPOINT_READ_BYTES) return new JsonlTail(file, { startAt: checkpoint });
+    if (checkpoint !== undefined && size - checkpoint <= CHECKPOINT_READ_BYTES) {
+      // Claude Code writes a checkpoint right after a turn's last reply; read
+      // from that reply so the board still knows what the session last said
+      // and asked. Usage before the checkpoint is dropped when it is read.
+      const reply = findLastLine(file, '"type":"assistant"', CHECKPOINT_SEARCH_BYTES);
+      const start = reply !== undefined && size - reply <= CHECKPOINT_READ_BYTES ? Math.min(reply, checkpoint) : checkpoint;
+      return new JsonlTail(file, { startAt: start });
+    }
     state.joinedLate = true;
     return new JsonlTail(file, { backfillBytes: BACKFILL_BYTES });
   }

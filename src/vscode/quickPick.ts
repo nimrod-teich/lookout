@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { describeLocation, describeState } from "../core/format";
 import type { SessionView } from "../core/types";
-import { STATE_ICON } from "./icons";
+import { escapeIcons, iconFor } from "./icons";
 
 /** How often the elapsed times in the open list are refreshed. */
 const REFRESH_MS = 1000;
@@ -26,7 +26,8 @@ function hostLabel(view: SessionView): string | undefined {
 export function toItem(view: SessionView, now: number): SessionItem {
   const where = hostLabel(view);
   const detail = where ? `${describeState(view, now)} · ${where}` : describeState(view, now);
-  return { label: `${STATE_ICON[view.state]} ${view.title}`, description: describeLocation(view), detail, view };
+  // The asks quote commands verbatim; only Lookout's own icon is meant as one.
+  return { label: `${iconFor(view, now)} ${escapeIcons(view.title)}`, description: escapeIcons(describeLocation(view)), detail: escapeIcons(detail), view };
 }
 
 /**

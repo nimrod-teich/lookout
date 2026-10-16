@@ -35,7 +35,6 @@
       "title": "Migrate billing webhooks",
       "state": "waiting",
       "since": 185000,
-      "needs": "permission prompt",
       "project": "api",
       "cwd": "/work/api",
       "host": "panel",
@@ -69,6 +68,15 @@
         "costUsd": 93.4,
         "estimated": false,
         "partial": false
+      },
+      "reason": {
+        "kind": "permission",
+        "ask": "Bash: npm run migrate -- --env staging",
+        "raw": "permission prompt"
+      },
+      "evidence": {
+        "source": "session file",
+        "at": 185000
       }
     },
     {
@@ -112,6 +120,10 @@
         "costUsd": 1.12,
         "estimated": true,
         "partial": false
+      },
+      "evidence": {
+        "source": "session file",
+        "at": 720000
       }
     },
     {
@@ -154,7 +166,12 @@
         "costUsd": 19.8,
         "estimated": true,
         "partial": false
-      }
+      },
+      "evidence": {
+        "source": "session file",
+        "at": 3000
+      },
+      "lastWriteAt": 4000
     },
     {
       "id": "4",
@@ -197,7 +214,12 @@
         "costUsd": 24.07,
         "estimated": true,
         "partial": false
-      }
+      },
+      "evidence": {
+        "source": "session file",
+        "at": 3000
+      },
+      "lastWriteAt": 4000
     },
     {
       "id": "5",
@@ -226,7 +248,12 @@
         "costUsd": 0.42,
         "estimated": true,
         "partial": false
-      }
+      },
+      "evidence": {
+        "source": "session file",
+        "at": 3000
+      },
+      "lastWriteAt": 4000
     },
     {
       "id": "6",
@@ -267,6 +294,10 @@
         "cacheWrite": 300000,
         "estimated": true,
         "partial": true
+      },
+      "evidence": {
+        "source": "session file",
+        "at": 2760000
       }
     },
     {
@@ -280,7 +311,12 @@
       "cwd": "/work/api",
       "host": "elsewhere",
       "agents": 0,
-      "pulse": []
+      "pulse": [],
+      "evidence": {
+        "source": "process",
+        "at": 5000,
+        "note": "no state recorded yet"
+      }
     }
   ],
   "past": [

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countStates, describeLocation, describeState, formatElapsed, formatTokens, formatUsd, shortModel } from "../../src/core/format";
+import { countStates, describeEvidence, describeLocation, describeReason, describeState, formatElapsed, formatTokens, formatUsd, quietFor, shortModel } from "../../src/core/format";
 import { view } from "../vscode/helpers";
 
 describe("format", () => {
@@ -13,7 +13,8 @@ describe("format", () => {
 
   it("describes state with how long it has lasted, and location", () => {
     const now = 12 * 60_000;
-    expect(describeState(view({ state: "waiting", needs: "permission prompt" }), now)).toBe("Needs you for 12m: permission prompt");
+    expect(describeState(view({ state: "waiting", reason: { kind: "permission", ask: "Bash: npm test", raw: "permission prompt" } }), now)).toBe("Needs you for 12m: Permission · Bash: npm test");
+    expect(describeState(view({ state: "waiting", reason: { kind: "permission", ask: "permission prompt", raw: "permission prompt" } }), now)).toBe("Needs you for 12m: Permission prompt");
     expect(describeState(view({ state: "waiting", since: undefined }), now)).toBe("Needs you: input");
     expect(describeState(view({ state: "working" }), now)).toBe("Working for 12m");
     expect(describeState(view({ state: "done", since: now - 3 * 60_000 }), now)).toBe("Finished 3m ago");
@@ -21,6 +22,35 @@ describe("format", () => {
     expect(describeState(view({ state: "unknown" }), now)).toBe("State unknown");
     expect(describeLocation(view({ worktree: "fix-x" }))).toBe("app · fix-x");
     expect(describeLocation(view())).toBe("app");
+  });
+
+  it("says what a waiting session asks, by kind", () => {
+    expect(describeReason({ kind: "question", ask: "Which color?", options: ["Red", "Blue"], raw: "input needed" })).toBe("Question · Which color? (Red / Blue)");
+    expect(describeReason({ kind: "plan", ask: "Cache the specs", raw: "permission prompt" })).toBe("Plan approval · Cache the specs");
+    expect(describeReason({ kind: "dialog", ask: "choose: retry on fallback model or edit prompt", raw: "dialog open" })).toBe("Dialog · choose: retry on fallback model or edit prompt");
+    expect(describeReason({ kind: "dialog", ask: "sandbox request", raw: "sandbox request" })).toBe("Sandbox request");
+    expect(describeReason({ kind: "typed", ask: "Want me to open the PR?" })).toBe("Asked you a question · Want me to open the PR?");
+    expect(describeReason(undefined)).toBe("input");
+  });
+
+  it("marks a working session quiet when its transcript has been silent for more than 10 minutes", () => {
+    const now = 60 * 60_000;
+    expect(quietFor(view({ state: "working", lastWriteAt: now - 10 * 60_000 }), now)).toBeUndefined();
+    expect(quietFor(view({ state: "working", lastWriteAt: now - 12 * 60_000 }), now)).toBe(12 * 60_000);
+    expect(quietFor(view({ state: "working" }), now)).toBeUndefined();
+    expect(quietFor(view({ state: "idle", lastWriteAt: 0 }), now)).toBeUndefined();
+    expect(describeState(view({ state: "working", since: 0, lastWriteAt: now - 12 * 60_000 }), now)).toBe("Working, quiet 12m");
+    expect(describeState(view({ state: "working", since: 0, lastWriteAt: now - 60_000 }), now)).toBe("Working for 1h 00m");
+    // A turn that has just started is not quiet, however old the transcript's last write.
+    expect(quietFor(view({ state: "working", since: now - 5_000, lastWriteAt: now - 2 * 3_600_000 }), now)).toBeUndefined();
+  });
+
+  it("says where a state comes from and how old it is", () => {
+    const now = 100_000;
+    expect(describeEvidence({ source: "session file", at: now - 4_000 }, now)).toBe("From the session file, written 4s ago");
+    expect(describeEvidence({ source: "process", at: now - 12_000, note: "no state recorded yet" }, now)).toBe("From the process, started 12s ago: no state recorded yet");
+    expect(describeEvidence({ source: "session file", note: "it cannot be read" }, now)).toBe("From the session file: it cannot be read");
+    expect(describeEvidence(undefined, now)).toBeUndefined();
   });
 
   it("counts sessions per state", () => {

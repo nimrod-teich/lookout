@@ -56,11 +56,44 @@ describe("StatusBar", () => {
   });
 
   it("shows working, waiting and finished counts with a warning background", () => {
-    bar.render(input([view({ state: "waiting", needs: "permission prompt" }), view({ id: "b", state: "working" }), view({ id: "c", state: "working" }), view({ id: "d", state: "done" })]));
+    bar.render(input([view({ state: "waiting", reason: { kind: "permission", ask: "permission prompt", raw: "permission prompt" } }), view({ id: "b", state: "working" }), view({ id: "c", state: "working" }), view({ id: "d", state: "done" })]));
     expect(lastSet("text")).toBe(`${L} ⠋ 2  $(bell-dot) 1  $(check) 1`);
     expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.warningBackground" });
     expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 2 working, 1 waiting for you, 1 finished, 0 idle" });
     expect(itemOps().at(-1)).toEqual([ITEM, "show"]);
+  });
+
+  it("counts a question read from a reply with the waits, but lights the background only for a prompt the agent reports", () => {
+    const typed = view({ state: "waiting", reason: { kind: "typed", ask: "Want me to open the PR?" } });
+    bar.render(input([typed]), 0);
+    expect(lastSet("text")).toBe(`${L} $(bell-dot) 1`);
+    expect(itemOps().some(([, action]) => action === "set:backgroundColor")).toBe(false);
+    const tip = (lastSet("tooltip") as { value: string }).value;
+    expect(tip).toContain("$(comment-discussion) **Wire the cache**");
+    expect(tip).toContain("Needs you for 0s: Asked you a question · Want me to open the PR?");
+    bar.render(input([typed, view({ id: "b", state: "waiting", reason: { kind: "question", ask: "Which color?", options: ["Red", "Blue"] } })]), 0);
+    expect(lastSet("text")).toBe(`${L} $(bell-dot) 2`);
+    expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.warningBackground" });
+  });
+
+  it("shows a working session that has gone quiet with a clock, and stops the spinner when every one has", () => {
+    const now = 15 * 60_000;
+    bar.render(input([view({ state: "working", since: 0, lastWriteAt: 0 }), view({ id: "b", state: "working", since: 0, lastWriteAt: now })]), now);
+    expect(lastSet("text")).toBe(`${L} ⠋ 1  $(clock) 1`);
+    expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 2 working (1 quiet), 0 waiting for you, 0 finished, 0 idle" });
+    expect((lastSet("tooltip") as { value: string }).value).toContain("$(clock) **Wire the cache**  \napp · Working, quiet 15m");
+    bar.render(input([view({ state: "working", since: 0, lastWriteAt: 0 })]), now);
+    expect(lastSet("text")).toBe(`${L} $(clock) 1`);
+    stub.ops.length = 0;
+    vi.advanceTimersByTime(500);
+    expect(itemOps()).toEqual([]);
+  });
+
+  it("notices a session go quiet on the minute tick, without new input", () => {
+    vi.setSystemTime(0);
+    bar.render(input([view({ state: "working", since: 0, lastWriteAt: 0 })]), 0);
+    vi.advanceTimersByTime(11 * 60_000);
+    expect(lastSet("text")).toBe(`${L} $(clock) 1`);
   });
 
   it("shows the idle count when nothing is active", () => {
@@ -184,11 +217,11 @@ describe("StatusBar", () => {
 
   it("escapes markdown in titles and shows where each session runs and for how long", () => {
     const now = 12 * 60_000;
-    bar.render(input([view({ state: "waiting", title: "fix *the* #build", needs: "permission prompt", worktree: "hotfix" }), view({ id: "b", state: "done" })]), now);
+    bar.render(input([view({ state: "waiting", title: "fix *the* #build", reason: { kind: "permission", ask: "Bash: npm test", raw: "permission prompt" }, worktree: "hotfix" }), view({ id: "b", state: "done" })]), now);
     const tip = lastSet("tooltip") as { value: string; supportThemeIcons: boolean };
     expect(tip.supportThemeIcons).toBe(true);
     expect(tip.value).toContain("$(bell-dot) **fix \\*the\\* \\#build**");
-    expect(tip.value).toContain("app · hotfix · Needs you for 12m: permission prompt");
+    expect(tip.value).toContain("app · hotfix · Needs you for 12m: Permission · Bash: npm test");
     expect(tip.value).toContain("$(check) **Wire the cache**  \n");
     expect(tip.value).toContain("app · Finished 12m ago");
   });

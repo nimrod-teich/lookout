@@ -188,10 +188,15 @@ describe("isWatched", () => {
 
 describe("notifications", () => {
   it("offer a jump and report whether the user took it", async () => {
-    expect(await notifyWaiting(view({ needs: "permission prompt" }))).toBe(false);
+    expect(await notifyWaiting(view({ reason: { kind: "permission", ask: "Bash: npm test", raw: "permission prompt" } }))).toBe(false);
+    expect(await notifyWaiting(view({ reason: { kind: "typed", ask: "Want me to open the PR?" } }))).toBe(false);
     stub.notificationAnswer = "Jump";
     expect(await notifyFinished(view())).toBe(true);
-    expect(messages("info")).toEqual(['"Wire the cache" needs you: permission prompt', '"Wire the cache" finished.']);
+    expect(messages("info")).toEqual([
+      '"Wire the cache" needs you: Permission · Bash: npm test',
+      '"Wire the cache" asked you a question: Want me to open the PR?',
+      '"Wire the cache" finished.',
+    ]);
   });
 });
 
