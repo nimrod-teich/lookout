@@ -43,7 +43,7 @@ Running several AI coding agents at once means clicking through tabs to find out
   </tr>
   <tr>
     <td><b>Conversation&nbsp;tab</b></td>
-    <td>A click on a match, or on "+N more", opens that session's whole conversation in an editor tab, scrolled to the match. The tab has a search of its own: it marks the words, dims the messages without them, and steps through the matches with Enter and the arrows. It follows the conversation as it grows, and an Open session button brings the agent's own tab or terminal to the front.</td>
+    <td>A click on a match, or on "+N more", opens that session's whole conversation in an editor tab, scrolled to the match, in the harbour's night colours with the messages' Markdown rendered: headings, lists, quotes, links, inline code and code blocks. The tab has a search of its own: it marks the words, dims the messages without them, and steps through the matches with Enter and the arrows. It follows the conversation as it grows, and an Open session button brings the agent's own tab or terminal to the front.</td>
   </tr>
   <tr>
     <td><b>Usage</b></td>

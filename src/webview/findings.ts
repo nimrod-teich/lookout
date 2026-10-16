@@ -1,4 +1,5 @@
 /// <reference lib="dom" />
+import { parseMarkdown, type Block, type Inline } from "../core/markdown";
 import { matchesAll, matchRanges, termsOf } from "../core/terms";
 import type { FindingsMessage, FromFindings, ToFindings } from "./findingsProtocol";
 
@@ -35,9 +36,11 @@ const blocks = new Map<number, HTMLElement>();
 
 const top = el("header", "top");
 const heading = el("h1", "heading");
+const mark = el("span", "mark");
+mark.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M6.2 6.5h3.6L11.4 15H4.6z"/><path d="M5 6h6v1.2H5z"/><path d="M6.4 3.4h3.2V6H6.4z"/><path d="M6.6 3.4a1.4 1.4 0 0 1 2.8 0z"/><path d="M7.6 1.2h.8v1.3h-.8z"/><path d="M9.8 4.1L15.6 2.2v4.4z"/></svg>';
 const titleEl = el("span", "title");
 const countEl = el("span", "count");
-heading.append(titleEl, countEl);
+heading.append(mark, titleEl, countEl);
 const field = el("label", "field");
 field.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 10l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 const input = el("input", "");
@@ -89,6 +92,86 @@ function marked(text: string): DocumentFragment {
   return fragment;
 }
 
+function renderInlines(parent: Node, items: Inline[]): void {
+  for (const item of items) {
+    switch (item.type) {
+      case "text":
+        parent.appendChild(marked(item.text));
+        break;
+      case "code": {
+        const code = el("code", "");
+        code.append(marked(item.text));
+        parent.appendChild(code);
+        break;
+      }
+      case "strong":
+      case "em": {
+        const node = el(item.type, "");
+        renderInlines(node, item.children);
+        parent.appendChild(node);
+        break;
+      }
+      case "link": {
+        const a = el("a", "");
+        a.href = item.href;
+        a.title = item.href;
+        a.append(marked(item.text));
+        parent.appendChild(a);
+        break;
+      }
+    }
+  }
+}
+
+/** A message's Markdown as elements, every text run marked. */
+function renderBlocks(parent: Node, items: Block[]): void {
+  for (const block of items) {
+    switch (block.type) {
+      case "paragraph": {
+        const p = el("p", "");
+        renderInlines(p, block.children);
+        parent.appendChild(p);
+        break;
+      }
+      case "heading": {
+        const h = el(`h${Math.min(6, Math.max(1, block.level))}` as "h1", "");
+        renderInlines(h, block.children);
+        parent.appendChild(h);
+        break;
+      }
+      case "code": {
+        const pre = el("pre", "");
+        if (block.lang) pre.append(el("span", "lang", block.lang));
+        const code = el("code", "");
+        code.append(marked(block.text));
+        pre.append(code);
+        parent.appendChild(pre);
+        break;
+      }
+      case "quote": {
+        const q = el("blockquote", "");
+        renderInlines(q, block.children);
+        parent.appendChild(q);
+        break;
+      }
+      case "list": {
+        const list = el(block.ordered ? "ol" : "ul", "");
+        for (const item of block.items) {
+          const li = el("li", "");
+          renderInlines(li, item.children);
+          if (item.sub) renderBlocks(li, [item.sub]);
+          list.appendChild(li);
+        }
+        parent.appendChild(list);
+        break;
+      }
+      case "rule":
+        parent.appendChild(el("hr", ""));
+        break;
+    }
+  }
+}
+
 function timeText(at: number | undefined): string {
   if (at === undefined) return "";
   return new Date(at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -101,7 +184,7 @@ function messageBlock(message: FindingsMessage): HTMLElement {
   const head = el("header", "head");
   head.append(el("span", "who", message.role === "you" ? "you" : "agent"), el("span", "when", timeText(message.at)));
   const body = el("div", "body");
-  body.append(marked(message.text));
+  renderBlocks(body, parseMarkdown(message.text));
   block.append(head, body);
   return block;
 }

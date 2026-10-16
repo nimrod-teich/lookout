@@ -21,7 +21,7 @@
   const at = (minutesAgo) => Date.now() - minutesAgo * 60_000;
   const messages = [
     { index: 0, role: "you", at: at(50), text: "Move the billing webhook receiver off the legacy path. Keep the signature check exactly as it is." },
-    { index: 1, role: "agent", at: at(49), text: "Reading the current receiver first.\n\nThe handler verifies the HMAC signature before parsing, then mirrors the subscription. I will keep that order." },
+    { index: 1, role: "agent", at: at(49), text: "Reading the current receiver first.\n\nThe handler verifies the **HMAC signature** before parsing, then mirrors the subscription. I will keep that order. Two things to check:\n\n1. `tax_id_collection` stays country-gated\n2. The raw body reaches `stripe.webhooks.constructEvent` untouched\n   - the parser is scoped to `/billing/webhook`\n   - every other route keeps the JSON parser\n\n```ts\nconst event = stripe.webhooks.constructEvent(request.rawBody, signature, secret);\n```\n\n> A late `checkout.session.completed` is a no-op through `stripe_events`." },
     { index: 2, role: "you", at: at(31), text: "Also make sure a lost checkout.session.completed can't strand a paid user on Free." },
     { index: 3, role: "agent", at: at(30), text: "The billing webhook now has a fallback: on return from Checkout the web calls checkout-sync, which mirrors the subscription when the webhook never arrived. Idempotent through stripe_events, so a late webhook is a no-op." },
     { index: 4, role: "you", at: at(4), text: "Run the smoke against the dev stack and show me the audit rows for the billing webhook." },
