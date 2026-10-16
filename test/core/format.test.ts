@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countStates, describeEvidence, describeLocation, describeReason, describeState, formatElapsed, formatTokens, formatUsd, quietFor, shortModel } from "../../src/core/format";
+import { countStates, describeEvidence, describeLocation, describeReason, describeState, formatElapsed, formatTokens, formatUsd, noticeBody, quietFor, shortModel } from "../../src/core/format";
 import { view } from "../vscode/helpers";
 
 describe("format", () => {
@@ -51,6 +51,12 @@ describe("format", () => {
     expect(describeEvidence({ source: "process", at: now - 12_000, note: "no state recorded yet" }, now)).toBe("From the process, started 12s ago: no state recorded yet");
     expect(describeEvidence({ source: "session file", note: "it cannot be read" }, now)).toBe("From the session file: it cannot be read");
     expect(describeEvidence(undefined, now)).toBeUndefined();
+  });
+
+  it("says in a desktop notification why a session needs the user", () => {
+    expect(noticeBody(view({ state: "waiting", reason: { kind: "permission", ask: "Bash: npm test", raw: "permission prompt" } }), false)).toBe("Needs you: Permission · Bash: npm test");
+    expect(noticeBody(view({ state: "waiting", reason: { kind: "typed", ask: "Want me to open the PR?" } }), false)).toBe("Asked you a question: Want me to open the PR?");
+    expect(noticeBody(view({ state: "done" }), true)).toBe("Finished its turn");
   });
 
   it("counts sessions per state", () => {

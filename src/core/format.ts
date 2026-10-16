@@ -69,6 +69,13 @@ export function describeState(view: SessionView, now: number): string {
   }
 }
 
+/** What a desktop notification says about a session that needs the user, or finished. */
+export function noticeBody(view: SessionView, finished: boolean): string {
+  if (finished) return "Finished its turn";
+  if (view.reason?.kind === "typed") return `Asked you a question: ${view.reason.ask}`;
+  return `Needs you: ${describeReason(view.reason)}`;
+}
+
 /** "app" or, in a worktree, "app · fix-x". */
 export function describeLocation(view: SessionView): string {
   return view.worktree ? `${view.project} · ${view.worktree}` : view.project;
