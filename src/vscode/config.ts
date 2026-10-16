@@ -1,10 +1,16 @@
 import * as vscode from "vscode";
 import { resolveConfigDir } from "../core/agents/claude/paths";
-import type { RefreshMode } from "../core/usage";
+import { envFlag, NONESSENTIAL_TRAFFIC, type RefreshMode } from "../core/usage";
 
 export interface Config {
   statusBarEnabled: boolean;
   statusBarUsage: boolean;
+  /** Show when the 5-hour window resets, after the bar. */
+  statusBarUsageReset: boolean;
+  /** Announce usage thresholds. */
+  usageAlerts: boolean;
+  /** Claude Code is told not to make nonessential network calls, which fetching usage is, in the environment or the Claude Code extension's settings. */
+  usageRefreshDisabled: boolean;
   usageRefresh: RefreshMode;
   notifyWaiting: boolean;
   notifyDone: boolean;
@@ -24,12 +30,17 @@ interface EnvVar {
   value?: unknown;
 }
 
-/** `CLAUDE_CONFIG_DIR` as the Claude Code extension passes it to the sessions it hosts. */
-function claudeExtensionConfigDir(): string | undefined {
+/** A variable as the Claude Code extension passes it to the sessions it hosts. */
+function claudeExtensionEnv(name: string): string | undefined {
   const vars = vscode.workspace.getConfiguration("claudeCode").get<EnvVar[]>("environmentVariables");
   if (!Array.isArray(vars)) return undefined;
-  const entry = vars.find((v) => v?.name === "CLAUDE_CONFIG_DIR");
+  const entry = vars.find((v) => v?.name === name);
   return typeof entry?.value === "string" ? entry.value : undefined;
+}
+
+/** Set for Claude Code in this process's environment or in the Claude Code extension's settings; its own settings file is asked before each refresh. */
+function nonessentialTrafficDisabled(): boolean {
+  return envFlag(process.env[NONESSENTIAL_TRAFFIC]) || envFlag(claudeExtensionEnv(NONESSENTIAL_TRAFFIC));
 }
 
 function refreshMode(value: string | undefined): RefreshMode {
@@ -38,9 +49,16 @@ function refreshMode(value: string | undefined): RefreshMode {
 
 export function readConfig(): Config {
   const lookout = vscode.workspace.getConfiguration("lookout");
+  const claudeConfigDir = resolveConfigDir({
+    setting: lookout.get<string>("claudeConfigDir"),
+    claudeExtensionEnv: claudeExtensionEnv("CLAUDE_CONFIG_DIR"),
+  });
   return {
     statusBarEnabled: lookout.get<boolean>("statusBar.enabled", true),
     statusBarUsage: lookout.get<boolean>("statusBar.showUsage", true),
+    statusBarUsageReset: lookout.get<boolean>("statusBar.usageReset", true),
+    usageAlerts: lookout.get<boolean>("usage.alerts", true),
+    usageRefreshDisabled: nonessentialTrafficDisabled(),
     usageRefresh: refreshMode(lookout.get<string>("usage.refresh")),
     notifyWaiting: lookout.get<boolean>("notifications.waiting", true),
     notifyDone: lookout.get<boolean>("notifications.done", false),
@@ -48,9 +66,6 @@ export function readConfig(): Config {
     notifySound: lookout.get<boolean>("notifications.sound", false),
     notifyCooldownMs: Math.max(0, lookout.get<number>("notifications.cooldownSeconds", 30)) * 1000,
     typedQuestions: lookout.get<boolean>("state.typedQuestions", true),
-    claudeConfigDir: resolveConfigDir({
-      setting: lookout.get<string>("claudeConfigDir"),
-      claudeExtensionEnv: claudeExtensionConfigDir(),
-    }),
+    claudeConfigDir,
   };
 }

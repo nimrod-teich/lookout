@@ -80,6 +80,11 @@
           "default": true,
           "description": "Show the 5-hour and weekly usage in the status bar item."
         },
+        "lookout.statusBar.usageReset": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show how long until the 5-hour window resets after the usage bar, for example `32% · 1h12m`. Needs `#lookout.statusBar.showUsage#`."
+        },
         "lookout.usage.refresh": {
           "type": "string",
           "enum": [
@@ -91,10 +96,15 @@
           "scope": "machine",
           "enumDescriptions": [
             "Fetch fresh usage numbers only when you run Lookout: Refresh Usage or click the usage item.",
-            "Fetch when the numbers are older than 10 minutes, at most every 5 minutes.",
+            "Fetch when the numbers are older than 10 minutes or a window has reset; at most every 3 minutes on the machine, less often while fetches fail.",
             "Never run the Claude Code binary; show only what Claude Code cached."
           ],
-          "markdownDescription": "How Lookout keeps the usage numbers fresh. A refresh starts the Claude Code binary from the Claude Code extension and asks it for the account's usage; it fetches with its own credentials and calls no model. Lookout never reads your credentials."
+          "markdownDescription": "How Lookout keeps the usage numbers fresh. A refresh starts the Claude Code binary from the Claude Code extension and asks it for the account's usage; it fetches with its own credentials and calls no model. Lookout never reads your credentials. Never more than once every 3 minutes on the machine, across VS Code windows; after a fetch that brings no new numbers the wait doubles each time, up to 30 minutes (`Lookout: Refresh Usage` waits only for the 3 minutes). While `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set for Claude Code, Lookout does not refresh and shows only what Claude Code cached."
+        },
+        "lookout.usage.alerts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Say when the 5-hour window reaches 70% and 90%, and the weekly limit 90%: once per window, in the VS Code window in front (any window when none is) and, while VS Code is not in front, on the desktop."
         },
         "lookout.notifications.waiting": {
           "type": "boolean",

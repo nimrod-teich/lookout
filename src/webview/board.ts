@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { describeEvidence, describeReason, formatElapsed, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
+import { describeEvidence, describePace, describeReason, formatElapsed, formatTokens, formatUntil, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
 import { Harbour } from "./harbour";
@@ -265,7 +265,7 @@ const meterRows = new Map<string, HTMLElement>();
 
 function resetText(resetsAt: number | undefined): string {
   if (resetsAt === undefined || resetsAt <= now()) return "";
-  return `resets in ${formatElapsed(resetsAt - now())}`;
+  return `resets in ${formatUntil(resetsAt - now())}`;
 }
 
 /** Fill colour by consumption: calm below half, amber from half, red from 80%. */
@@ -286,15 +286,22 @@ function renderMeters(): void {
       row = el("div", "meter");
       const bar = el("span", "bar");
       bar.append(el("span", "fill"));
-      row.append(el("span", "label"), bar, el("span", "percent"), el("span", "reset"));
+      const reset = el("span", "reset");
+      reset.append(el("span", "when"), el("span", "pace"));
+      row.append(el("span", "label"), bar, el("span", "percent"), reset);
       meterRows.set(meter.key, row);
     }
-    row.className = `meter ${meterLevel(meter.percent)}`;
+    const pace = usage.pace[meter.key];
+    const paceText = describePace(pace, meter, now());
+    // The pace runs out before the window resets: red, whatever the share used so far.
+    row.className = `meter ${pace?.runsOut ? "high runs-out" : meterLevel(meter.percent)}`;
     row.querySelector(".label")!.textContent = meter.label;
     (row.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
     row.querySelector(".percent")!.textContent = `${meter.percent}%`;
-    row.querySelector(".reset")!.textContent = resetText(meter.resetsAt);
-    row.title = `${meter.label}: ${meter.percent}% used${meter.resetsAt !== undefined && meter.resetsAt > now() ? `, ${resetText(meter.resetsAt)}` : ""}`;
+    row.querySelector(".when")!.textContent = resetText(meter.resetsAt);
+    row.querySelector(".pace")!.textContent = paceText ? `${resetText(meter.resetsAt) ? " · " : ""}${paceText}` : "";
+    row.querySelector(".reset")!.classList.toggle("hidden", !resetText(meter.resetsAt) && !paceText);
+    row.title = [`${meter.label}: ${meter.percent}% used${meter.resetsAt !== undefined && meter.resetsAt > now() ? `, ${resetText(meter.resetsAt)}` : ""}.`, pace ? `Rising ${pace.perHour} points an hour over the readings of this window.` : "", paceText ? `${paceText[0]!.toUpperCase()}${paceText.slice(1)}.` : ""].filter(Boolean).join(" ");
     if (row.previousElementSibling !== (previous ?? null) || row.parentElement !== meters) meters.insertBefore(row, previous ? previous.nextSibling : meters.firstChild);
     previous = row;
   }
@@ -310,10 +317,14 @@ function renderMeters(): void {
     refresh.type = "button";
     refresh.title = "Fetch the usage again now";
     refresh.addEventListener("click", () => vscode.postMessage({ type: "refreshUsage" }));
-    foot.append(refresh);
+    foot.append(el("span", "age"), refresh);
     meters.append(foot);
   }
   meters.append(foot);
+  // How old the numbers are, and why they may not be current; or that there are none.
+  const age = usage.fetchedAt === undefined ? "No usage reported" : `as of ${formatElapsed(now() - usage.fetchedAt)} ago${usage.stale ? " · stale" : ""}`;
+  foot.querySelector(".age")!.textContent = usage.note ? `${age} · ${usage.note}` : age;
+  foot.classList.toggle("none", usage.fetchedAt === undefined);
   foot.querySelector(".link")!.classList.toggle("hidden", !usage.canRefresh);
 }
 

@@ -20,6 +20,7 @@ function usage(overrides: Partial<Usage> = {}): Usage {
   return {
     fetchedAt: 0,
     stale: false,
+    pace: {},
     meters: [
       { key: "session", label: "5h", percent: 18, resetsAt: 2 * 3_600_000, windowMs: 5 * 3_600_000 },
       { key: "weekly_all", label: "Week", percent: 31 },
@@ -30,7 +31,7 @@ function usage(overrides: Partial<Usage> = {}): Usage {
 }
 
 function input(views: SessionView[], overrides: Partial<StatusBarInput> = {}): StatusBarInput {
-  return { views, usage: undefined, enabled: true, showUsage: true, canRefreshUsage: true, ...overrides };
+  return { views, usage: undefined, enabled: true, showUsage: true, showReset: false, canRefreshUsage: true, ...overrides };
 }
 
 describe("StatusBar", () => {
@@ -155,6 +156,48 @@ describe("StatusBar", () => {
     bar.render(input([], { usage: usage({ meters: [{ key: "weekly_all", label: "Week", percent: 4 }] }) }), 0);
     expect(lastSet("text")).toBe(`${L} ▱▱▱▱▱▱▱▱▱▱ 4%`);
     expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 0 working, 0 waiting for you, 0 finished, 0 idle. Usage Week 4%" });
+  });
+
+  it("counts down to the 5-hour reset after the bar, and keeps the countdown current", () => {
+    vi.setSystemTime(3 * 60_000);
+    bar.render(input([], { usage: usage(), showReset: true }), 3 * 60_000);
+    expect(lastSet("text")).toBe(`${L} ▰▰▱▱▱▱▱▱▱▱ 18% · 1h57m`);
+    vi.advanceTimersByTime(60_000);
+    expect(lastSet("text")).toBe(`${L} ▰▰▱▱▱▱▱▱▱▱ 18% · 1h56m`);
+  });
+
+  it("turns the countdown over with its minute, not with the minute ticker", () => {
+    // 1h56m30s left: the text turns to 1h56m thirty seconds from now, as the board's does.
+    vi.setSystemTime(3 * 60_000 + 30_000);
+    bar.render(input([], { usage: usage(), showReset: true }), 3 * 60_000 + 30_000);
+    expect(lastSet("text")).toBe(`${L} ▰▰▱▱▱▱▱▱▱▱ 18% · 1h57m`);
+    vi.advanceTimersByTime(29_000);
+    expect(lastSet("text")).toBe(`${L} ▰▰▱▱▱▱▱▱▱▱ 18% · 1h57m`);
+    vi.advanceTimersByTime(1_100);
+    expect(lastSet("text")).toBe(`${L} ▰▰▱▱▱▱▱▱▱▱ 18% · 1h56m`);
+    vi.advanceTimersByTime(60_000);
+    expect(lastSet("text")).toBe(`${L} ▰▰▱▱▱▱▱▱▱▱ 18% · 1h55m`);
+    // Without the setting only the minute ticker is left.
+    bar.render(input([], { usage: usage(), showReset: false }), Date.now());
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("turns the bar red when the pace runs out before the reset, grey when the numbers are stale", () => {
+    const fullAt = 90 * 60_000;
+    bar.render(input([], { usage: usage({ pace: { session: { perHour: 30, fullAt, runsOut: true } } }) }), 0);
+    expect(lastSet("color")).toMatchObject({ id: "charts.red" });
+    expect((lastSet("tooltip") as { value: string }).value).toContain("at this pace 100% at");
+    bar.render(input([], { usage: usage({ stale: true }) }), 0);
+    expect(lastSet("color")).toMatchObject({ id: "disabledForeground" });
+  });
+
+  it("says when there are no numbers, and why they are not kept fresh", () => {
+    bar.render(input([view()], { usage: undefined }), 0);
+    expect((lastSet("tooltip") as { value: string }).value).toContain("No usage reported; run Lookout: Refresh Usage");
+    bar.render(input([view()], { usage: undefined, usageNote: "refresh disabled by CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", canRefreshUsage: false }), 0);
+    const tip = (lastSet("tooltip") as { value: string }).value;
+    expect(tip).toContain("No usage reported");
+    expect(tip).toContain("Usage refresh disabled by CLAUDE\\_CODE\\_DISABLE\\_NONESSENTIAL\\_TRAFFIC");
   });
 
   it("animates the spinner by rewriting only the text, once per frame, while a session works", () => {

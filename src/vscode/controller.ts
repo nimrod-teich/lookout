@@ -1,3 +1,5 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import * as vscode from "vscode";
 import type { AgentProvider, SearchOutcome } from "../core/agents/agent";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
@@ -8,8 +10,12 @@ import { buildPastView, sortViews } from "../core/model";
 import { Monitor } from "../core/monitor";
 import { createProcessTable, type ProcessTable } from "../core/proc";
 import type { PastView, SessionView } from "../core/types";
-import { isStale, shouldAutoRefresh, UsageCache, usageCacheFile, type RefreshMode, type UsageSnapshot } from "../core/usage";
-import { refreshUsage } from "../core/usageRefresh";
+import { clockTime } from "../core/format";
+import { addSamples, paceOf, type Pace, type SampleStore } from "../core/pace";
+import { RefreshLedger } from "../core/refreshLedger";
+import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
+import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../core/usageAlerts";
+import { refreshEnv, refreshUsage } from "../core/usageRefresh";
 import { WindowRegistry } from "../core/windows";
 import type { Config } from "./config";
 import type { Log } from "./log";
@@ -24,6 +30,12 @@ const POLL_MS = 1000;
 const DEBOUNCE_MS = 50;
 const DONE_KEY = "lookout.done";
 const DISMISSED_KEY = "lookout.dismissed";
+/** Usage readings, for the pace, per source of numbers; kept across reloads. */
+const SAMPLES_KEY = "lookout.usageReadings";
+/** A window not in front leaves a usage alert this long to a window that is. */
+const ALERT_GRACE_MS = 10_000;
+/** An attempt to refresh usage that started longer ago than this has ended, in whichever window made it. */
+const REFRESH_IN_FLIGHT_MS = 30_000;
 /** Matches shown per session. */
 const SEARCH_HITS = 3;
 /** A search reads conversations not read yet for at most this long; the rest are reported pending. */
@@ -45,6 +57,12 @@ export interface ControllerHost {
   sharedDir: string;
   /** Per-workspace storage, to carry finished marks across a reload. */
   state: vscode.Memento;
+  /** Storage shared by every window, for the usage readings. */
+  globalState: vscode.Memento;
+  /** Directory where the windows on this host record their usage refreshes and which usage alerts went out. */
+  usageDir: string;
+  /** This window is the one in front. */
+  focused(): boolean;
   /** The Claude Code binary that can fetch the account's usage, when installed. */
   claudeBinary(): string | undefined;
   /** The folders open in this window: their past sessions are listed. */
@@ -55,8 +73,14 @@ export interface ControllerHost {
 
 /** The usage numbers as the UI gets them. */
 export interface Usage extends UsageSnapshot {
+  /** Old, and nothing will bring them up to date. */
   stale: boolean;
+  /** Pace per meter key, where the readings allow one. */
+  pace: Record<string, Pace>;
 }
+
+/** How a request for fresh usage numbers went. */
+export type RefreshOutcome = "fetched" | "failed" | "too soon" | "unavailable";
 
 /** Polls the sessions on this host and announces when what the UI shows changes. */
 export class Controller implements vscode.Disposable {
@@ -67,6 +91,9 @@ export class Controller implements vscode.Disposable {
   readonly onDidChange = this.changed.event;
   /** The usage numbers were fetched or read anew. */
   readonly onDidChangeUsage = this.usageChanged.event;
+  private readonly thresholdReached = new vscode.EventEmitter<UsageAlert>();
+  /** A usage meter reached a threshold for the first time in its window, and this window is the one to say so. */
+  readonly onDidReachUsageThreshold = this.thresholdReached.event;
   /** A session of this window finished a turn while the user was not looking. */
   readonly onDidFinish = this.finished.event;
   /** A session of this window started to wait for the user while they were not looking. */
@@ -89,9 +116,30 @@ export class Controller implements vscode.Disposable {
   private typedQuestions = true;
   private usageCache: UsageCache | undefined;
   private usageMode: RefreshMode = "manual";
-  private currentUsage: UsageSnapshot | undefined;
-  private refreshing: Promise<boolean> | undefined;
-  private lastRefreshAttempt = -Infinity;
+  private usageRead: UsageRead = { snapshot: undefined, why: "missing" };
+  private usageAlerts = true;
+  /** Refresh is switched off for Claude Code in VS Code's environment or the Claude Code extension's settings. */
+  private refreshDisabledByEnv = false;
+  /** Claude Code's own settings file, which can switch it off too. */
+  private settingsEnv: ClaudeSettingsEnv | undefined;
+  /** The environment the Claude Code binary gets: the config directory the numbers are read from. */
+  private refreshEnvironment: NodeJS.ProcessEnv = process.env;
+  private readonly ledger: RefreshLedger;
+  /** The key of the numbers this window's last refresh failed to replace. */
+  private failedKey: string | undefined;
+  /** The numbers the UI last got were stale. */
+  private shownStale = false;
+  private refreshing: Promise<RefreshOutcome> | undefined;
+  /** Usage readings per source of numbers. */
+  private readonly sampleStores: Record<string, SampleStore>;
+  /** The readings of the source shown. */
+  private samples: SampleStore = {};
+  /** The source of the numbers shown, named for the readings, the refreshes and the alerts. */
+  private scope = "";
+  private readonly alerts: AlertLedger;
+  /** Usage alerts this window waits to claim while it is not in front. */
+  private readonly pendingAlerts = new Map<string, ReturnType<typeof setTimeout>>();
+  private disposed = false;
   private readonly announcing = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(
@@ -108,6 +156,11 @@ export class Controller implements vscode.Disposable {
     const dismissed = host.state.get<Record<string, string>>(DISMISSED_KEY, {});
     this.attention.restoreDismissals(dismissed);
     this.savedDismissed = JSON.stringify(this.attention.dismissals());
+    this.sampleStores = { ...host.globalState.get<Record<string, SampleStore>>(SAMPLES_KEY, {}) };
+    this.alerts = new AlertLedger(path.join(host.usageDir, "alerts"));
+    this.ledger = new RefreshLedger(path.join(host.usageDir, "refresh"));
+    this.alerts.prune(Date.now());
+    this.ledger.prune(Date.now());
   }
 
   get sessions(): readonly SessionView[] {
@@ -124,13 +177,53 @@ export class Controller implements vscode.Disposable {
     return this.current.find((view) => view.id === id)?.title ?? this.pastViews.find((view) => view.id === id)?.title;
   }
 
+  /** The usage numbers, or nothing when there are none to show: none cached, unreadable, or another account's. */
   get usage(): Usage | undefined {
-    return this.currentUsage && { ...this.currentUsage, stale: isStale(this.currentUsage, Date.now()) };
+    const snapshot = this.usageRead.snapshot;
+    if (!snapshot) return undefined;
+    const now = Date.now();
+    const stale = isStale(snapshot, now);
+    // Numbers too old to go by are no base for a forecast.
+    const pace: Record<string, Pace> = {};
+    for (const meter of stale ? [] : snapshot.meters) {
+      const found = paceOf(this.samples[meter.key], meter, now);
+      if (found) pace[meter.key] = found;
+    }
+    return { ...snapshot, stale, pace };
+  }
+
+  /** Claude Code is told to make no network calls it can do without, which fetching usage is. Asked again each time: the settings file can change. */
+  private get refreshDisabled(): boolean {
+    return this.refreshDisabledByEnv || envFlag(this.settingsEnv?.get(NONESSENTIAL_TRAFFIC));
   }
 
   /** Lookout can ask the agent for fresh usage numbers. */
   get canRefreshUsage(): boolean {
-    return this.usageMode !== "off" && this.host.claudeBinary() !== undefined;
+    return this.usageMode !== "off" && !this.refreshDisabled && this.host.claudeBinary() !== undefined;
+  }
+
+  /** Names the numbers shown, for the refreshes on file. */
+  private get ledgerKey(): string {
+    return `${this.scope}-${this.usageRead.snapshot?.fetchedAt ?? "none"}`;
+  }
+
+  /** A refresh of the numbers shown was tried, by this window or another, and they are still there. */
+  private get refreshFailing(): boolean {
+    if (this.refreshing) return false;
+    const key = this.ledgerKey;
+    if (this.failedKey === key) return true;
+    const { count, lastAt } = this.ledger.attempts(key);
+    return count > 0 && lastAt !== undefined && Date.now() - lastAt > REFRESH_IN_FLIGHT_MS;
+  }
+
+  /** Why the usage numbers are not kept fresh, when that needs saying. */
+  get usageNote(): string | undefined {
+    if (this.refreshDisabled) return "refresh disabled by CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
+    if (this.usageMode === "off") return "refresh is off (lookout.usage.refresh)";
+    if (this.host.claudeBinary() === undefined) return "refresh needs the Claude Code extension";
+    if (!this.refreshFailing) return undefined;
+    if (this.usageMode !== "auto") return "the last refresh failed";
+    return `the last refresh failed; trying again at ${clockTime(Math.max(Date.now(), this.nextRefreshAt(false)))}`;
   }
 
   /** Starts, or restarts with other settings. */
@@ -138,8 +231,16 @@ export class Controller implements vscode.Disposable {
     this.typedQuestions = config.typedQuestions;
     this.providers = [new ClaudeProvider(config.claudeConfigDir, this.proc)];
     this.monitor = new Monitor(this.providers, this.proc);
-    this.usageCache = new UsageCache(usageCacheFile(config.claudeConfigDir));
+    const cacheFile = usageCacheFile(config.claudeConfigDir);
+    this.usageCache = new UsageCache(cacheFile);
+    this.usageRead = { snapshot: undefined, why: "missing" };
+    this.scope = scopeOf(cacheFile);
+    this.samples = this.sampleStores[this.scope] ??= {};
+    this.settingsEnv = new ClaudeSettingsEnv(path.join(config.claudeConfigDir, "settings.json"));
+    this.refreshEnvironment = refreshEnv(process.env, config.claudeConfigDir, path.join(os.homedir(), ".claude"));
     this.usageMode = config.usageRefresh;
+    this.usageAlerts = config.usageAlerts;
+    this.refreshDisabledByEnv = config.usageRefreshDisabled;
     this.archived = new ArchivedSessions(stateDbCandidates(this.host.globalStorageDir));
     if (!this.archived.available) this.log.info("The agent's archived-session list is out of reach; every past session is listed");
     this.log.info(`Watching ${this.providers.map((p) => p.label).join(", ")} (${config.claudeConfigDir})`);
@@ -150,6 +251,9 @@ export class Controller implements vscode.Disposable {
   /** Takes settings that need no restart, and shows their effect at once. */
   configure(config: Config): void {
     this.typedQuestions = config.typedQuestions;
+    this.usageMode = config.usageRefresh;
+    this.usageAlerts = config.usageAlerts;
+    this.refreshDisabledByEnv = config.usageRefreshDisabled;
     this.poll();
   }
 
@@ -218,37 +322,113 @@ export class Controller implements vscode.Disposable {
   }
 
   private pollUsage(): void {
-    const read = this.usageCache?.read();
-    if (read && read.fetchedAt !== this.currentUsage?.fetchedAt) {
-      this.currentUsage = read;
-      this.usageChanged.fire(this.usage);
-    }
-    if (this.canRefreshUsage && shouldAutoRefresh(this.usageMode, this.currentUsage, this.lastRefreshAttempt, Date.now())) void this.refreshUsage();
+    if (this.disposed || !this.usageCache) return;
+    this.consider(this.usageCache.readWithReason());
+    const now = Date.now();
+    if (this.canRefreshUsage && wantsRefresh(this.usageMode, this.usageRead.snapshot, now) && now >= this.nextRefreshAt(false)) void this.refreshUsage();
+  }
+
+  /** Takes a read of the cache: newer numbers, or word that there are none to show; never older numbers. */
+  private consider(read: UsageRead): void {
+    const before = this.usageRead;
+    const news = read.snapshot ? before.snapshot === undefined || read.snapshot.fetchedAt > before.snapshot.fetchedAt : before.snapshot !== undefined || read.why !== before.why;
+    if (news) this.acceptUsage(read);
+    else if ((this.usage?.stale ?? false) !== this.shownStale) this.fireUsage();
+  }
+
+  private acceptUsage(read: UsageRead): void {
+    this.usageRead = read;
+    if (read.snapshot && addSamples(this.samples, read.snapshot)) void this.host.globalState.update(SAMPLES_KEY, this.sampleStores);
+    this.announceThresholds();
+    this.fireUsage();
+  }
+
+  /** Tells the UI about the numbers; also when they only turned stale, which no new reading announces. */
+  private fireUsage(): void {
+    const usage = this.usage;
+    this.shownStale = usage?.stale ?? false;
+    this.usageChanged.fire(usage);
+  }
+
+  /** The thresholds the numbers shown reach in windows still running; none from numbers too old to go by. */
+  private currentAlerts(): UsageAlert[] {
+    const usage = this.usage;
+    if (!this.usageAlerts || !usage || usage.stale) return [];
+    const now = Date.now();
+    return reachedThresholds(
+      usage.meters.filter((meter) => meter.resetsAt === undefined || meter.resetsAt > now),
+      this.scope,
+    );
   }
 
   /**
-   * Has the agent fetch fresh usage numbers. Resolves true when they arrived.
-   * One fetch runs at a time; a call during a fetch waits for that one.
+   * Each threshold once per window, by one VS Code window on the host: the
+   * one in front claims it at once; the others leave it a moment, so the
+   * alert shows where the user is, and claim it themselves when no window in
+   * front did.
    */
-  refreshUsage(): Promise<boolean> {
+  private announceThresholds(): void {
+    if (this.disposed) return;
+    for (const alert of this.currentAlerts()) {
+      if (this.pendingAlerts.has(alert.id)) continue;
+      if (this.host.focused()) {
+        this.claimAlert(alert);
+        continue;
+      }
+      const timer = setTimeout(() => {
+        this.pendingAlerts.delete(alert.id);
+        const still = this.currentAlerts().find((current) => current.id === alert.id);
+        if (still && !this.disposed) this.claimAlert(still);
+      }, ALERT_GRACE_MS);
+      this.pendingAlerts.set(alert.id, timer);
+    }
+  }
+
+  private claimAlert(alert: UsageAlert): void {
+    if (this.alerts.claim(alert.id)) this.thresholdReached.fire(alert);
+  }
+
+  /**
+   * Has the agent fetch fresh usage numbers: at most once every 180 s on the
+   * host, and less often after failures unless the user asks (`manual`). The
+   * numbers then come from the cache the agent rewrote, with its account
+   * check, not from its answer; a refresh that leaves the cache as it was
+   * failed. One fetch runs at a time; a call during a fetch waits for it.
+   */
+  refreshUsage(manual = false): Promise<RefreshOutcome> {
     if (this.refreshing) return this.refreshing;
     const binary = this.host.claudeBinary();
-    if (!binary || this.usageMode === "off") return Promise.resolve(false);
-    this.lastRefreshAttempt = Date.now();
-    this.refreshing = refreshUsage({ binary })
-      .then((snapshot) => {
-        if (!snapshot) {
-          this.log.errorOnce("Usage refresh: the Claude Code binary gave no usage numbers");
-          return false;
+    const cache = this.usageCache;
+    if (!binary || !cache || !this.canRefreshUsage) return Promise.resolve("unavailable");
+    const now = Date.now();
+    const key = this.ledgerKey;
+    const before = this.usageRead.snapshot?.fetchedAt;
+    if (!this.ledger.claim(key, now, manual)) return Promise.resolve("too soon");
+    const refreshing: Promise<RefreshOutcome> = refreshUsage({ binary, env: this.refreshEnvironment })
+      .then((answer): RefreshOutcome => {
+        this.refreshing = undefined;
+        if (this.disposed || cache !== this.usageCache) return "failed";
+        this.consider(cache.readWithReason());
+        const after = this.usageRead.snapshot?.fetchedAt;
+        if (after !== undefined && (before === undefined || after > before)) {
+          this.failedKey = undefined;
+          return "fetched";
         }
-        this.currentUsage = snapshot;
-        this.usageChanged.fire(this.usage);
-        return true;
+        this.failedKey = this.ledgerKey;
+        this.log.errorOnce(answer ? "Usage refresh: Claude Code answered, but its cache did not change" : "Usage refresh: the Claude Code binary gave no usage numbers");
+        this.fireUsage();
+        return "failed";
       })
       .finally(() => {
-        this.refreshing = undefined;
+        if (this.refreshing === refreshing) this.refreshing = undefined;
       });
-    return this.refreshing;
+    this.refreshing = refreshing;
+    return refreshing;
+  }
+
+  /** When a refresh may start again, automatic or asked for. */
+  nextRefreshAt(manual: boolean): number {
+    return this.ledger.nextAt(this.ledgerKey, manual);
   }
 
   /** Searches the conversations of the live and the past sessions: the newest few matches per session, for the cards. */
@@ -340,6 +520,9 @@ export class Controller implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.disposed = true;
+    for (const timer of this.pendingAlerts.values()) clearTimeout(timer);
+    this.pendingAlerts.clear();
     if (this.timer) clearInterval(this.timer);
     if (this.debounce) clearTimeout(this.debounce);
     for (const timer of this.announcing) clearTimeout(timer);
@@ -351,6 +534,7 @@ export class Controller implements vscode.Disposable {
     this.windows.unregister(this.host.pid);
     this.changed.dispose();
     this.usageChanged.dispose();
+    this.thresholdReached.dispose();
     this.finished.dispose();
     this.waiting.dispose();
   }

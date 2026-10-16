@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countStates, describeEvidence, describeLocation, describeReason, describeState, formatElapsed, formatTokens, formatUsd, noticeBody, quietFor, shortModel } from "../../src/core/format";
+import { clockTime, countStates, describeAlert, describeEvidence, describeLocation, describePace, describeReason, describeState, formatCountdown, formatElapsed, formatTokens, formatUntil, formatUsd, noticeBody, quietFor, shortModel, windowName } from "../../src/core/format";
 import { view } from "../vscode/helpers";
 
 describe("format", () => {
@@ -57,6 +57,47 @@ describe("format", () => {
     expect(noticeBody(view({ state: "waiting", reason: { kind: "permission", ask: "Bash: npm test", raw: "permission prompt" } }), false)).toBe("Needs you: Permission · Bash: npm test");
     expect(noticeBody(view({ state: "waiting", reason: { kind: "typed", ask: "Want me to open the PR?" } }), false)).toBe("Asked you a question: Want me to open the PR?");
     expect(noticeBody(view({ state: "done" }), true)).toBe("Finished its turn");
+  });
+
+  it("counts down compactly for the status bar", () => {
+    expect([formatCountdown(0), formatCountdown(59_000), formatCountdown(45 * 60_000), formatCountdown(72 * 60_000), formatCountdown(26 * 3_600_000)]).toEqual(["0m", "1m", "45m", "1h12m", "1d"]);
+    // The board and the hover round up the same way, so they agree with the status bar.
+    expect([formatUntil(59_000), formatUntil(148 * 60_000 + 30_000), formatUntil(149 * 60_000), formatUntil(-5)]).toEqual(["1m", "2h 29m", "2h 29m", "0s"]);
+    expect(formatCountdown(148 * 60_000 + 30_000)).toBe("2h29m");
+  });
+
+  it("writes a time of day, with the weekday when it is not today", () => {
+    const now = new Date(2026, 9, 16, 10, 0).getTime();
+    expect(clockTime(new Date(2026, 9, 16, 15, 40).getTime(), now)).toBe("15:40");
+    expect(clockTime(new Date(2026, 9, 17, 9, 5).getTime(), now)).toBe("Sat 09:05");
+    expect(clockTime(new Date(2026, 9, 30, 9, 5).getTime(), now)).toBe("Oct 30, 09:05");
+  });
+
+  it("names a usage window", () => {
+    expect(windowName({ key: "session", label: "5h", percent: 1 })).toBe("5-hour limit");
+    expect(windowName({ key: "weekly_all", label: "Week", percent: 1 })).toBe("weekly limit");
+    expect(windowName({ key: "weekly_scoped:Fable", label: "Week · Fable", percent: 1 })).toBe("weekly Fable limit");
+    expect(windowName({ key: "other", label: "other", percent: 1 })).toBe("other limit");
+  });
+
+  it("says where the pace leads", () => {
+    const now = new Date(2026, 9, 16, 12, 0).getTime();
+    const meter = { key: "session", label: "5h", percent: 40, resetsAt: new Date(2026, 9, 16, 17, 5).getTime() };
+    expect(describePace({ perHour: 20, fullAt: new Date(2026, 9, 16, 15, 40).getTime(), runsOut: true }, meter, now)).toBe("at this pace 100% at 15:40, resets 17:05");
+    expect(describePace({ perHour: 5, fullAt: new Date(2026, 9, 17, 0, 0).getTime(), runsOut: false, atReset: 64 }, meter, now)).toBe("at this pace 64% at the reset");
+    expect(describePace({ perHour: 0, runsOut: false, atReset: 40 }, meter, now)).toBe("at this pace 40% at the reset");
+    expect(describePace(undefined, meter, now)).toBeUndefined();
+  });
+
+  it("says which usage limit reached a threshold, and when it resets", () => {
+    const now = new Date(2026, 9, 16, 12, 0).getTime();
+    expect(describeAlert({ key: "session", label: "5h", percent: 72, resetsAt: new Date(2026, 9, 16, 17, 5).getTime() }, now)).toEqual({
+      text: "Your 5-hour limit is at 72%; it resets at 17:05.",
+      title: "5-hour limit at 72%",
+      body: "It resets at 17:05.",
+    });
+    expect(describeAlert({ key: "weekly_all", label: "Week", percent: 91, resetsAt: new Date(2026, 9, 20, 23, 0).getTime() }, now).text).toBe("Your weekly limit is at 91%; it resets at Tue 23:00.");
+    expect(describeAlert({ key: "session", label: "5h", percent: 90 }, now)).toEqual({ text: "Your 5-hour limit is at 90%.", title: "5-hour limit at 90%", body: "Usage" });
   });
 
   it("counts sessions per state", () => {

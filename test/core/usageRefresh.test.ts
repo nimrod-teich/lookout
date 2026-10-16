@@ -2,7 +2,7 @@ import { spawn as realSpawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseResponse, refreshUsage } from "../../src/core/usageRefresh";
+import { parseResponse, refreshEnv, refreshUsage } from "../../src/core/usageRefresh";
 import { tempConfigDir } from "./helpers";
 
 const RESPONSE = {
@@ -33,6 +33,15 @@ describe("parseResponse", () => {
   });
 });
 
+describe("refreshEnv", () => {
+  it("names an overridden config directory, and leaves the standard one to the binary's default", () => {
+    const home = path.join(path.sep, "home", "u");
+    expect(refreshEnv({ PATH: "/bin" }, path.join(home, ".claude-work"), path.join(home, ".claude"))).toEqual({ PATH: "/bin", CLAUDE_CONFIG_DIR: path.join(home, ".claude-work") });
+    // With CLAUDE_CONFIG_DIR set, Claude Code keeps its config file inside the folder: the standard one must go unnamed.
+    expect(refreshEnv({ PATH: "/bin", CLAUDE_CONFIG_DIR: "/elsewhere" }, path.join(home, ".claude"), path.join(home, ".claude"))).toEqual({ PATH: "/bin" });
+  });
+});
+
 describe("refreshUsage", () => {
   it("sends the request, reads the answer, and exits", async () => {
     const { binary, spawn } = fakeBinary(`
@@ -57,6 +66,36 @@ describe("refreshUsage", () => {
     const hanging = fakeBinary(`process.stdin.resume(); setInterval(() => {}, 1000);`);
     const started = Date.now();
     expect(await refreshUsage({ ...hanging, timeoutMs: 300 })).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("runs the binary with the config directory the numbers are read from, and lets it finish writing its cache", async () => {
+    const dir = tempConfigDir();
+    const { binary, spawn } = fakeBinary(`
+      process.stdin.resume();
+      process.stdin.on("end", () => {
+        process.stdout.write(${JSON.stringify(JSON.stringify(RESPONSE))} + "\\n");
+        // The cache is written after the answer, as a slow disk might.
+        setTimeout(() => {
+          require("fs").writeFileSync(require("path").join(process.env.CLAUDE_CONFIG_DIR, ".claude.json"), "{}");
+          process.exit(0);
+        }, 300);
+      });
+    `);
+    const snapshot = await refreshUsage({ binary, spawn, env: refreshEnv(process.env, dir, "/home/nobody/.claude") });
+    expect(snapshot?.meters[0]).toMatchObject({ key: "session", percent: 18 });
+    expect(fs.existsSync(path.join(dir, ".claude.json"))).toBe(true);
+  });
+
+  it("stops a binary that does not exit after answering, after a short grace", async () => {
+    const lingering = fakeBinary(`
+      process.stdin.resume();
+      process.stdin.on("end", () => process.stdout.write(${JSON.stringify(JSON.stringify(RESPONSE))} + "\\n"));
+      setInterval(() => {}, 1000);
+    `);
+    const started = Date.now();
+    const snapshot = await refreshUsage({ ...lingering, exitGraceMs: 200, timeoutMs: 10_000 });
+    expect(snapshot?.meters).toHaveLength(2);
     expect(Date.now() - started).toBeLessThan(5_000);
   });
 

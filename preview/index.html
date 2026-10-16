@@ -46,8 +46,9 @@
     }
     const usage = fixture.usage;
     if (usage) {
-      usage.fetchedAt = now - usage.fetchedAt;
+      if (usage.fetchedAt !== undefined) usage.fetchedAt = now - usage.fetchedAt;
       for (const m of usage.meters) if (m.resetsAt) m.resetsAt = now + m.resetsAt;
+      for (const pace of Object.values(usage.pace ?? {})) if (pace.fullAt !== undefined) pace.fullAt = now + pace.fullAt;
     }
     for (const p of fixture.past ?? []) if (p.modifiedAt < 1e12) p.modifiedAt = now - p.modifiedAt;
     fixtureSessions = [...fixture.sessions, ...(fixture.past ?? [])];

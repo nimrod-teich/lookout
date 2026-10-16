@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { noticeBody } from "./core/format";
+import { clockTime, describeAlert, noticeBody } from "./core/format";
 import { nextAttention } from "./core/model";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
@@ -44,6 +44,9 @@ export function activate(context: vscode.ExtensionContext): void {
       label: vscode.workspace.name ?? "untitled window",
       sharedDir: path.join(context.globalStorageUri.fsPath, "windows"),
       state: context.workspaceState,
+      globalState: context.globalState,
+      usageDir: path.join(context.globalStorageUri.fsPath, "usage"),
+      focused: () => vscode.window.state.focused,
       claudeBinary: findClaudeBinary,
       workspaceFolders: () => vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [],
       globalStorageDir: path.dirname(context.globalStorageUri.fsPath),
@@ -90,7 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
     resume: (id) => void resume(id),
     usage: () => {
       const usage = controller.usage;
-      return usage && { ...usage, canRefresh: controller.canRefreshUsage };
+      return { fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: usage?.meters ?? [], pace: usage?.pace ?? {}, canRefresh: controller.canRefreshUsage, note: controller.usageNote };
     },
     jump,
     rename: async (view) => {
@@ -99,7 +102,8 @@ export function activate(context: vscode.ExtensionContext): void {
     markSeen: (id) => controller.markSeen(id),
     markAllSeen: () => controller.markAllSeen(),
     dismiss: (id) => controller.dismiss(id),
-    refreshUsage: () => void controller.refreshUsage(),
+    // The command, so the board's link says what the command says when it cannot fetch.
+    refreshUsage: () => void vscode.commands.executeCommand(REFRESH_USAGE),
     search: (query) => controller.search(query),
     openHit: (query, id, index) => {
       if (!findings.show(id, query, index)) void vscode.window.showInformationMessage(`Lookout has not found the transcript of "${controller.sessions.find((v) => v.id === id)?.title ?? id}" yet.`);
@@ -109,8 +113,10 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar.render({
       views: controller.sessions,
       usage: controller.usage,
+      usageNote: controller.usageNote,
       enabled: config.statusBarEnabled,
       showUsage: config.statusBarUsage,
+      showReset: config.statusBarUsageReset,
       canRefreshUsage: controller.canRefreshUsage,
     });
     board.refresh();
@@ -125,6 +131,11 @@ export function activate(context: vscode.ExtensionContext): void {
     board,
     findings,
     controller.onDidChangeUsage(render),
+    controller.onDidReachUsageThreshold((alert) => {
+      const said = describeAlert(alert.meter);
+      void vscode.window.showWarningMessage(`Lookout: ${said.text}`);
+      if (config.notifyOs && !vscode.window.state.focused) osNotifier.send({ title: said.title, body: `${said.body}\nLookout`, tag: alert.id }, config.notifySound);
+    }),
     vscode.window.registerWebviewViewProvider(BOARD_VIEW, board),
     controller.onDidChange(render),
     controller.onDidChange(() => findings.refresh()),
@@ -172,10 +183,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(SHOW_BOARD, () => vscode.commands.executeCommand(`${BOARD_VIEW}.focus`)),
     vscode.commands.registerCommand(REFRESH_USAGE, async () => {
       if (!controller.canRefreshUsage) {
-        void vscode.window.showInformationMessage("Lookout can't fetch usage: usage refresh is off, or the Claude Code extension is not installed.");
+        void vscode.window.showInformationMessage(`Lookout can't fetch usage: ${controller.usageNote ?? "usage refresh is off"}.`);
         return;
       }
-      if (!(await controller.refreshUsage())) void vscode.window.showWarningMessage("Lookout: Claude Code gave no usage numbers. Check the Lookout output log.");
+      const outcome = await controller.refreshUsage(true);
+      if (outcome === "too soon") void vscode.window.showInformationMessage(`Lookout fetches usage at most every 3 minutes on this machine; next at ${clockTime(controller.nextRefreshAt(true))}.`);
+      else if (outcome === "failed") void vscode.window.showWarningMessage("Lookout: Claude Code gave no new usage numbers. Check the Lookout output log.");
     }),
   );
 
