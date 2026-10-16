@@ -1,5 +1,5 @@
-import type { AgentSession } from "./agents/agent";
-import type { Host, SessionView, State } from "./types";
+import type { AgentSession, PastSession } from "./agents/agent";
+import type { Host, PastView, SessionView, State } from "./types";
 
 const WORKTREE = /^(.*)[\\/]\.claude[\\/]worktrees[\\/]([^\\/]+)/;
 const STATE_ORDER: Record<State, number> = { waiting: 0, done: 1, working: 2, unknown: 3, idle: 4 };
@@ -85,6 +85,11 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
 }
 
 /** What wants the user's attention first, each group ordered by how long it has been in its state. */
+/** The view of a session that is not running. */
+export function buildPastView(session: PastSession): PastView {
+  return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), cwd: session.cwd, modifiedAt: session.modifiedAt };
+}
+
 export function sortViews(views: readonly SessionView[]): SessionView[] {
   return [...views].sort(
     (a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || (a.since ?? 0) - (b.since ?? 0) || a.id.localeCompare(b.id),

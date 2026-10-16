@@ -48,6 +48,23 @@ export interface SessionSpend {
   partial: boolean;
 }
 
+/** A session that is not running, known from its transcript. */
+export interface PastSession {
+  /** Id of the provider that reported it. */
+  agent: string;
+  id: string;
+  cwd: string;
+  title: string;
+  /** Epoch ms the transcript was last written. */
+  modifiedAt: number;
+}
+
+/** A search's outcome: the sessions with matches, and how many were not read within the time given. */
+export interface SearchOutcome {
+  results: SearchResult[];
+  pending: number;
+}
+
 /**
  * A coding agent Lookout can watch. A provider turns whatever the agent
  * records about its sessions into `AgentSession`s; everything after that
@@ -66,11 +83,14 @@ export interface AgentProvider {
    */
   watch?(listener: () => void): { dispose(): void } | undefined;
   /**
-   * Searches the conversations of the live sessions: what the user wrote and
-   * what the agent replied. Returns only sessions with matches, each with its
-   * newest `limit` matches.
+   * Searches the conversations of the live and the past sessions: what the
+   * user wrote and what the agent replied. Returns only sessions with matches,
+   * each with its newest `limit` matches. A conversation not read yet is read
+   * only while `budgetMs` allows; the rest are counted as pending.
    */
-  search?(query: string, limit: number): SearchResult[];
+  search?(query: string, limit: number, budgetMs: number): SearchOutcome;
+  /** The sessions of these working directories that are not running, newest first, without the ids in `exclude`. */
+  past?(cwds: readonly string[], exclude: ReadonlySet<string>): PastSession[];
   /** The conversation of one live session, oldest first; undefined when the agent keeps no transcript for it. */
   history?(id: string): HistoryMessage[] | undefined;
 }

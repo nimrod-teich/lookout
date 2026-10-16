@@ -47,6 +47,18 @@ export interface SessionView {
   spend?: SessionSpend;
 }
 
+/** A session that is not running, shown collapsed under the live ones. */
+export interface PastView {
+  id: string;
+  agent: string;
+  title: string;
+  project: string;
+  worktree?: string;
+  cwd: string;
+  /** Epoch ms the transcript was last written. */
+  modifiedAt: number;
+}
+
 export interface SessionSpend {
   input: number;
   output: number;

@@ -1,17 +1,17 @@
 import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import type { HistoryMessage } from "../core/history";
-import type { SessionView } from "../core/types";
 import type { FromFindings, ToFindings } from "../webview/findingsProtocol";
 
 export const FINDINGS_VIEW_TYPE = "lookout.findings";
 
 export interface FindingsActions {
-  sessions(): readonly SessionView[];
-  /** The conversation of a live session, oldest first. */
+  /** The title of a live or a past session. */
+  titleOf(id: string): string;
+  /** The conversation of a live or a past session, oldest first. */
   history(id: string): HistoryMessage[] | undefined;
-  /** Brings the session's own tab or terminal to the front. */
-  jump(view: SessionView): Promise<void>;
+  /** Brings the session's own tab or terminal to the front, or resumes it when it is not running. */
+  open(id: string): Promise<void>;
 }
 
 /**
@@ -52,8 +52,7 @@ export class Findings implements vscode.Disposable {
   private conversation(id: string, query: string, target: number | undefined): ToFindings | undefined {
     const messages = this.actions.history(id);
     if (!messages) return undefined;
-    const title = this.actions.sessions().find((view) => view.id === id)?.title ?? id;
-    return { type: "conversation", session: { id, title }, messages: messages.map((message, index) => ({ index, ...message })), query, target };
+    return { type: "conversation", session: { id, title: this.actions.titleOf(id) }, messages: messages.map((message, index) => ({ index, ...message })), query, target };
   }
 
   private send(message: ToFindings): void {
@@ -89,11 +88,9 @@ export class Findings implements vscode.Disposable {
       case "ready":
         if (this.last) void this.panel?.webview.postMessage(this.last);
         return;
-      case "jump": {
-        const view = this.actions.sessions().find((v) => v.id === message.id);
-        if (view) void this.actions.jump(view);
+      case "jump":
+        if (typeof message.id === "string") void this.actions.open(message.id);
         return;
-      }
     }
   }
 

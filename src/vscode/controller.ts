@@ -1,12 +1,13 @@
 import * as vscode from "vscode";
-import type { AgentProvider } from "../core/agents/agent";
+import type { AgentProvider, SearchOutcome } from "../core/agents/agent";
+import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { ClaudeProvider } from "../core/agents/claude/provider";
-import type { HistoryMessage, SearchResult } from "../core/history";
+import type { HistoryMessage } from "../core/history";
 import { Attention } from "../core/attention";
-import { sortViews } from "../core/model";
+import { buildPastView, sortViews } from "../core/model";
 import { Monitor } from "../core/monitor";
 import { createProcessTable, type ProcessTable } from "../core/proc";
-import type { SessionView } from "../core/types";
+import type { PastView, SessionView } from "../core/types";
 import { isStale, shouldAutoRefresh, UsageCache, usageCacheFile, type RefreshMode, type UsageSnapshot } from "../core/usage";
 import { refreshUsage } from "../core/usageRefresh";
 import { WindowRegistry } from "../core/windows";
@@ -24,6 +25,8 @@ const DEBOUNCE_MS = 50;
 const DONE_KEY = "lookout.done";
 /** Matches shown per session. */
 const SEARCH_HITS = 3;
+/** A search reads conversations not read yet for at most this long; the rest are reported pending. */
+const SEARCH_BUDGET_MS = 150;
 
 export interface ControllerHost {
   /** Pid of the extension host, which an agent panel's sessions descend from. */
@@ -36,6 +39,10 @@ export interface ControllerHost {
   state: vscode.Memento;
   /** The Claude Code binary that can fetch the account's usage, when installed. */
   claudeBinary(): string | undefined;
+  /** The folders open in this window: their past sessions are listed. */
+  workspaceFolders(): string[];
+  /** VS Code's extension storage directory, next to which it keeps extension state. */
+  globalStorageDir: string;
 }
 
 /** The usage numbers as the UI gets them. */
@@ -67,6 +74,8 @@ export class Controller implements vscode.Disposable {
   private debounce: ReturnType<typeof setTimeout> | undefined;
   private current: readonly SessionView[] = [];
   private snapshot = "[]";
+  private pastViews: PastView[] = [];
+  private archived = new ArchivedSessions([]);
   private savedDone = "";
   private usageCache: UsageCache | undefined;
   private usageMode: RefreshMode = "manual";
@@ -91,6 +100,16 @@ export class Controller implements vscode.Disposable {
     return this.current;
   }
 
+  /** The sessions that are not running, newest first. */
+  get past(): readonly PastView[] {
+    return this.pastViews;
+  }
+
+  /** The title of a live or a past session. */
+  titleOf(id: string): string | undefined {
+    return this.current.find((view) => view.id === id)?.title ?? this.pastViews.find((view) => view.id === id)?.title;
+  }
+
   get usage(): Usage | undefined {
     return this.currentUsage && { ...this.currentUsage, stale: isStale(this.currentUsage, Date.now()) };
   }
@@ -106,6 +125,8 @@ export class Controller implements vscode.Disposable {
     this.monitor = new Monitor(this.providers, this.proc);
     this.usageCache = new UsageCache(usageCacheFile(config.claudeConfigDir));
     this.usageMode = config.usageRefresh;
+    this.archived = new ArchivedSessions(stateDbCandidates(this.host.globalStorageDir));
+    if (!this.archived.available) this.log.info("The agent's archived-session list is out of reach; every past session is listed");
     this.log.info(`Watching ${this.providers.map((p) => p.label).join(", ")} (${config.claudeConfigDir})`);
     this.watch();
     this.poll();
@@ -126,7 +147,11 @@ export class Controller implements vscode.Disposable {
       return;
     }
     const update = this.attention.update(views, (view) => isWatched(view, this.terminals));
-    this.publish(sortViews(update.views));
+    const exclude = new Set<string>([...update.views.map((view) => view.id), ...this.archived.read()]);
+    const folders = this.host.workspaceFolders();
+    const past = this.providers.flatMap((provider) => provider.past?.(folders, exclude) ?? []).map(buildPastView);
+    past.sort((a, b) => b.modifiedAt - a.modifiedAt);
+    this.publish(sortViews(update.views), past);
     this.saveDone();
     for (const view of update.finished) this.finished.fire(view);
     for (const view of update.waiting) this.waiting.fire(view);
@@ -167,11 +192,18 @@ export class Controller implements vscode.Disposable {
     return this.refreshing;
   }
 
-  /** Searches the conversations of the live sessions: the newest few matches per session, for the cards. */
-  search(query: string): SearchResult[] {
-    const results: SearchResult[] = [];
-    for (const provider of this.providers) results.push(...(provider.search?.(query, SEARCH_HITS) ?? []));
-    return results;
+  /** Searches the conversations of the live and the past sessions: the newest few matches per session, for the cards. */
+  search(query: string): SearchOutcome {
+    const started = Date.now();
+    const outcome: SearchOutcome = { results: [], pending: 0 };
+    for (const provider of this.providers) {
+      const left = Math.max(0, SEARCH_BUDGET_MS - (Date.now() - started));
+      const part = provider.search?.(query, SEARCH_HITS, left);
+      if (!part) continue;
+      outcome.results.push(...part.results);
+      outcome.pending += part.pending;
+    }
+    return outcome;
   }
 
   /** The conversation of one live session, oldest first. */
@@ -219,11 +251,12 @@ export class Controller implements vscode.Disposable {
     }, DEBOUNCE_MS);
   }
 
-  private publish(views: SessionView[]): void {
-    const snapshot = JSON.stringify(views);
+  private publish(views: SessionView[], past: PastView[]): void {
+    const snapshot = JSON.stringify([views, past]);
     if (snapshot === this.snapshot) return;
     this.snapshot = snapshot;
     this.current = views;
+    this.pastViews = past;
     this.changed.fire(views);
   }
 

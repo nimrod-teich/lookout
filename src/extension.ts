@@ -5,6 +5,7 @@ import type { SessionView } from "./core/types";
 import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
+import { panelAdapter } from "./vscode/agents";
 import { Findings } from "./vscode/findings";
 import { Controller } from "./vscode/controller";
 import { jumpToSession, renameSession, revealed } from "./vscode/jump";
@@ -30,6 +31,8 @@ export function activate(context: vscode.ExtensionContext): void {
       sharedDir: path.join(context.globalStorageUri.fsPath, "windows"),
       state: context.workspaceState,
       claudeBinary: findClaudeBinary,
+      workspaceFolders: () => vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [],
+      globalStorageDir: path.dirname(context.globalStorageUri.fsPath),
     },
     terminals,
     log,
@@ -43,13 +46,24 @@ export function activate(context: vscode.ExtensionContext): void {
     lastJump = view.id;
     if (revealed(await jumpToSession(view, terminals, log))) controller.markSeen(view.id);
   };
+  /** Opens a session that is not running: the agent resumes it in its panel. */
+  const resume = async (id: string) => {
+    const view = controller.past.find((p) => p.id === id);
+    if (!view || !(await panelAdapter(view.agent)?.resume(id, log))) void vscode.window.showWarningMessage(`Lookout could not resume "${view?.title ?? id}".`);
+  };
   const findings = new Findings(context.extensionUri, {
-    sessions: () => controller.sessions,
+    titleOf: (id) => controller.titleOf(id) ?? id,
     history: (id) => controller.history(id),
-    jump,
+    open: async (id) => {
+      const live = controller.sessions.find((view) => view.id === id);
+      if (live) await jump(live);
+      else await resume(id);
+    },
   });
   const board = new Board(context.extensionUri, {
     sessions: () => controller.sessions,
+    past: () => controller.past,
+    resume: (id) => void resume(id),
     usage: () => {
       const usage = controller.usage;
       return usage && { ...usage, canRefresh: controller.canRefreshUsage };
@@ -100,6 +114,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.tabGroups.onDidChangeTabGroups(noticeFocus),
     vscode.window.onDidChangeActiveTerminal(noticeFocus),
     vscode.window.onDidChangeWindowState(noticeFocus),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => controller.poll()),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration("lookout") && !event.affectsConfiguration("claudeCode.environmentVariables")) return;
       const next = readConfig();

@@ -982,6 +982,51 @@ body.vscode-reduce-motion .hover-card {
   background: color-mix(in srgb, var(--done) 20%, transparent);
 }
 
+/* Earlier: the sessions that are not running ------------------------------ */
+
+.group-past .heading {
+  cursor: pointer;
+  user-select: none;
+}
+
+.group-past .heading:hover .label {
+  color: var(--ink);
+}
+
+.group-past .chev {
+  display: inline-block;
+  width: 10px;
+  margin-right: 2px;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+
+.group-past.open .chev {
+  transform: rotate(90deg);
+}
+
+.group-past .cards.hidden {
+  display: none;
+}
+
+.card.past {
+  opacity: 0.85;
+}
+
+.card.past:hover {
+  opacity: 1;
+}
+
+.card.past .rail {
+  background: color-mix(in srgb, var(--idle) 45%, transparent);
+}
+
+.card.past .title {
+  font-weight: 500;
+}
+
 /* Empty state ------------------------------------------------------------- */
 
 .nothing {

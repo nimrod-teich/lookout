@@ -265,7 +265,6 @@
         "output": 40000,
         "cacheRead": 9000000,
         "cacheWrite": 300000,
-        "costUsd": null,
         "estimated": true,
         "partial": true
       }
@@ -282,6 +281,33 @@
       "host": "elsewhere",
       "agents": 0,
       "pulse": []
+    }
+  ],
+  "past": [
+    {
+      "id": "p1",
+      "agent": "claude-code",
+      "title": "BSC router v1.5.2 consistency pre-validation",
+      "project": "smart-router",
+      "cwd": "/home/bob/projects/smart-router",
+      "modifiedAt": 1296000000
+    },
+    {
+      "id": "p2",
+      "agent": "claude-code",
+      "title": "Solana peak research",
+      "project": "lava-connect",
+      "cwd": "/home/bob/projects/lava-connect",
+      "modifiedAt": 1814400000
+    },
+    {
+      "id": "p3",
+      "agent": "claude-code",
+      "title": "Smart-router-infra redis cache support",
+      "project": "smart-router-infrastructure",
+      "worktree": "redis",
+      "cwd": "/home/bob/projects/smart-router-infrastructure/.claude/worktrees/redis",
+      "modifiedAt": 2419200000
     }
   ]
 }

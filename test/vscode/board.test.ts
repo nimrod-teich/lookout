@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionView } from "../../src/core/types";
+import type { PastView, SessionView } from "../../src/core/types";
 import type { BoardUsage } from "../../src/webview/protocol";
 import { Board } from "../../src/vscode/board";
 import { view } from "./helpers";
 import { createWebviewView, stub } from "./stub-vscode";
 
+const PAST: PastView[] = [{ id: "00000000-0000-4000-8000-000000000009", agent: "claude-code", title: "Old one", project: "app", cwd: "/work/app", modifiedAt: 1 }];
+
 function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
-  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => (query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [])), openHit: vi.fn() };
+  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => ({ results: query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [], pending: 0 })), openHit: vi.fn(), past: () => PAST, resume: vi.fn() };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
   board.resolveWebviewView(webviewView as never);
@@ -90,7 +92,16 @@ describe("Board", () => {
     webviewView.receive({ type: "search", query: "cache" });
     webviewView.receive({ type: "search", query: 42 });
     expect(actions.search).toHaveBeenCalledTimes(1);
-    expect(webviewView.posted.at(-1)).toEqual({ type: "search", query: "cache", results: [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] });
+    expect(webviewView.posted.at(-1)).toEqual({ type: "search", query: "cache", results: [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }], pending: 0 });
+  });
+
+  it("sends the past sessions with the live ones, and resumes only a past session it showed", () => {
+    const { actions, webviewView } = setup([view()]);
+    expect(webviewView.posted[0]).toMatchObject({ type: "sessions", past: PAST });
+    webviewView.receive({ type: "resume", id: PAST[0]!.id });
+    webviewView.receive({ type: "resume", id: "00000000-0000-4000-8000-000000000001" });
+    expect(actions.resume).toHaveBeenCalledTimes(1);
+    expect(actions.resume).toHaveBeenCalledWith(PAST[0]!.id);
   });
 
   it("relays the requests to open a conversation in the findings tab, at a message or at the newest match", () => {

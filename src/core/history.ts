@@ -99,6 +99,11 @@ export class HistoryIndex {
     private readonly parse: (line: string) => HistoryMessage | undefined,
   ) {}
 
+  /** The file was read at least once; before that a refresh reads it whole. */
+  get ready(): boolean {
+    return this.identity !== "";
+  }
+
   /** Reads what the file gained since the last call. */
   refresh(): void {
     let st: fs.Stats;

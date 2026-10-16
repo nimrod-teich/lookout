@@ -1,15 +1,15 @@
 /// <reference lib="dom" />
 import { formatElapsed, formatTokens, formatUsd, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
-import type { SessionView } from "../core/types";
+import type { PastView, SessionView } from "../core/types";
 import { Harbour } from "./harbour";
 import { contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type GroupKey } from "./model";
 import type { BoardUsage, FromBoard, ToBoard } from "./protocol";
 
 declare function acquireVsCodeApi(): {
   postMessage(message: FromBoard): void;
-  getState(): { hidden?: string[] } | undefined;
-  setState(state: { hidden?: string[] }): void;
+  getState(): { hidden?: string[]; earlier?: boolean } | undefined;
+  setState(state: { hidden?: string[]; earlier?: boolean }): void;
 };
 
 const vscode = acquireVsCodeApi();
@@ -26,6 +26,14 @@ let usage: BoardUsage | undefined;
 let query = "";
 /** The results for `query`, by session id; sessions absent here are hidden while a query is active. */
 let hits = new Map<string, SearchResult>();
+/** Sessions whose conversation the extension has not read yet for the current query. */
+let pending = 0;
+/** The sessions that are not running, newest first. */
+let past: PastView[] = [];
+/** The user opened the Earlier group; kept across reloads. */
+let earlierOpen = vscode.getState()?.earlier === true;
+const pastCards = new Map<string, HTMLElement>();
+let earlierEl: HTMLElement | undefined;
 /** The extension's clock minus ours, so elapsed times agree with the status bar. */
 let clockOffset = 0;
 
@@ -111,7 +119,7 @@ function showHover(id: string | undefined): void {
   const meta = chips(view);
   if (view.spend) {
     const tokens = view.spend.input + view.spend.output + view.spend.cacheRead + view.spend.cacheWrite;
-    meta.push(`${formatTokens(tokens)} tokens${view.spend.costUsd === undefined ? "" : ` · ${view.spend.estimated ? "~" : ""}${formatUsd(view.spend.costUsd)}`}`);
+    meta.push(`${formatTokens(tokens)} tokens${typeof view.spend.costUsd !== "number" ? "" : ` · ${view.spend.estimated ? "~" : ""}${formatUsd(view.spend.costUsd)}`}`);
   }
   hover.append(el("div", "hover-meta", meta.join(" · ")));
   hover.append(el("div", "hover-hint", "Click to jump"));
@@ -193,15 +201,23 @@ clear.addEventListener("click", () => {
   input.focus();
 });
 
-function receiveSearch(message: { query: string; results: SearchResult[] }): void {
+function receiveSearch(message: { query: string; results: SearchResult[]; pending: number }): void {
   // An answer to an older query is of no use.
   if (message.query !== query) return;
   hits = new Map(message.results.map((result) => [result.id, result]));
-  search.classList.remove("searching");
+  pending = message.pending;
+  search.classList.toggle("searching", pending > 0);
   const matches = message.results.reduce((sum, result) => sum + result.count, 0);
-  summary.textContent = matches === 0 ? "no matches" : `${matches} ${matches === 1 ? "match" : "matches"} in ${message.results.length} ${message.results.length === 1 ? "session" : "sessions"}`;
+  const found = matches === 0 ? "no matches" : `${matches} ${matches === 1 ? "match" : "matches"} in ${message.results.length} ${message.results.length === 1 ? "session" : "sessions"}`;
+  summary.textContent = pending > 0 ? `${found} · reading ${pending} more…` : found;
   applyFilters();
   render();
+  // Conversations not read within the time given: ask again shortly, until none is left.
+  if (pending > 0) {
+    setTimeout(() => {
+      if (query === message.query) vscode.postMessage({ type: "search", query });
+    }, 400);
+  }
 }
 
 function applyFilters(): void {
@@ -211,7 +227,7 @@ function applyFilters(): void {
 function toggleGroup(key: GroupKey): void {
   if (hidden.has(key)) hidden.delete(key);
   else hidden.add(key);
-  vscode.setState({ hidden: [...hidden] });
+  vscode.setState({ hidden: [...hidden], earlier: earlierOpen });
   applyFilters();
   render();
 }
@@ -376,11 +392,11 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   spendEl.classList.toggle("hidden", spend === undefined);
   if (spend) {
     const tokens = spend.input + spend.output + spend.cacheRead + spend.cacheWrite;
-    const cost = spend.costUsd === undefined ? "" : ` · ${spend.estimated ? "~" : ""}${formatUsd(spend.costUsd)}`;
+    const cost = typeof spend.costUsd !== "number" ? "" : ` · ${spend.estimated ? "~" : ""}${formatUsd(spend.costUsd)}`;
     spendEl.textContent = `${spend.partial ? "≥ " : ""}${formatTokens(tokens)} tokens${cost}`;
     spendEl.title = [
       `Tokens this session: ${formatTokens(spend.input)} input, ${formatTokens(spend.output)} output, ${formatTokens(spend.cacheRead)} cache read, ${formatTokens(spend.cacheWrite)} cache write.`,
-      spend.costUsd === undefined ? "No price for this model." : `API list price: ${formatUsd(spend.costUsd)}${spend.estimated ? ", part of it Lookout's estimate since the agent's last checkpoint (subagents since then not counted)" : ", the agent's own figure"}.`,
+      typeof spend.costUsd !== "number" ? "No price for this model." : `API list price: ${formatUsd(spend.costUsd)}${spend.estimated ? ", part of it Lookout's estimate since the agent's last checkpoint (subagents since then not counted)" : ", the agent's own figure"}.`,
       spend.partial ? "Earlier usage is missing: Lookout joined this transcript late." : "",
     ]
       .filter(Boolean)
@@ -434,26 +450,110 @@ function renderHits(hitsEl: Element, result: SearchResult | undefined): void {
   }
 }
 
+function createPastCard(view: PastView): HTMLElement {
+  const card = el("button", "card past");
+  card.type = "button";
+  card.dataset.id = view.id;
+  card.append(el("span", "rail"));
+  const main = el("span", "main");
+  const row = el("span", "row");
+  row.append(el("span", "title"), el("span", "elapsed"));
+  main.append(row, el("span", "chips"), el("span", "hits hidden"));
+  card.append(main);
+  card.addEventListener("click", () => vscode.postMessage({ type: "resume", id: view.id }));
+  return card;
+}
+
+function pastElapsed(view: PastView): string {
+  return `${formatElapsed(now() - view.modifiedAt)} ago`;
+}
+
+function updatePastCard(card: HTMLElement, view: PastView): void {
+  card.title = `Not running · last written ${pastElapsed(view)} · click to resume it in the agent's panel`;
+  card.querySelector(".title")!.textContent = view.title;
+  card.querySelector(".elapsed")!.textContent = pastElapsed(view);
+  const chipsEl = card.querySelector(".chips")!;
+  if (chipsEl.childNodes.length === 0) chipsEl.append(el("span", "chip"));
+  const label = view.worktree ? `${view.project} · ${view.worktree}` : view.project;
+  if (chipsEl.firstChild!.textContent !== label) chipsEl.firstChild!.textContent = label;
+  renderHits(card.querySelector(".hits")!, query === "" ? undefined : hits.get(view.id));
+}
+
+/** The sessions that are not running, collapsed under the live ones; open while a search has matches among them. */
+function renderEarlier(after: HTMLElement): void {
+  const shown = query === "" ? past : past.filter((view) => hits.has(view.id));
+  if (shown.length === 0) {
+    earlierEl?.remove();
+    earlierEl = undefined;
+    for (const card of pastCards.values()) card.remove();
+    pastCards.clear();
+    return;
+  }
+  const open = earlierOpen || query !== "";
+  if (!earlierEl) {
+    earlierEl = el("section", "group group-past");
+    const heading = el("h2", "heading");
+    heading.title = "Sessions that are not running. Click to show or hide them; a click on one resumes it in the agent's panel.";
+    heading.append(el("i", "chev", "▸"), el("span", "label", "Earlier"), el("span", "count"));
+    heading.addEventListener("click", () => {
+      earlierOpen = !earlierOpen;
+      vscode.setState({ hidden: [...hidden], earlier: earlierOpen });
+      render();
+    });
+    earlierEl.append(heading, el("div", "cards"));
+  }
+  earlierEl.classList.toggle("open", open);
+  earlierEl.querySelector(".count")!.textContent = query === "" ? String(shown.length) : `${shown.length} of ${past.length}`;
+  if (earlierEl.previousElementSibling !== after) root.insertBefore(earlierEl, after.nextSibling);
+  const list = earlierEl.querySelector(".cards")!;
+  list.classList.toggle("hidden", !open);
+  const seen = new Set<string>();
+  let previousCard: HTMLElement | undefined;
+  if (open) {
+    for (const view of shown) {
+      seen.add(view.id);
+      let card = pastCards.get(view.id);
+      if (!card) {
+        card = createPastCard(view);
+        pastCards.set(view.id, card);
+      }
+      updatePastCard(card, view);
+      const prev = previousCard ?? null;
+      if (card.parentElement !== list || card.previousElementSibling !== prev) list.insertBefore(card, prev ? prev.nextSibling : list.firstChild);
+      previousCard = card;
+    }
+  }
+  for (const [id, card] of pastCards) {
+    if (seen.has(id)) continue;
+    card.remove();
+    pastCards.delete(id);
+  }
+}
+
 function render(): void {
   if (!beam.isConnected) root.prepend(beam);
   if (!meters.isConnected) beam.append(meters);
   renderBeam();
   renderMeters();
   const groups = groupSessions(sessions);
-  root.classList.toggle("empty", sessions.length === 0);
-  if (sessions.length === 0) {
+  const pastShown = query === "" ? past.length : past.filter((view) => hits.has(view.id)).length;
+  const nothing = sessions.length === 0 && pastShown === 0;
+  root.classList.toggle("empty", nothing);
+  root.querySelector(".nothing")?.remove();
+  if (nothing) {
     for (const group of groupsEl.values()) group.remove();
     groupsEl.clear();
     cards.clear();
-    root.querySelector(".nothing")?.remove();
-    const nothing = el("div", "nothing");
-    if (query !== "") nothing.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message. Esc clears the search."));
-    else if (allSessions.length > 0) nothing.append(el("p", "big", "Everything is hidden"), el("p", "small", "Click a state in the legend to show it again."));
-    else nothing.append(el("p", "big", "Nothing on the horizon"), el("p", "small", "Sessions appear here as soon as an agent starts."));
-    root.append(nothing);
+    earlierEl?.remove();
+    earlierEl = undefined;
+    pastCards.clear();
+    const empty = el("div", "nothing");
+    if (query !== "") empty.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message. Esc clears the search."));
+    else if (allSessions.length > 0) empty.append(el("p", "big", "Everything is hidden"), el("p", "small", "Click a state in the legend to show it again."));
+    else empty.append(el("p", "big", "Nothing on the horizon"), el("p", "small", "Sessions appear here as soon as an agent starts."));
+    root.append(empty);
     return;
   }
-  root.querySelector(".nothing")?.remove();
   const seenIds = new Set<string>();
   const seenGroups = new Set<string>();
   let previousGroup: HTMLElement = beam;
@@ -503,6 +603,7 @@ function render(): void {
     section.remove();
     groupsEl.delete(key);
   }
+  renderEarlier(previousGroup);
 }
 
 function tick(): void {
@@ -510,6 +611,10 @@ function tick(): void {
   for (const view of sessions) {
     const card = cards.get(view.id);
     if (card) card.querySelector(".elapsed")!.textContent = elapsedText(view);
+  }
+  for (const view of past) {
+    const card = pastCards.get(view.id);
+    if (card) card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   }
   renderBeam();
   if (usage) renderMeters();
@@ -523,6 +628,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   }
   if (message.type !== "sessions") return;
   allSessions = message.sessions;
+  past = message.past ?? [];
   usage = message.usage;
   clockOffset = message.now - Date.now();
   applyFilters();
