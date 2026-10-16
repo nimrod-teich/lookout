@@ -4,7 +4,11 @@ import type { Host, PastView, SessionView, State } from "./types";
 const WORKTREE = /^(.*)[\\/]\.claude[\\/]worktrees[\\/]([^\\/]+)/;
 const STATE_ORDER: Record<State, number> = { waiting: 0, done: 1, working: 2, unknown: 3, idle: 4 };
 
-export const UNTITLED = "Untitled session";
+/** The title of a session that has no conversation yet: an open tab or terminal with nothing sent. */
+export const EMPTY_TAB = "Empty tab";
+export const EMPTY_TERMINAL = "Empty session";
+/** @deprecated The empty-tab label; kept for the tests that name it. */
+export const UNTITLED = EMPTY_TAB;
 
 /** Last segment of a path written with either separator, whatever platform this runs on. */
 function baseName(dir: string): string {
@@ -66,7 +70,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
     id: session.id,
     agent: session.agent,
     pid: session.pid,
-    title: session.title ?? UNTITLED,
+    title: session.title ?? (session.panel ? EMPTY_TAB : EMPTY_TERMINAL),
     state: session.status,
     since: session.since,
     needs: session.status === "waiting" ? session.needs : undefined,

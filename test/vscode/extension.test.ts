@@ -83,7 +83,7 @@ describe("the extension", () => {
     // The session asks for permission while its tab is not in front: one notification.
     writeSession({ status: "waiting", waitingFor: "permission prompt", statusUpdatedAt: Date.now() });
     await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(bell-dot) 1"), WAIT);
-    expect(infoMessages().filter((m) => m.includes("needs you"))).toEqual(['"Untitled session" needs you: permission prompt']);
+    expect(infoMessages().filter((m) => m.includes("needs you"))).toEqual(['"Empty tab" needs you: permission prompt']);
 
     // It works again, then finishes unwatched: marked finished, no notification by default.
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });

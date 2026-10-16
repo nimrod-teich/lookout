@@ -32,7 +32,7 @@ Running several AI coding agents at once means clicking through tabs to find out
   </tr>
   <tr>
     <td><b>Cards</b></td>
-    <td>One card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its tool calls per minute over the last 15 minutes (the bars grow from the left while it is younger than that), a ring for how full its context window is, the tokens it has used so far with their price at API list rates, its project and worktree, where it runs and its model. Click a card to jump to the session; a pencil renames it through the agent; a click on a state in the legend hides that group.</td>
+    <td>One card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its tool calls per minute over the last 15 minutes (the bars grow from the left while it is younger than that), a ring for how full its context window is, the tokens it has used so far with their price at API list rates, its project and worktree, where it runs and its model. Click a card to jump to the session; a pencil renames it through the agent; a click on a state in the legend hides that group. A tab with nothing sent yet is listed as "Empty tab".</td>
   </tr>
   <tr>
     <td><b>Earlier</b></td>
@@ -76,7 +76,7 @@ Running several AI coding agents at once means clicking through tabs to find out
 | Finished | The session finished a turn while you were not looking at it. The mark clears when you open its tab or terminal, and survives a window reload. |
 | Working | The session is running a turn. |
 | Idle | The session waits for the next prompt. |
-| State unknown | The session runs an agent version that doesn't record its state. |
+| State unknown | The session runs an agent version that doesn't record its state. A session in its first minute counts as idle instead. |
 | Earlier | Not running. Its transcript is still there, so it can be searched, read in the conversation tab, and resumed. |
 
 ## Supported agents
