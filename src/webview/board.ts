@@ -401,8 +401,15 @@ function renderHits(hitsEl: Element, result: SearchResult | undefined): void {
   hitsEl.textContent = "";
   hitsEl.classList.toggle("hidden", result === undefined);
   if (!result) return;
+  const id = (hitsEl.closest(".card") as HTMLElement).dataset.id!;
   for (const hit of result.hits) {
     const line = el("span", `hit ${hit.role}`);
+    line.title = "Open the conversation here, in a tab";
+    line.setAttribute("role", "button");
+    line.addEventListener("click", (event) => {
+      event.stopPropagation();
+      vscode.postMessage({ type: "openHit", query, id, index: hit.index });
+    });
     line.append(el("i", "who", hit.role === "you" ? "you" : "agent"));
     const text = el("span", "snippet");
     let at = 0;
@@ -415,7 +422,16 @@ function renderHits(hitsEl: Element, result: SearchResult | undefined): void {
     line.append(text);
     hitsEl.append(line);
   }
-  if (result.count > result.hits.length) hitsEl.append(el("span", "more", `+${result.count - result.hits.length} more`));
+  if (result.count > result.hits.length) {
+    const more = el("span", "more", `+${result.count - result.hits.length} more`);
+    more.title = "Open the conversation in a tab, with every match";
+    more.setAttribute("role", "button");
+    more.addEventListener("click", (event) => {
+      event.stopPropagation();
+      vscode.postMessage({ type: "openHit", query, id });
+    });
+    hitsEl.append(more);
+  }
 }
 
 function render(): void {

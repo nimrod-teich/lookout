@@ -23,4 +23,6 @@ export type FromBoard =
   | { type: "seen"; id: string }
   | { type: "seenAll" }
   | { type: "refreshUsage" }
-  | { type: "search"; query: string };
+  | { type: "search"; query: string }
+  /** Open the session's conversation in the findings tab, at one message or at the newest match. */
+  | { type: "openHit"; query: string; id: string; index?: number };

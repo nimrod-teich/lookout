@@ -58,7 +58,7 @@ describe("HistoryIndex", () => {
     expect(index.messages).toHaveLength(4);
     const { count, hits } = index.search(["billing", "webhook"], 1);
     expect(count).toBe(2);
-    expect(hits).toEqual([{ role: "agent", at: 5, snippet: "The Billing webhook retries twice", ranges: [[4, 11], [12, 19]] }]);
+    expect(hits).toEqual([{ index: 2, role: "agent", at: 5, snippet: "The Billing webhook retries twice", ranges: [[4, 11], [12, 19]] }]);
     expect(index.search([], 3)).toEqual({ count: 0, hits: [] });
   });
 

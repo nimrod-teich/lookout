@@ -479,6 +479,14 @@ body.vscode-reduce-motion .hover-card {
   display: flex;
   gap: 6px;
   min-width: 0;
+  margin: 0 -4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.hit:hover {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
 .hit .who {
@@ -518,9 +526,18 @@ body.vscode-reduce-motion .hover-card {
 }
 
 .hits .more {
-  padding-left: 40px;
+  align-self: flex-start;
+  margin-left: 36px;
+  padding: 0 4px;
+  border-radius: 3px;
   font-size: calc(var(--vscode-font-size) - 2px);
   color: var(--muted);
+  cursor: pointer;
+}
+
+.hits .more:hover {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink);
 }
 
 .meters {

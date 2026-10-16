@@ -17,6 +17,8 @@ export interface BoardActions {
   markAllSeen(): void;
   /** Searches the live sessions' conversations. */
   search(query: string): SearchResult[];
+  /** Shows a session's conversation in the findings tab, at one message or at the newest match. */
+  openHit(query: string, id: string, index: number | undefined): void;
 }
 
 /** The session board in the activity bar: one card per session, grouped by state. */
@@ -81,6 +83,11 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         return;
       case "refreshUsage":
         this.actions.refreshUsage();
+        return;
+      case "openHit":
+        if (typeof message.query === "string" && typeof message.id === "string" && (message.index === undefined || typeof message.index === "number")) {
+          this.actions.openHit(message.query, message.id, message.index);
+        }
         return;
       case "search": {
         if (typeof message.query !== "string") return;
