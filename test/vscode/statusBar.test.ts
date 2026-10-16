@@ -71,8 +71,9 @@ describe("StatusBar", () => {
 
   it("puts the usage under the same lighthouse, with every limit in the hover", () => {
     bar.render(input([view({ state: "working" })], { usage: usage() }), 3 * 60_000);
-    expect(lastSet("text")).toBe(`${L} ⠋ 1   5h 18% · wk 31%`);
-    expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 1 working, 0 waiting for you, 0 finished, 0 idle. Usage 5h 18% · wk 31%" });
+    expect(lastSet("text")).toBe(`${L} ⠋ 1   ▰▰▱▱▱▱▱▱▱▱ 18%`);
+    expect(lastSet("color")).toMatchObject({ id: "charts.green" });
+    expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 1 working, 0 waiting for you, 0 finished, 0 idle. Usage 5h 18%" });
     const tip = (lastSet("tooltip") as { value: string }).value;
     expect(tip).toContain("**Claude usage**");
     expect(tip).toContain("5h: 18% · resets in 1h 57m");
@@ -83,13 +84,14 @@ describe("StatusBar", () => {
 
   it("shows the usage alone when no session runs, and nothing when usage is off", () => {
     bar.render(input([], { usage: usage() }));
-    expect(lastSet("text")).toBe(`${L} 5h 18% · wk 31%`);
+    expect(lastSet("text")).toBe(`${L} ▰▰▱▱▱▱▱▱▱▱ 18%`);
     expect((lastSet("tooltip") as { value: string }).value).toContain("No agent sessions running.");
     stub.ops.length = 0;
     bar.render(input([], { usage: usage(), showUsage: false }));
     expect(itemOps()).toEqual([[ITEM, "hide"]]);
     bar.render(input([view()], { usage: usage(), showUsage: false }));
     expect(lastSet("text")).toBe(`${L} 1 idle`);
+    expect(lastSet("color")).toBeUndefined();
     expect((lastSet("tooltip") as { value: string }).value).not.toContain("Claude usage");
   });
 
@@ -97,11 +99,29 @@ describe("StatusBar", () => {
     const high = usage({ meters: [{ key: "session", label: "5h", percent: 97 }] });
     bar.render(input([view()], { usage: high }), 0);
     expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.errorBackground" });
+    expect(lastSet("color")).toMatchObject({ id: "charts.red" });
+    expect(lastSet("text")).toBe(`${L} 1 idle   ▰▰▰▰▰▰▰▰▰▰ 97%`);
     bar.render(input([view()], { usage: { ...high, stale: true } }), 0);
     expect(lastSet("backgroundColor")).toBeUndefined();
     expect((lastSet("tooltip") as { value: string }).value).toMatch(/As of 0s ago \\?\(stale\\?\)/);
     bar.render(input([view({ state: "waiting" })], { usage: high }), 0);
     expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.warningBackground" });
+  });
+
+  it("colours the bar by the 5-hour usage alone and leaves the week to the hover", () => {
+    const meters = (session: number, week: number) => usage({ meters: [{ key: "session", label: "5h", percent: session }, { key: "weekly_all", label: "Week", percent: week }] });
+    bar.render(input([], { usage: meters(55, 90) }), 0);
+    expect(lastSet("text")).toBe(`${L} ▰▰▰▰▰▰▱▱▱▱ 55%`);
+    expect(lastSet("color")).toMatchObject({ id: "charts.yellow" });
+    expect(lastSet("backgroundColor")).toBeUndefined();
+    expect((lastSet("tooltip") as { value: string }).value).toContain("Week: 90%");
+    bar.render(input([], { usage: meters(80, 10) }), 0);
+    expect(lastSet("color")).toMatchObject({ id: "charts.red" });
+    expect(lastSet("text")).toBe(`${L} ▰▰▰▰▰▰▰▰▱▱ 80%`);
+    // No 5-hour meter at all: the first one stands in.
+    bar.render(input([], { usage: usage({ meters: [{ key: "weekly_all", label: "Week", percent: 4 }] }) }), 0);
+    expect(lastSet("text")).toBe(`${L} ▱▱▱▱▱▱▱▱▱▱ 4%`);
+    expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 0 working, 0 waiting for you, 0 finished, 0 idle. Usage Week 4%" });
   });
 
   it("animates the spinner by rewriting only the text, once per frame, while a session works", () => {

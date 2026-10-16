@@ -121,7 +121,7 @@ describe("the extension", () => {
       JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now(), utilization: { five_hour: { utilization: 18 }, seven_day: { utilization: 31 } } } }),
     );
     activate(context());
-    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) 5h 18% · wk 31%"), WAIT);
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▱▱▱▱▱▱▱▱ 18%"), WAIT);
   }, 60_000);
 
   it("restores finished marks from the workspace state", async () => {

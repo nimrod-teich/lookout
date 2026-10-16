@@ -292,7 +292,7 @@ function notify(kind: string) {
 
 export const window = {
   createStatusBarItem: (id: string) =>
-    recorded(`statusBar:${id}`, ["text", "tooltip", "backgroundColor", "name", "command", "accessibilityInformation"], ["show", "hide", "dispose"]),
+    recorded(`statusBar:${id}`, ["text", "tooltip", "backgroundColor", "color", "name", "command", "accessibilityInformation"], ["show", "hide", "dispose"]),
   createOutputChannel: (name: string) => ({
     appendLine: (line: string) => void stub.ops.push([`output:${name}`, "appendLine", line]),
     dispose: () => {},

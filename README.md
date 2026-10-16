@@ -32,11 +32,11 @@ Running several AI coding agents at once means clicking through tabs to find out
   </tr>
   <tr>
     <td><b>Usage</b></td>
-    <td>Your 5-hour and weekly limits, in the status bar item and on the board, with each window's reset time. The bars turn amber from half and red from 80%. Claude Code fetches the numbers again when they are older than 10 minutes, with its own credentials; <code>Lookout: Refresh Usage</code> fetches at once.</td>
+    <td>Your 5-hour and weekly limits on the board, with each window's reset time, and the 5-hour one as a coloured bar in the status bar item. The bars turn amber from half and red from 80%. Claude Code fetches the numbers again when they are older than 10 minutes, with its own credentials; <code>Lookout: Refresh Usage</code> fetches at once.</td>
   </tr>
   <tr>
     <td><b>Watch</b></td>
-    <td>One status bar item shows how many sessions are working, how many wait for you, how many finished since you last looked, and your 5-hour and weekly usage. Its background lights up while any session waits. Hover for every session's title, project, worktree and state, and every usage limit.</td>
+    <td>One status bar item shows how many sessions are working, how many wait for you, how many finished since you last looked, and your 5-hour usage as a ten-cell bar coloured by consumption. Its background lights up while any session waits. Hover for every session's title, project, worktree and state, and every usage limit.</td>
   </tr>
   <tr>
     <td><b>Jump</b></td>
@@ -111,7 +111,7 @@ Windows support is new. Its process handling is tested on Windows in CI; it has 
 | Setting | Default | Description |
 | --- | --- | --- |
 | `lookout.statusBar.enabled` | `true` | Show the session counts in the status bar. |
-| `lookout.statusBar.showUsage` | `true` | Show the 5-hour and weekly usage in the status bar item. |
+| `lookout.statusBar.showUsage` | `true` | Show the 5-hour usage as a coloured bar in the status bar item; the hover lists every limit. |
 | `lookout.usage.refresh` | `auto` | `auto`: fetch when the numbers are older than 10 minutes, at most every 5 minutes. `manual`: fetch only on `Lookout: Refresh Usage`. `off`: never start the Claude Code binary; show only what it cached. |
 | `lookout.notifications.waiting` | `true` | Notify when a session of this window starts to wait for you and you are not looking at it. |
 | `lookout.notifications.done` | `false` | Notify when a session of this window finishes a turn and you are not looking at it. |
