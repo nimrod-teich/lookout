@@ -54,6 +54,39 @@ export function findLastLine(file: string, needle: string, maxBytes: number): nu
   }
 }
 
+/** The line that starts at `offset`, without its newline, or undefined when it cannot be read or is longer than `maxBytes`. */
+export function readLineAt(file: string, offset: number, maxBytes = 1024 * 1024): string | undefined {
+  let fd: number;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch {
+    return undefined;
+  }
+  try {
+    const chunk = 64 * 1024;
+    const parts: Buffer[] = [];
+    let total = 0;
+    while (total < maxBytes) {
+      const buffer = Buffer.alloc(chunk);
+      const got = fs.readSync(fd, buffer, 0, chunk, offset + total);
+      if (got === 0) break;
+      const data = buffer.subarray(0, got);
+      const nl = data.indexOf(NEWLINE);
+      if (nl >= 0) {
+        parts.push(data.subarray(0, nl));
+        return Buffer.concat(parts).toString("utf8");
+      }
+      parts.push(Buffer.from(data));
+      total += got;
+    }
+    return total < maxBytes && total > 0 ? Buffer.concat(parts).toString("utf8") : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export interface TailRead {
   /** Complete lines appended since the previous read. */
   lines: string[];

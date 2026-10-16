@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { JsonlTail } from "../../src/core/jsonlTail";
+import { JsonlTail, readLineAt } from "../../src/core/jsonlTail";
 import { tempConfigDir } from "./helpers";
 
 function file(): string {
@@ -73,5 +73,25 @@ describe("JsonlTail", () => {
     fs.writeFileSync(`${f}.new`, "replaced with a longer body\n");
     fs.renameSync(`${f}.new`, f);
     expect(tail.read()).toMatchObject({ lines: ["replaced with a longer body"], reset: true });
+  });
+});
+
+describe("readLineAt", () => {
+  it("returns the line that starts at an offset, with or without a newline after it", () => {
+    const f = file();
+    fs.writeFileSync(f, "first\nsecond ünïcode\nlast");
+    expect(readLineAt(f, 0)).toBe("first");
+    expect(readLineAt(f, 6)).toBe("second ünïcode");
+    expect(readLineAt(f, 23)).toBe("last");
+  });
+
+  it("gives up on a missing file, an offset past the end, and a line longer than the cap", () => {
+    const f = file();
+    expect(readLineAt(f, 0)).toBeUndefined();
+    fs.writeFileSync(f, `${"x".repeat(300_000)}\nshort\n`);
+    expect(readLineAt(f, 300_001)).toBe("short");
+    expect(readLineAt(f, 400_000)).toBeUndefined();
+    expect(readLineAt(f, 0, 100_000)).toBeUndefined();
+    expect(readLineAt(f, 0)).toHaveLength(300_000);
   });
 });

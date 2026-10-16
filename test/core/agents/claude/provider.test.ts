@@ -185,6 +185,35 @@ describe("ClaudeProvider", () => {
     expect(provider.poll(7_000)[0]?.cwd).toBe("/work/svc/.claude/worktrees/hotfix");
   });
 
+  it("keeps a title stamped before the last checkpoint of a large transcript", () => {
+    // Claude Code stamps the title once, and again on resume just before a
+    // cost checkpoint; reading from the checkpoint alone would miss it.
+    const { configDir, proc, provider } = setup();
+    const id = sessionId(1);
+    writeSession(configDir, proc, { pid: 11, sessionId: id, cwd: "/work/app" });
+    const filler = Array.from({ length: 1200 }, () => ({ type: "progress", data: "x".repeat(1000) }));
+    appendEntries(transcriptPath(configDir, "/work/app", id), [
+      { type: "ai-title", aiTitle: "Wire the cache" },
+      ...filler,
+      { type: "custom-title", customTitle: "Cache rewrite" },
+      { type: "cost-state", totalCostUSD: 1, modelUsage: {} },
+      { type: "user", cwd: "/work/app" },
+    ]);
+    expect(provider.poll(0)[0]).toMatchObject({ title: "Cache rewrite", cwd: "/work/app" });
+  });
+
+  it("keeps the title of a large transcript without a checkpoint, and lets a later line override it", () => {
+    const { configDir, proc, provider } = setup();
+    const id = sessionId(1);
+    writeSession(configDir, proc, { pid: 11, sessionId: id, cwd: "/work/app" });
+    const transcript = transcriptPath(configDir, "/work/app", id);
+    const filler = Array.from({ length: 1200 }, () => ({ type: "progress", data: "x".repeat(1000) }));
+    appendEntries(transcript, [{ type: "custom-title", customTitle: "Renamed" }, { type: "ai-title", aiTitle: "Wire the cache" }, ...filler]);
+    expect(provider.poll(0)[0]?.title).toBe("Renamed");
+    appendEntries(transcript, [{ type: "custom-title", customTitle: "" }]);
+    expect(provider.poll(1_000)[0]?.title).toBe("Wire the cache");
+  });
+
   it("reports the activity of a working session only", () => {
     const { configDir, proc, provider } = setup();
     const id = sessionId(1);
