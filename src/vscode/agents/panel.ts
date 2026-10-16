@@ -15,4 +15,10 @@ export interface PanelAdapter {
    * this window hosts. Resolves false when the agent's rename could not be reached.
    */
   rename(view: SessionView, log: Log): Promise<boolean>;
+  /**
+   * Puts the cursor in the session's input, so the user can type a command
+   * to the agent. Called after `reveal`, for sessions this window hosts.
+   * Resolves false when the agent's focus command could not be reached.
+   */
+  focusInput(view: SessionView, log: Log): Promise<boolean>;
 }

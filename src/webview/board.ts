@@ -282,7 +282,8 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   const remote = card.querySelector(".action.remote")!;
   remote.classList.toggle("on", view.remote === true);
   remote.setAttribute("aria-checked", String(view.remote === true));
-  remote.setAttribute("title", view.remote ? "Remote Control is on: reachable from claude.ai/code and the Claude app. Click to turn it off" : "Turn Remote Control on: drive this session from claude.ai/code or the Claude app");
+  const together = view.host === "panel" ? " Claude Code switches all its tabs together, so this reaches every tab." : "";
+  remote.setAttribute("title", view.remote ? `Remote Control is on: reachable from claude.ai/code and the Claude app. Click to turn it off.${together}` : `Turn Remote Control on: drive this session from claude.ai/code or the Claude app.${together}`);
   const line = card.querySelector(".line")!;
   const text = secondLine(view);
   line.querySelector(".mark")!.textContent = MARKS[view.state];

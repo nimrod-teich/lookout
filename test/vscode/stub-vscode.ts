@@ -264,6 +264,7 @@ export const window = {
   }),
   showInformationMessage: notify("info"),
   showWarningMessage: notify("warning"),
+  showErrorMessage: notify("error"),
   createQuickPick,
   tabGroups: {
     get all() {

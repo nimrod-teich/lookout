@@ -57,7 +57,7 @@ export function activate(context: vscode.ExtensionContext): void {
     markAllSeen: () => controller.markAllSeen(),
     refreshUsage: () => void controller.refreshUsage(),
     remote: async (view) => {
-      await toggleRemoteControl(view, terminals, log);
+      await toggleRemoteControl(view, terminals, log, { configDir: () => config.claudeConfigDir, sessions: () => controller.sessions });
     },
   });
   const render = () => {
