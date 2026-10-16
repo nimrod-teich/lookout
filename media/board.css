@@ -805,29 +805,6 @@ body.vscode-reduce-motion .hover-card {
   color: var(--ink);
 }
 
-.action.remote.on {
-  color: var(--working);
-}
-
-.action.remote.on:hover {
-  background: color-mix(in srgb, var(--working) 20%, transparent);
-}
-
-/* A session that is on Remote Control shows it without a hover. */
-.card:has(.action.remote.on) .actions {
-  opacity: 1;
-}
-
-.card:has(.action.remote.on) .actions .action:not(.remote) {
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
-.card:has(.action.remote.on):hover .actions .action,
-.card:has(.action.remote.on):focus-within .actions .action {
-  opacity: 1;
-}
-
 .action.seen {
   display: none;
   color: var(--done);

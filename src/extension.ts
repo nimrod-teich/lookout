@@ -10,7 +10,6 @@ import { jumpToSession, renameSession, revealed } from "./vscode/jump";
 import { createLog } from "./vscode/log";
 import { notifyFinished, notifyWaiting } from "./vscode/notifications";
 import { pickSession } from "./vscode/quickPick";
-import { toggleRemoteControl } from "./vscode/remote";
 import { StatusBar } from "./vscode/statusBar";
 import { Terminals } from "./vscode/terminals";
 
@@ -56,9 +55,6 @@ export function activate(context: vscode.ExtensionContext): void {
     markSeen: (id) => controller.markSeen(id),
     markAllSeen: () => controller.markAllSeen(),
     refreshUsage: () => void controller.refreshUsage(),
-    remote: async (view) => {
-      await toggleRemoteControl(view, terminals, log);
-    },
   });
   const render = () => {
     statusBar.render({

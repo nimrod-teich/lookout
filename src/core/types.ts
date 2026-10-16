@@ -26,8 +26,6 @@ export interface SessionView {
   worktree?: string;
   cwd: string;
   host: Host;
-  /** Can be driven from the agent's web or mobile app (Claude Code's Remote Control). */
-  remote?: boolean;
   /** Shell pid of the integrated terminal the session runs in, when `host` is "terminal". */
   terminalPid?: number;
   /** Name of the other VS Code window the session runs in, when `host` is "window". */
