@@ -73,7 +73,10 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
     title: session.title ?? (session.panel ? EMPTY_TAB : EMPTY_TERMINAL),
     state: session.status,
     since: session.since,
-    needs: session.status === "waiting" ? session.needs : undefined,
+    reason: session.status === "waiting" ? session.reason : undefined,
+    evidence: session.evidence,
+    question: session.status === "idle" ? session.question : undefined,
+    lastWriteAt: session.lastWriteAt,
     ...projectOf(session.cwd),
     cwd: session.cwd,
     ...locate(session, ancestors, ctx),
@@ -88,14 +91,19 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
   };
 }
 
-/** What wants the user's attention first, each group ordered by how long it has been in its state. */
 /** The view of a session that is not running. */
 export function buildPastView(session: PastSession): PastView {
   return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), cwd: session.cwd, modifiedAt: session.modifiedAt };
 }
 
+/** A prompt the agent reports blocks it; a question read from a reply does not, so it comes after. */
+function typedRank(view: SessionView): number {
+  return view.reason?.kind === "typed" ? 1 : 0;
+}
+
+/** What wants the user's attention first, each group ordered by how long it has been in its state. */
 export function sortViews(views: readonly SessionView[]): SessionView[] {
   return [...views].sort(
-    (a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || (a.since ?? 0) - (b.since ?? 0) || a.id.localeCompare(b.id),
+    (a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || typedRank(a) - typedRank(b) || (a.since ?? 0) - (b.since ?? 0) || a.id.localeCompare(b.id),
   );
 }

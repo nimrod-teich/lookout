@@ -1,4 +1,5 @@
 // Pure helpers for the board; no DOM here so they can be tested under Node.
+import { formatElapsed, quietFor, reasonLabel } from "../core/format";
 import type { SessionView, State } from "../core/types";
 
 export type GroupKey = "waiting" | "done" | "working" | "idle";
@@ -43,19 +44,41 @@ export function hostChip(view: SessionView): string | undefined {
   }
 }
 
-/** The second line of a card: what the session does, needs, or last said. */
-export function secondLine(view: SessionView): string | undefined {
+/** The second line of a card: what the session asks, does, or last said, with a label for the kind of ask. */
+export interface CardLine {
+  /** "Permission", "Question", "quiet 12m"… */
+  label?: string;
+  text?: string;
+  /** The answers a question offers. */
+  options?: string[];
+}
+
+export function cardLine(view: SessionView, now: number): CardLine {
   switch (view.state) {
-    case "waiting":
-      return view.needs ?? "input needed";
-    case "working":
-      return view.activity ?? "thinking";
+    case "waiting": {
+      const reason = view.reason;
+      if (!reason) return { text: "input needed" };
+      // "Permission" over "permission prompt" says it twice.
+      const text = reason.kind === "permission" && reason.ask === reason.raw ? undefined : reason.ask;
+      return { label: reasonLabel(reason.kind), text, options: reason.options };
+    }
+    case "working": {
+      const quiet = quietFor(view, now);
+      return { label: quiet === undefined ? undefined : `quiet ${formatElapsed(quiet)}`, text: view.activity ?? "thinking" };
+    }
     case "done":
     case "idle":
-      return view.lastReply;
+      return { text: view.lastReply };
     case "unknown":
-      return undefined;
+      return { text: view.evidence?.note };
   }
+}
+
+/** The card's second line as one string, for the hover over a boat. */
+export function secondLine(view: SessionView, now: number): string | undefined {
+  const line = cardLine(view, now);
+  if (line.text === undefined) return line.label;
+  return line.label ? `${line.label} · ${line.text}` : line.text;
 }
 
 /** Bar heights for the pulse, 0..1, scaled to the busiest minute. */

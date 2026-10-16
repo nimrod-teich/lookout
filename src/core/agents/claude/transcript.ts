@@ -1,3 +1,4 @@
+import { clip, quoteAsk } from "../../asks";
 import { costOf, type TokenCounts } from "./pricing";
 
 /** A tool call the assistant made that has no result yet. */
@@ -6,6 +7,19 @@ export interface OpenTool {
   name: string;
   /** What the tool works on, e.g. the command or the file. */
   summary?: string;
+  /** What a permission prompt for it asks: the whole command, the path, the question. */
+  ask?: string;
+  /** The answers a question offers. */
+  options?: string[];
+}
+
+/** The latest reply of the main chain, while the turn has not moved on from it. */
+export interface Reply {
+  /** Message id; one message spans several lines. */
+  id?: string;
+  text: string;
+  /** Epoch ms, when known. */
+  at?: number;
 }
 
 /** Tokens a session used, by kind, and what they cost. */
@@ -33,6 +47,10 @@ export interface TranscriptState {
   openTools: Map<string, OpenTool>;
   /** First line of the assistant's latest message. */
   lastReply?: string;
+  /** The latest reply, unless a tool call, a prompt or an interrupt came after it. */
+  reply?: Reply;
+  /** Names the session's plan file, `<config>/plans/<slug>.md`. */
+  slug?: string;
   model?: string;
   /** Tokens in the context window at the last model call. */
   contextTokens?: number;
@@ -55,6 +73,9 @@ const MAX_TOOL_TIMES = 400;
 
 export const INTERRUPT = "[Request interrupted by user";
 const SUMMARY_MAX = 60;
+/** A reply longer than this is cut; a question sits at its end, so the end is kept. */
+const REPLY_MAX = 16 * 1024;
+const OPTION_MAX = 60;
 
 export function emptyTranscript(): TranscriptState {
   return { openTools: new Map(), toolCallTimes: [], since: new Map(), countedMessages: new Set(), joinedLate: false };
@@ -157,6 +178,53 @@ export function summarizeTool(name: string, input: unknown): string | undefined 
   }
 }
 
+/** Fields that name what a tool works on, literally: shown as they are. */
+const LITERAL_FIELDS = ["command", "file_path", "notebook_path", "url", "pattern", "query", "skill", "path"];
+/** Fields that describe it in words: shown without their Markdown. */
+const PROSE_FIELDS = ["description", "prompt", "title", "summary", "name"];
+
+function record(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** A path under the session's directory, relative to it. */
+function relative(file: string, cwd: string | undefined): string {
+  if (!cwd) return file;
+  const base = cwd.replace(/[\\/]+$/, "");
+  return file.startsWith(`${base}/`) || file.startsWith(`${base}\\`) ? file.slice(base.length + 1) : file;
+}
+
+/**
+ * What a tool call asks to do, as a permission prompt would show it: the
+ * whole command, the path, the address; for a question, the question and
+ * its answers.
+ */
+export function askOf(name: string, input: unknown, cwd?: string): Pick<OpenTool, "ask" | "options"> {
+  const i = record(input);
+  if (name === "AskUserQuestion") {
+    const questions = Array.isArray(i.questions) ? i.questions : [];
+    const first = record(questions[0]);
+    const question = str(first.question);
+    if (!question) return {};
+    const options = (Array.isArray(first.options) ? first.options : []).map((option) => str(record(option).label)).filter((label): label is string => label !== undefined).map((label) => quoteAsk(label, OPTION_MAX));
+    const more = questions.length > 1 ? ` (+${questions.length - 1} more)` : "";
+    return { ask: clip(`${quoteAsk(question)}${more}`), options };
+  }
+  for (const key of LITERAL_FIELDS) {
+    const value = str(i[key]);
+    if (value) return { ask: clip(oneLine(key === "file_path" || key === "notebook_path" || key === "path" ? relative(value, cwd) : value)) };
+  }
+  for (const key of ["plan", ...PROSE_FIELDS]) {
+    const value = str(i[key]);
+    if (value) return { ask: quoteAsk(key === "plan" ? (value.split("\n").find((l) => l.trim() !== "") ?? value) : value) };
+  }
+  return {};
+}
+
 interface Block {
   type?: unknown;
   id?: unknown;
@@ -182,9 +250,12 @@ function applyAssistant(state: TranscriptState, e: Record<string, unknown>): voi
     applyUsage(state, message!);
   }
   const at = typeof e.timestamp === "string" ? Date.parse(e.timestamp) : NaN;
+  const id = typeof message?.id === "string" ? message.id : undefined;
   for (const block of blocksOf(e.message)) {
     if (block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") {
-      state.openTools.set(block.id, { id: block.id, name: block.name, summary: summarizeTool(block.name, block.input) });
+      state.openTools.set(block.id, { id: block.id, name: block.name, summary: summarizeTool(block.name, block.input), ...askOf(block.name, block.input, state.cwd) });
+      // The turn goes on: what was said before the call is not where it stopped.
+      state.reply = undefined;
       if (Number.isFinite(at)) {
         state.toolCallTimes.push(at);
         if (state.toolCallTimes.length > MAX_TOOL_TIMES) state.toolCallTimes.splice(0, state.toolCallTimes.length - MAX_TOOL_TIMES);
@@ -192,14 +263,27 @@ function applyAssistant(state: TranscriptState, e: Record<string, unknown>): voi
     } else if (block.type === "text" && typeof block.text === "string") {
       const line = firstLine(block.text, 120);
       if (line) state.lastReply = line;
+      if (block.text.trim() === "") continue;
+      const text = state.reply && id !== undefined && state.reply.id === id ? `${state.reply.text}\n\n${block.text}` : block.text;
+      state.reply = { id, text: text.length > REPLY_MAX ? tailOf(text, REPLY_MAX) : text, at: Number.isFinite(at) ? at : undefined };
     }
   }
+}
+
+/** The last `max` characters from a line start; a cut inside a code block gets its opening fence back. */
+function tailOf(text: string, max: number): string {
+  const cut = text.slice(-max);
+  const tail = cut.slice(cut.indexOf("\n") + 1);
+  const fences = tail.split("\n").filter((line) => /^\s*(`{3,}|~{3,})/.test(line)).length;
+  return fences % 2 === 1 ? `\`\`\`\n${tail}` : tail;
 }
 
 function applyUser(state: TranscriptState, e: Record<string, unknown>): void {
   const content = (e.message as { content?: unknown } | undefined)?.content;
   if (typeof content === "string") {
     if (content.startsWith(INTERRUPT)) state.openTools.clear();
+    // A prompt, an interrupt or a compaction summary: the reply before it is answered or moot.
+    if (e.isMeta !== true) state.reply = undefined;
     return;
   }
   let results = 0;
@@ -209,15 +293,19 @@ function applyUser(state: TranscriptState, e: Record<string, unknown>): void {
       if (typeof block.tool_use_id === "string") state.openTools.delete(block.tool_use_id);
     } else if (block.type === "text" && typeof block.text === "string" && block.text.startsWith(INTERRUPT)) {
       state.openTools.clear();
+      state.reply = undefined;
       return;
     }
   }
   // A prompt starts a new turn; whatever was in flight is over.
-  if (results === 0 && e.isMeta !== true) state.openTools.clear();
+  if (results === 0 && e.isMeta !== true) {
+    state.openTools.clear();
+    state.reply = undefined;
+  }
 }
 
-/** Folds one transcript line into the state. Lines that don't parse are ignored. */
-export function applyLine(state: TranscriptState, line: string): void {
+/** Folds one transcript line into the state. Lines that don't parse are ignored, and subagents' unless `sidechain` asks for them. */
+export function applyLine(state: TranscriptState, line: string, sidechain = false): void {
   if (line.length < 2) return;
   let entry: unknown;
   try {
@@ -242,8 +330,9 @@ export function applyLine(state: TranscriptState, line: string): void {
       return;
   }
   // Subagent entries carry their own cwd and tools; only the main chain is the session.
-  if (e.isSidechain === true) return;
+  if (e.isSidechain === true && !sidechain) return;
   if (typeof e.cwd === "string" && e.cwd !== "") state.cwd = e.cwd;
+  if (typeof e.slug === "string" && e.slug !== "") state.slug = e.slug;
   if (e.type === "assistant") applyAssistant(state, e);
   else if (e.type === "user") applyUser(state, e);
 }

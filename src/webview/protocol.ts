@@ -22,6 +22,8 @@ export type FromBoard =
   | { type: "jump"; id: string }
   | { type: "rename"; id: string }
   | { type: "seen"; id: string }
+  /** Dismiss the question the session's last message asks. */
+  | { type: "dismiss"; id: string }
   | { type: "seenAll" }
   | { type: "refreshUsage" }
   | { type: "search"; query: string }

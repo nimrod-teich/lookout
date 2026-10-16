@@ -61,6 +61,8 @@ export const stub = {
   closeTerminal: new EventEmitter<StubTerminal>(),
   /** Fired for any change of the front tab, the active terminal, or window focus. */
   focusChange: new EventEmitter<void>(),
+  /** Fired by tests after they change `config`. */
+  configChange: new EventEmitter<{ affectsConfiguration(section: string): boolean }>(),
   reset(): void {
     this.ops.length = 0;
     this.config = {};
@@ -79,6 +81,7 @@ export const stub = {
     this.openTerminal.dispose();
     this.closeTerminal.dispose();
     this.focusChange.dispose();
+    this.configChange.dispose();
   },
   /** Adds an editor group whose tabs are Claude Code panels with these labels. */
   addClaudeGroup(labels: string[]): StubGroup {
@@ -359,5 +362,5 @@ export const workspace = {
   getConfiguration: (section: string) => ({
     get: (key: string, fallback?: unknown) => stub.config[`${section}.${key}`] ?? fallback,
   }),
-  onDidChangeConfiguration: () => ({ dispose: () => {} }),
+  onDidChangeConfiguration: stub.configChange.event,
 };

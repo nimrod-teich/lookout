@@ -13,9 +13,15 @@ export interface SessionFile {
   waitingFor?: string;
   needs?: string;
   statusUpdatedAt?: number;
+  /** Epoch ms Claude Code last wrote the record. */
+  updatedAt?: number;
   procStart?: string;
   pidDomain?: string;
   spare: boolean;
+  /** Epoch ms the file was last modified, from the file system. */
+  writtenAt?: number;
+  /** The file has changed since it was last read whole, and what it holds now does not parse. */
+  unreadable?: boolean;
 }
 
 const STATUSES: readonly string[] = ["busy", "waiting", "idle", "shell"];
@@ -57,6 +63,7 @@ export function parseSessionFile(text: string): SessionFile | null {
     waitingFor: str(o.waitingFor),
     needs: str(o.needs),
     statusUpdatedAt: num(o.statusUpdatedAt),
+    updatedAt: num(o.updatedAt),
     procStart: str(o.procStart),
     pidDomain: str(o.pidDomain),
     spare: o.spare === true,

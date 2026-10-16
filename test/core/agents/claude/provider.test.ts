@@ -158,17 +158,17 @@ describe("ClaudeProvider", () => {
 
     const byPid = new Map(provider.poll(0).map((s) => [s.pid, s]));
     expect([11, 12, 13, 14, 15, 16].map((pid) => byPid.get(pid)?.status)).toEqual(["working", "waiting", "idle", "idle", "unknown", "idle"]);
-    expect(byPid.get(12)?.needs).toBe("permission prompt");
-    expect(byPid.get(11)?.needs).toBeUndefined();
+    expect(byPid.get(12)?.reason).toEqual({ kind: "permission", ask: "permission prompt", raw: "permission prompt", tentative: true });
+    expect(byPid.get(11)?.reason).toBeUndefined();
     expect(byPid.get(11)).toMatchObject({ agent: "claude-code", panel: true, since: 2_000, agents: 0 });
     expect(byPid.get(11)?.activity).toBeUndefined();
     expect(byPid.get(14)?.panel).toBe(false);
   });
 
-  it("prefers the specific reason a session waits", () => {
+  it("quotes the agent's own line for a prompt it can't tie to a tool call", () => {
     const { configDir, proc, provider } = setup();
-    writeSession(configDir, proc, { pid: 11, sessionId: sessionId(1), status: "waiting", waitingFor: "permission prompt", needs: "choose: allow or deny Bash" });
-    expect(provider.poll(0)[0]?.needs).toBe("choose: allow or deny Bash");
+    writeSession(configDir, proc, { pid: 11, sessionId: sessionId(1), status: "waiting", waitingFor: "permission prompt", needs: "choose: allow or deny the computer-use action" });
+    expect(provider.poll(0)[0]?.reason).toEqual({ kind: "permission", ask: "choose: allow or deny the computer-use action", raw: "permission prompt" });
   });
 
   it("takes title and current directory from the transcript as it grows", () => {

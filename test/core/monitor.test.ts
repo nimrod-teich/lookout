@@ -71,8 +71,9 @@ describe("Monitor", () => {
 
   it("fills in the view from the agent's session", () => {
     const { monitor } = setup([
-      session({ status: "waiting", needs: "permission prompt", since: 5, title: "Wire the cache", cwd: "/work/svc/.claude/worktrees/hotfix" }),
-      session({ id: "s2", status: "working", needs: "stale reason" }),
+      session({ status: "waiting", reason: { kind: "permission", ask: "permission prompt", raw: "permission prompt" }, since: 5, title: "Wire the cache", cwd: "/work/svc/.claude/worktrees/hotfix" }),
+      session({ id: "s2", status: "working", reason: { kind: "dialog", ask: "stale reason" }, question: { text: "Ready?" } }),
+      session({ id: "s3", status: "idle", question: { text: "Want me to open the PR?", at: 7 }, evidence: { source: "session file", at: 6 }, lastWriteAt: 7 }),
     ]);
     const views = monitor.poll({ hostPid: HOST, terminalPids: new Set(), windows: new Map() });
     expect(views[0]).toMatchObject({
@@ -82,12 +83,14 @@ describe("Monitor", () => {
       title: "Wire the cache",
       state: "waiting",
       since: 5,
-      needs: "permission prompt",
+      reason: { kind: "permission", ask: "permission prompt", raw: "permission prompt" },
       project: "svc",
       worktree: "hotfix",
     });
     expect(views[1]).toMatchObject({ title: UNTITLED, state: "working", project: "app" });
-    expect(views[1]?.needs).toBeUndefined();
+    expect(views[1]?.reason).toBeUndefined();
+    expect(views[1]?.question).toBeUndefined();
+    expect(views[2]).toMatchObject({ question: { text: "Want me to open the PR?", at: 7 }, evidence: { source: "session file", at: 6 }, lastWriteAt: 7 });
   });
 
   it("merges the sessions of several agents", () => {
@@ -110,6 +113,15 @@ describe("sortViews", () => {
     const views = monitor.poll({ hostPid: HOST, terminalPids: new Set(), windows: new Map() });
     views.push({ ...views[0]!, id: "done", state: "done" });
     expect(sortViews(views).map((v) => v.id)).toEqual(["wait", "done", "work-old", "work-new", "unknown", "idle"]);
+  });
+});
+
+describe("sortViews and typed questions", () => {
+  it("puts a prompt the agent reports before a question read from a reply, however long that has waited", () => {
+    const typed = view({ id: "typed", state: "waiting", since: 0, reason: { kind: "typed", ask: "Want me to open the PR?" } });
+    const prompt = view({ id: "prompt", state: "waiting", since: 5_000, reason: { kind: "permission", ask: "Bash: npm test", raw: "permission prompt" } });
+    expect(sortViews([typed, prompt]).map((v) => v.id)).toEqual(["prompt", "typed"]);
+    expect(nextAttention(sortViews([typed, prompt]), undefined)?.id).toBe("prompt");
   });
 });
 

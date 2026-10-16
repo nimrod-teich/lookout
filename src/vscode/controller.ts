@@ -23,10 +23,18 @@ const POLL_MS = 1000;
 /** A burst of file changes becomes one poll. */
 const DEBOUNCE_MS = 50;
 const DONE_KEY = "lookout.done";
+const DISMISSED_KEY = "lookout.dismissed";
 /** Matches shown per session. */
 const SEARCH_HITS = 3;
 /** A search reads conversations not read yet for at most this long; the rest are reported pending. */
 const SEARCH_BUDGET_MS = 150;
+/**
+ * The agent can write to the transcript a moment after it records a state:
+ * a prompt's tool call, a turn's last reply. An announcement looks again
+ * this often, this many times, so it can say what the session asks.
+ */
+const ANNOUNCE_RETRY_MS = 250;
+const ANNOUNCE_TRIES = 8;
 
 export interface ControllerHost {
   /** Pid of the extension host, which an agent panel's sessions descend from. */
@@ -77,11 +85,14 @@ export class Controller implements vscode.Disposable {
   private pastViews: PastView[] = [];
   private archived = new ArchivedSessions([]);
   private savedDone = "";
+  private savedDismissed = "";
+  private typedQuestions = true;
   private usageCache: UsageCache | undefined;
   private usageMode: RefreshMode = "manual";
   private currentUsage: UsageSnapshot | undefined;
   private refreshing: Promise<boolean> | undefined;
   private lastRefreshAttempt = -Infinity;
+  private readonly announcing = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly host: ControllerHost,
@@ -94,6 +105,9 @@ export class Controller implements vscode.Disposable {
     const done = host.state.get<string[]>(DONE_KEY, []);
     this.attention.restore(done);
     this.savedDone = done.join("\n");
+    const dismissed = host.state.get<Record<string, string>>(DISMISSED_KEY, {});
+    this.attention.restoreDismissals(dismissed);
+    this.savedDismissed = JSON.stringify(this.attention.dismissals());
   }
 
   get sessions(): readonly SessionView[] {
@@ -121,6 +135,7 @@ export class Controller implements vscode.Disposable {
 
   /** Starts, or restarts with other settings. */
   start(config: Config): void {
+    this.typedQuestions = config.typedQuestions;
     this.providers = [new ClaudeProvider(config.claudeConfigDir, this.proc)];
     this.monitor = new Monitor(this.providers, this.proc);
     this.usageCache = new UsageCache(usageCacheFile(config.claudeConfigDir));
@@ -129,6 +144,12 @@ export class Controller implements vscode.Disposable {
     if (!this.archived.available) this.log.info("The agent's archived-session list is out of reach; every past session is listed");
     this.log.info(`Watching ${this.providers.map((p) => p.label).join(", ")} (${config.claudeConfigDir})`);
     this.watch();
+    this.poll();
+  }
+
+  /** Takes settings that need no restart, and shows their effect at once. */
+  configure(config: Config): void {
+    this.typedQuestions = config.typedQuestions;
     this.poll();
   }
 
@@ -146,16 +167,54 @@ export class Controller implements vscode.Disposable {
       this.log.errorOnce(`Poll failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
       return;
     }
-    const update = this.attention.update(views, (view) => isWatched(view, this.terminals));
+    const update = this.attention.update(views, (view) => isWatched(view, this.terminals), { typedQuestions: this.typedQuestions });
     const exclude = new Set<string>([...update.views.map((view) => view.id), ...this.archived.read()]);
     const folders = this.host.workspaceFolders();
     const past = this.providers.flatMap((provider) => provider.past?.(folders, exclude) ?? []).map(buildPastView);
     past.sort((a, b) => b.modifiedAt - a.modifiedAt);
     this.publish(sortViews(update.views), past);
     this.saveDone();
-    for (const view of update.finished) this.finished.fire(view);
-    for (const view of update.waiting) this.waiting.fire(view);
+    for (const view of update.finished) this.announceFinished(view);
+    for (const view of update.waiting) this.announce(view);
     this.pollUsage();
+  }
+
+  /**
+   * Announces a wait at once, or, while its reason is only the agent's word
+   * and could still say more, once it does or after two seconds; not when the
+   * user has turned to the session meanwhile.
+   */
+  private announce(view: SessionView, attempt = 0): void {
+    if (!view.reason?.tentative || attempt >= ANNOUNCE_TRIES) {
+      if (attempt === 0 || !isWatched(view, this.terminals)) this.waiting.fire(view);
+      return;
+    }
+    this.later(() => {
+      const now = this.current.find((v) => v.id === view.id);
+      if (now?.state === "waiting") this.announce(now, attempt + 1);
+    });
+  }
+
+  /** Announces a finished turn, unless its last reply turns out to ask something: that is announced as a wait. */
+  private announceFinished(view: SessionView, attempt = 0): void {
+    if (attempt >= ANNOUNCE_TRIES) {
+      if (!isWatched(view, this.terminals)) this.finished.fire(view);
+      return;
+    }
+    this.later(() => {
+      const now = this.current.find((v) => v.id === view.id);
+      if (now?.state === "done") this.announceFinished(now, attempt + 1);
+    });
+  }
+
+  /** Polls again after a moment, then runs `next`. */
+  private later(next: () => void): void {
+    const timer = setTimeout(() => {
+      this.announcing.delete(timer);
+      this.poll();
+      next();
+    }, ANNOUNCE_RETRY_MS);
+    this.announcing.add(timer);
   }
 
   private pollUsage(): void {
@@ -224,6 +283,11 @@ export class Controller implements vscode.Disposable {
     if (this.attention.markAllSeen()) this.poll();
   }
 
+  /** The user dismissed the question a session's last message asks. */
+  dismiss(id: string): void {
+    if (this.attention.dismiss(id)) this.poll();
+  }
+
   /** Clears "done" from the session whose tab or terminal the user just brought to the front. */
   noticeFocus(): void {
     for (const view of this.current) {
@@ -263,14 +327,23 @@ export class Controller implements vscode.Disposable {
   private saveDone(): void {
     const done = this.attention.snapshot();
     const key = done.join("\n");
-    if (key === this.savedDone) return;
-    this.savedDone = key;
-    void this.host.state.update(DONE_KEY, done);
+    if (key !== this.savedDone) {
+      this.savedDone = key;
+      void this.host.state.update(DONE_KEY, done);
+    }
+    const dismissed = this.attention.dismissals();
+    const dismissedKey = JSON.stringify(dismissed);
+    if (dismissedKey !== this.savedDismissed) {
+      this.savedDismissed = dismissedKey;
+      void this.host.state.update(DISMISSED_KEY, dismissed);
+    }
   }
 
   dispose(): void {
     if (this.timer) clearInterval(this.timer);
     if (this.debounce) clearTimeout(this.debounce);
+    for (const timer of this.announcing) clearTimeout(timer);
+    this.announcing.clear();
     this.timer = undefined;
     for (const watcher of this.watchers) watcher.dispose();
     this.watchers = [];

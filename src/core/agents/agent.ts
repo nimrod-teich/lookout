@@ -1,4 +1,5 @@
 import type { HistoryMessage, SearchResult } from "../history";
+import type { Evidence, Reason, TypedQuestion } from "../types";
 
 export type AgentStatus = "working" | "waiting" | "idle" | "unknown";
 
@@ -10,7 +11,13 @@ export interface AgentSession {
   pid: number;
   status: AgentStatus;
   /** Why the session waits for the user, when it does. */
-  needs?: string;
+  reason?: Reason;
+  /** Where the status comes from, and how old that is. */
+  evidence?: Evidence;
+  /** The question the session's last message asks, while it is idle. */
+  question?: TypedQuestion;
+  /** Epoch ms the session last wrote to its transcript. */
+  lastWriteAt?: number;
   /** Epoch ms of the last status change. */
   since?: number;
   title?: string;
