@@ -21,14 +21,30 @@
   <a href="#how-it-works">How it works</a>
 </p>
 
-Running several AI coding agents at once means clicking through tabs to find out which one finished and which one is stuck on a question. Lookout keeps that answer in the status bar and takes you to the right tab with one keystroke.
+Running several AI coding agents at once means clicking through tabs to find out which one finished and which one is stuck on a question. Lookout keeps that answer in the status bar, takes you to the right tab with one keystroke, and finds any conversation, running or not, by a word you remember from it.
 
 ## What it does
 
 <table>
   <tr>
     <td><b>Board</b></td>
-    <td>The Lookout view in the activity bar. At the top, the harbour: a night scene where every session is a boat on the water. Its lane says its state, its distance from the lighthouse how long it has been there; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with your 5-hour usage. Hover a boat for the session's details; its card lights up below. Below, one card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its tool calls per minute over the last 15 minutes (fewer while it is younger than that, so the bars grow from the left), a ring for how full its context window is, the tokens it has used so far with their price at API list rates, its project and worktree, where it runs and its model. Click a boat or a card to jump to the session; a pencil on the card renames it through the agent; a click on a state in the legend hides that group. Under the live sessions, an Earlier group holds the sessions of this window's folders that are not running (and that Claude Code has not archived), collapsed until clicked; a click on one resumes it in the agent's panel. The search box looks through every conversation, live and earlier: the sessions with matches stay, each with its newest matches under the card, the terms marked. A click on a snippet, or on "+N more", opens that session's whole conversation in a tab, scrolled to the match with the words marked; the tab has a search of its own, with next and previous, and a button that brings the session's own tab or terminal to the front.</td>
+    <td>The Lookout view in the activity bar. At the top, the harbour: a night scene where every session is a boat on the water. Its lane says its state, its distance from the lighthouse how long it has been there; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with your 5-hour usage. Hover a boat for the session's details; its card lights up below.</td>
+  </tr>
+  <tr>
+    <td><b>Cards</b></td>
+    <td>One card per session, grouped into Needs you, Finished, Working and Idle: the title, time in state, what it is doing right now (the tool it runs, or what it asks you), its tool calls per minute over the last 15 minutes (the bars grow from the left while it is younger than that), a ring for how full its context window is, the tokens it has used so far with their price at API list rates, its project and worktree, where it runs and its model. Click a card to jump to the session; a pencil renames it through the agent; a click on a state in the legend hides that group.</td>
+  </tr>
+  <tr>
+    <td><b>Earlier</b></td>
+    <td>Under the live sessions, a collapsed group holds the sessions of this window's folders that are not running and that the agent has not archived, newest first. Click the heading to open it; click a session to resume it in the agent's panel.</td>
+  </tr>
+  <tr>
+    <td><b>Search</b></td>
+    <td>A box above the cards looks through every conversation, live and earlier: what you wrote and what the agent replied, not tool traffic. Every word must appear in one message. The sessions with matches stay, each with its newest three matches under the card and the words marked; the rest hide until the box is cleared. Big transcripts are read a little at a time, and the box says how many are left.</td>
+  </tr>
+  <tr>
+    <td><b>Conversation&nbsp;tab</b></td>
+    <td>A click on a match, or on "+N more", opens that session's whole conversation in an editor tab, scrolled to the match. The tab has a search of its own: it marks the words, dims the messages without them, and steps through the matches with Enter and the arrows. It follows the conversation as it grows, and an Open session button brings the agent's own tab or terminal to the front.</td>
   </tr>
   <tr>
     <td><b>Usage</b></td>
@@ -61,14 +77,15 @@ Running several AI coding agents at once means clicking through tabs to find out
 | Working | The session is running a turn. |
 | Idle | The session waits for the next prompt. |
 | State unknown | The session runs an agent version that doesn't record its state. |
+| Earlier | Not running. Its transcript is still there, so it can be searched, read in the conversation tab, and resumed. |
 
 ## Supported agents
 
 | Agent | Watch | Jump |
 | --- | --- | --- |
-| [Claude Code](https://claude.com/claude-code) | Sessions in the VS Code panel and in terminals | Sessions in the VS Code panel and in the integrated terminals of the same window |
+| [Claude Code](https://claude.com/claude-code) | Sessions in the VS Code panel and in terminals; past sessions of the window's folders | Sessions in the VS Code panel and in the integrated terminals of the same window; past sessions resume in the panel |
 
-Sessions in another VS Code window are listed with that window's name; sessions in a terminal outside VS Code are listed as such. Neither can be jumped to from this window.
+Sessions in another VS Code window are listed with that window's name; sessions in a terminal outside VS Code are listed as such. Neither can be jumped to from this window, but both can be searched and read.
 
 ## Install
 
