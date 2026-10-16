@@ -1,3 +1,5 @@
+import type { SearchResult } from "../history";
+
 export type AgentStatus = "working" | "waiting" | "idle" | "unknown";
 
 /** One live session, as an agent provider reports it. */
@@ -63,4 +65,10 @@ export interface AgentProvider {
    * records can't be watched, in which case polling alone keeps up.
    */
   watch?(listener: () => void): { dispose(): void } | undefined;
+  /**
+   * Searches the conversations of the live sessions: what the user wrote and
+   * what the agent replied. Returns only sessions with matches, each with its
+   * newest `limit` matches.
+   */
+  search?(query: string, limit: number): SearchResult[];
 }

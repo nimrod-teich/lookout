@@ -53,7 +53,7 @@ export const PULSE_WINDOW_MS = 15 * 60_000;
 const PULSE_BINS = 15;
 const MAX_TOOL_TIMES = 400;
 
-const INTERRUPT = "[Request interrupted by user";
+export const INTERRUPT = "[Request interrupted by user";
 const SUMMARY_MAX = 60;
 
 export function emptyTranscript(): TranscriptState {

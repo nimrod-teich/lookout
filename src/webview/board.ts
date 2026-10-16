@@ -1,5 +1,6 @@
 /// <reference lib="dom" />
 import { formatElapsed, formatTokens, formatUsd, shortModel } from "../core/format";
+import type { SearchResult } from "../core/history";
 import type { SessionView } from "../core/types";
 import { Harbour } from "./harbour";
 import { contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type GroupKey } from "./model";
@@ -21,6 +22,10 @@ let sessions: SessionView[] = [];
 /** State groups the user hid through the legend; kept across reloads. */
 const hidden = new Set<GroupKey>((vscode.getState()?.hidden ?? []).filter(isGroupKey));
 let usage: BoardUsage | undefined;
+/** The search the user typed, trimmed; empty when the box is empty. */
+let query = "";
+/** The results for `query`, by session id; sessions absent here are hidden while a query is active. */
+let hits = new Map<string, SearchResult>();
 /** The extension's clock minus ours, so elapsed times agree with the status bar. */
 let clockOffset = 0;
 
@@ -129,8 +134,78 @@ function showHover(id: string | undefined): void {
 const legend = el("div", "legend");
 beam.append(legend);
 
+// The search box: looks through what the user and the agent said in every live session.
+
+const search = el("div", "search");
+const field = el("label", "field");
+field.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 10l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+const input = el("input", "");
+input.type = "search";
+input.placeholder = "Search the conversations";
+input.setAttribute("aria-label", "Search the conversations");
+input.spellcheck = false;
+field.append(input);
+const clear = el("button", "clear", "×");
+clear.type = "button";
+clear.title = "Clear the search";
+const summary = el("span", "summary");
+search.append(field, clear, summary);
+beam.append(search);
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+function runSearch(): void {
+  const next = input.value.trim();
+  if (next === query && next !== "") {
+    vscode.postMessage({ type: "search", query });
+    return;
+  }
+  query = next;
+  hits = new Map();
+  search.classList.toggle("active", query !== "");
+  if (query === "") {
+    search.classList.remove("searching");
+    summary.textContent = "";
+    applyFilters();
+    render();
+    return;
+  }
+  search.classList.add("searching");
+  vscode.postMessage({ type: "search", query });
+}
+
+input.addEventListener("input", () => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 250);
+});
+input.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    input.value = "";
+    runSearch();
+  } else if (event.key === "Enter") {
+    if (searchTimer) clearTimeout(searchTimer);
+    runSearch();
+  }
+});
+clear.addEventListener("click", () => {
+  input.value = "";
+  runSearch();
+  input.focus();
+});
+
+function receiveSearch(message: { query: string; results: SearchResult[] }): void {
+  // An answer to an older query is of no use.
+  if (message.query !== query) return;
+  hits = new Map(message.results.map((result) => [result.id, result]));
+  search.classList.remove("searching");
+  const matches = message.results.reduce((sum, result) => sum + result.count, 0);
+  summary.textContent = matches === 0 ? "no matches" : `${matches} ${matches === 1 ? "match" : "matches"} in ${message.results.length} ${message.results.length === 1 ? "session" : "sessions"}`;
+  applyFilters();
+  render();
+}
+
 function applyFilters(): void {
-  sessions = allSessions.filter((view) => !hidden.has(groupSessions([view])[0]!.key));
+  sessions = allSessions.filter((view) => !hidden.has(groupSessions([view])[0]!.key) && (query === "" || hits.has(view.id)));
 }
 
 function toggleGroup(key: GroupKey): void {
@@ -236,7 +311,8 @@ function createCard(view: SessionView): HTMLElement {
   const pulse = el("span", "pulse");
   const chipsEl = el("span", "chips");
   const spend = el("span", "chip spend");
-  main.append(row, line, pulse, chipsEl, spend);
+  const hitsEl = el("span", "hits hidden");
+  main.append(row, line, pulse, chipsEl, spend, hitsEl);
   card.append(main);
   const ring = el("span", "ring");
   ring.append(el("span", "ring-value"));
@@ -310,6 +386,7 @@ function updateCard(card: HTMLElement, view: SessionView): void {
       .filter(Boolean)
       .join(" ");
   }
+  renderHits(card.querySelector(".hits")!, query === "" ? undefined : hits.get(view.id));
   const chipsEl = card.querySelector(".chips")!;
   const labels = chips(view);
   while (chipsEl.childNodes.length > labels.length) chipsEl.lastChild!.remove();
@@ -317,6 +394,28 @@ function updateCard(card: HTMLElement, view: SessionView): void {
     const chip = chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"));
     if (chip.textContent !== label) chip.textContent = label;
   });
+}
+
+/** The newest matches of a session under its card, the terms marked. */
+function renderHits(hitsEl: Element, result: SearchResult | undefined): void {
+  hitsEl.textContent = "";
+  hitsEl.classList.toggle("hidden", result === undefined);
+  if (!result) return;
+  for (const hit of result.hits) {
+    const line = el("span", `hit ${hit.role}`);
+    line.append(el("i", "who", hit.role === "you" ? "you" : "agent"));
+    const text = el("span", "snippet");
+    let at = 0;
+    for (const [start, end] of hit.ranges) {
+      if (start > at) text.append(hit.snippet.slice(at, start));
+      text.append(el("mark", "", hit.snippet.slice(start, end)));
+      at = end;
+    }
+    if (at < hit.snippet.length) text.append(hit.snippet.slice(at));
+    line.append(text);
+    hitsEl.append(line);
+  }
+  if (result.count > result.hits.length) hitsEl.append(el("span", "more", `+${result.count - result.hits.length} more`));
 }
 
 function render(): void {
@@ -332,7 +431,8 @@ function render(): void {
     cards.clear();
     root.querySelector(".nothing")?.remove();
     const nothing = el("div", "nothing");
-    if (allSessions.length > 0) nothing.append(el("p", "big", "Everything is hidden"), el("p", "small", "Click a state in the legend to show it again."));
+    if (query !== "") nothing.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message. Esc clears the search."));
+    else if (allSessions.length > 0) nothing.append(el("p", "big", "Everything is hidden"), el("p", "small", "Click a state in the legend to show it again."));
     else nothing.append(el("p", "big", "Nothing on the horizon"), el("p", "small", "Sessions appear here as soon as an agent starts."));
     root.append(nothing);
     return;
@@ -401,12 +501,18 @@ function tick(): void {
 
 window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   const message = event.data;
+  if (message.type === "search") {
+    receiveSearch(message);
+    return;
+  }
   if (message.type !== "sessions") return;
   allSessions = message.sessions;
   usage = message.usage;
   clockOffset = message.now - Date.now();
   applyFilters();
   render();
+  // The conversations go on; keep an open search current.
+  if (query !== "") vscode.postMessage({ type: "search", query });
 });
 
 setInterval(tick, 1000);

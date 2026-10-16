@@ -1,3 +1,4 @@
+import type { SearchResult } from "../core/history";
 import type { SessionView } from "../core/types";
 import type { UsageMeter } from "../core/usage";
 
@@ -10,7 +11,9 @@ export interface BoardUsage {
 }
 
 /** Extension → webview. */
-export type ToBoard = { type: "sessions"; sessions: SessionView[]; now: number; usage?: BoardUsage };
+export type ToBoard =
+  | { type: "sessions"; sessions: SessionView[]; now: number; usage?: BoardUsage }
+  | { type: "search"; query: string; results: SearchResult[] };
 
 /** Webview → extension. */
 export type FromBoard =
@@ -19,4 +22,5 @@ export type FromBoard =
   | { type: "rename"; id: string }
   | { type: "seen"; id: string }
   | { type: "seenAll" }
-  | { type: "refreshUsage" };
+  | { type: "refreshUsage" }
+  | { type: "search"; query: string };
