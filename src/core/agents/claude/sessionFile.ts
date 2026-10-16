@@ -13,8 +13,6 @@ export interface SessionFile {
   waitingFor?: string;
   needs?: string;
   statusUpdatedAt?: number;
-  /** Set while the session is under Remote Control. */
-  bridgeSessionId?: string;
   procStart?: string;
   pidDomain?: string;
   spare: boolean;
@@ -59,7 +57,6 @@ export function parseSessionFile(text: string): SessionFile | null {
     waitingFor: str(o.waitingFor),
     needs: str(o.needs),
     statusUpdatedAt: num(o.statusUpdatedAt),
-    bridgeSessionId: str(o.bridgeSessionId),
     procStart: str(o.procStart),
     pidDomain: str(o.pidDomain),
     spare: o.spare === true,

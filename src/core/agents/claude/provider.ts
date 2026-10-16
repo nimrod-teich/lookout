@@ -84,7 +84,6 @@ export class ClaudeProvider implements AgentProvider {
         title: titleOf(transcript),
         cwd: transcript.cwd ?? file.cwd,
         panel: file.entrypoint === PANEL_ENTRYPOINT,
-        remote: file.bridgeSessionId !== undefined,
         activity: status === "working" ? activityOf(transcript) : undefined,
         agents: status === "working" ? agentsOf(transcript) : 0,
         lastReply: transcript.lastReply,

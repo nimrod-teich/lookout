@@ -28,15 +28,6 @@ export class Terminals implements vscode.Disposable {
     return active ? this.pidOf.get(active) : undefined;
   }
 
-  /** Types a line into the terminal with this shell pid, as if the user had, and brings it to the front. */
-  send(pid: number, line: string): boolean {
-    const terminal = this.byPid.get(pid);
-    if (!terminal) return false;
-    terminal.sendText(line, true);
-    terminal.show(true);
-    return true;
-  }
-
   /** Brings the terminal with this shell pid to the front and focuses it. */
   show(pid: number): boolean {
     const terminal = this.byPid.get(pid);

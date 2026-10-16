@@ -249,12 +249,6 @@ function createCard(view: SessionView): HTMLElement {
     event.stopPropagation();
     vscode.postMessage({ type: "rename", id: view.id });
   });
-  const remote = el("span", "action remote", "◎");
-  remote.setAttribute("role", "button");
-  remote.addEventListener("click", (event) => {
-    event.stopPropagation();
-    vscode.postMessage({ type: "remote", id: view.id });
-  });
   const seen = el("span", "action seen", "✓");
   seen.title = "Mark as seen";
   seen.setAttribute("role", "button");
@@ -262,7 +256,7 @@ function createCard(view: SessionView): HTMLElement {
     event.stopPropagation();
     vscode.postMessage({ type: "seen", id: view.id });
   });
-  actions.append(remote, rename, seen);
+  actions.append(rename, seen);
   card.append(actions);
   card.addEventListener("click", () => harbour.jump(view.id));
   card.addEventListener("mouseenter", () => harbour.highlight(view.id, true));
@@ -277,9 +271,6 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   card.title = `${stateTitle(view)} · ${view.title}`;
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = elapsedText(view);
-  const remote = card.querySelector(".action.remote")!;
-  remote.classList.toggle("on", view.remote === true);
-  remote.setAttribute("title", view.remote ? "Remote Control is on: reachable from claude.ai/code and the Claude app. Click to turn it off" : "Turn Remote Control on: drive this session from claude.ai/code or the Claude app");
   const line = card.querySelector(".line")!;
   const text = secondLine(view);
   line.querySelector(".mark")!.textContent = MARKS[view.state];
