@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Dev preview of the findings tab outside VS Code: npm run build, then open this file. ?q=<query>&target=<index>&theme=light -->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="theme-dark.css" id="theme">
+<link rel="stylesheet" href="../media/findings.css">
+<style>html { background: var(--vscode-editor-background); }</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  const params = new URLSearchParams(location.search);
+  if (params.get("theme") === "light") {
+    document.getElementById("theme").href = "theme-light.css";
+    document.body.className = "vscode-light";
+  } else {
+    document.body.className = "vscode-dark";
+  }
+  window.acquireVsCodeApi = () => ({ postMessage: (m) => console.log("to extension:", JSON.stringify(m)) });
+  const at = (minutesAgo) => Date.now() - minutesAgo * 60_000;
+  const messages = [
+    { index: 0, role: "you", at: at(50), text: "Move the billing webhook receiver off the legacy path. Keep the signature check exactly as it is." },
+    { index: 1, role: "agent", at: at(49), text: "Reading the current receiver first.\n\nThe handler verifies the HMAC signature before parsing, then mirrors the subscription. I will keep that order." },
+    { index: 2, role: "you", at: at(31), text: "Also make sure a lost checkout.session.completed can't strand a paid user on Free." },
+    { index: 3, role: "agent", at: at(30), text: "The billing webhook now has a fallback: on return from Checkout the web calls checkout-sync, which mirrors the subscription when the webhook never arrived. Idempotent through stripe_events, so a late webhook is a no-op." },
+    { index: 4, role: "you", at: at(4), text: "Run the smoke against the dev stack and show me the audit rows for the billing webhook." },
+    { index: 5, role: "agent", at: at(3), text: "Smoke passed: 14 routes, every expected audit_log row present. The billing.canceled row carries switch_to_free as its reason." },
+  ];
+  const target = params.has("target") ? Number(params.get("target")) : undefined;
+  const view = { type: "conversation", session: { id: "1", title: "Migrate billing webhooks" }, messages, query: params.get("q") ?? "", target };
+  window.addEventListener("load", () => window.postMessage(view, "*"));
+</script>
+<script src="../dist/findings.js"></script>
+</body>
+</html>

@@ -6,7 +6,7 @@ import { view } from "./helpers";
 import { createWebviewView, stub } from "./stub-vscode";
 
 function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
-  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => (query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [])) };
+  const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => (query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [])), openHit: vi.fn() };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
   board.resolveWebviewView(webviewView as never);
@@ -91,6 +91,17 @@ describe("Board", () => {
     webviewView.receive({ type: "search", query: 42 });
     expect(actions.search).toHaveBeenCalledTimes(1);
     expect(webviewView.posted.at(-1)).toEqual({ type: "search", query: "cache", results: [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] });
+  });
+
+  it("relays the requests to open a conversation in the findings tab, at a message or at the newest match", () => {
+    const { actions, webviewView } = setup([view()]);
+    webviewView.receive({ type: "openHit", query: "cache", id: "00000000-0000-4000-8000-000000000001", index: 4 });
+    webviewView.receive({ type: "openHit", query: "cache", id: "00000000-0000-4000-8000-000000000001" });
+    webviewView.receive({ type: "openHit", query: "cache", id: "00000000-0000-4000-8000-000000000001", index: "4" });
+    webviewView.receive({ type: "openHit", query: 1, id: "00000000-0000-4000-8000-000000000001" });
+    expect(actions.openHit).toHaveBeenCalledTimes(2);
+    expect(actions.openHit).toHaveBeenNthCalledWith(1, "cache", "00000000-0000-4000-8000-000000000001", 4);
+    expect(actions.openHit).toHaveBeenNthCalledWith(2, "cache", "00000000-0000-4000-8000-000000000001", undefined);
   });
 
   it("stops sending after the view is disposed", () => {

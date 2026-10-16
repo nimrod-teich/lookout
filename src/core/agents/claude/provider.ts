@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { HistoryIndex, termsOf, type SearchResult } from "../../history";
+import { HistoryIndex, termsOf, type HistoryMessage, type SearchResult } from "../../history";
 import { findLastLine, JsonlTail, readLineAt } from "../../jsonlTail";
 import { messageOf } from "./history";
 import type { ProcessTable } from "../../proc";
@@ -110,13 +110,25 @@ export class ClaudeProvider implements AgentProvider {
     if (terms.length === 0) return [];
     const results: SearchResult[] = [];
     for (const [id, tracked] of this.tracked) {
-      if (!tracked.file) continue;
-      tracked.history ??= new HistoryIndex(tracked.file, messageOf);
-      tracked.history.refresh();
-      const { count, hits } = tracked.history.search(terms, limit);
+      const index = this.indexOf(tracked);
+      if (!index) continue;
+      const { count, hits } = index.search(terms, limit);
       if (count > 0) results.push({ id, count, hits });
     }
     return results;
+  }
+
+  history(id: string): HistoryMessage[] | undefined {
+    const tracked = this.tracked.get(id);
+    return tracked && this.indexOf(tracked)?.messages;
+  }
+
+  /** The session's messages, read up to date; nothing until its transcript is found. */
+  private indexOf(tracked: Tracked): HistoryIndex | undefined {
+    if (!tracked.file) return undefined;
+    tracked.history ??= new HistoryIndex(tracked.file, messageOf);
+    tracked.history.refresh();
+    return tracked.history;
   }
 
   /** Session files are rewritten in place on every state change, which the directory watch reports. */

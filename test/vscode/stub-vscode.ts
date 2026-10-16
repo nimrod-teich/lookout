@@ -51,6 +51,8 @@ export const stub = {
   /** The quick pick that is open, if any. */
   openPicker: undefined as StubQuickPick | undefined,
   webviewProviders: new Map<string, unknown>(),
+  /** Every webview panel created, in order. */
+  panels: [] as StubWebviewPanel[],
   /** What `extensions.getExtension` returns for any id. */
   extension: undefined as { extensionPath: string } | undefined,
   /** What the user presses on the next notification. */
@@ -71,6 +73,7 @@ export const stub = {
     this.quickPick = undefined;
     this.openPicker = undefined;
     this.webviewProviders.clear();
+    this.panels = [];
     this.extension = undefined;
     this.notificationAnswer = undefined;
     this.openTerminal.dispose();
@@ -173,6 +176,40 @@ export class TabInputWebview {
 }
 
 export const StatusBarAlignment = { Left: 1, Right: 2 };
+
+export const ViewColumn = { Active: -1, Beside: -2, One: 1 };
+
+export interface StubWebviewPanel {
+  viewType: string;
+  title: string;
+  webview: StubWebviewView["webview"];
+  reveal(column?: unknown, preserveFocus?: boolean): void;
+  onDidDispose(listener: () => void): { dispose(): void };
+  dispose(): void;
+  /** Test helpers. */
+  posted: unknown[];
+  receive(message: unknown): void;
+}
+
+function createWebviewPanel(viewType: string, title: string): StubWebviewPanel {
+  const view = createWebviewView();
+  const disposed = new EventEmitter<void>();
+  const panel: StubWebviewPanel = {
+    viewType,
+    title,
+    webview: view.webview,
+    reveal: (column, preserveFocus) => void stub.ops.push([`panel:${viewType}`, "reveal", [column, preserveFocus]]),
+    onDidDispose: disposed.event,
+    dispose: () => {
+      stub.ops.push([`panel:${viewType}`, "dispose"]);
+      disposed.fire();
+    },
+    posted: view.posted,
+    receive: view.receive,
+  };
+  stub.panels.push(panel);
+  return panel;
+}
 
 export const Uri = {
   joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: [base.fsPath, ...parts].join("/"), path: [base.fsPath, ...parts].join("/") }),
@@ -286,6 +323,7 @@ export const window = {
   onDidCloseTerminal: stub.closeTerminal.event,
   onDidChangeActiveTerminal: stub.focusChange.event,
   onDidChangeWindowState: stub.focusChange.event,
+  createWebviewPanel,
   registerWebviewViewProvider: (id: string, provider: unknown) => {
     stub.ops.push(["window", "registerWebviewViewProvider", id]);
     stub.webviewProviders.set(id, provider);

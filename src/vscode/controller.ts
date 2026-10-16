@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { AgentProvider } from "../core/agents/agent";
 import { ClaudeProvider } from "../core/agents/claude/provider";
-import type { SearchResult } from "../core/history";
+import type { HistoryMessage, SearchResult } from "../core/history";
 import { Attention } from "../core/attention";
 import { sortViews } from "../core/model";
 import { Monitor } from "../core/monitor";
@@ -167,11 +167,20 @@ export class Controller implements vscode.Disposable {
     return this.refreshing;
   }
 
-  /** Searches the conversations of the live sessions. */
+  /** Searches the conversations of the live sessions: the newest few matches per session, for the cards. */
   search(query: string): SearchResult[] {
     const results: SearchResult[] = [];
     for (const provider of this.providers) results.push(...(provider.search?.(query, SEARCH_HITS) ?? []));
     return results;
+  }
+
+  /** The conversation of one live session, oldest first. */
+  history(id: string): HistoryMessage[] | undefined {
+    for (const provider of this.providers) {
+      const messages = provider.history?.(id);
+      if (messages) return messages;
+    }
+    return undefined;
   }
 
   /** The user looked at this session. */
