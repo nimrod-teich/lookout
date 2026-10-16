@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { countStates, describeLocation, describeState, formatElapsed, type Counts } from "../core/format";
 import type { SessionView } from "../core/types";
+import type { UsageMeter } from "../core/usage";
 import type { Usage } from "./controller";
 import { BRAND_ICON, STATE_ICON } from "./icons";
 
@@ -10,6 +11,10 @@ const FRAME_MS = 100;
 /** How often the elapsed times in the hover are refreshed. */
 const TOOLTIP_MS = 60_000;
 const USAGE_ERROR_AT = 95;
+/** Cells in the usage bar. */
+const BAR_CELLS = 10;
+/** The bar's colour by consumption, like the board's meters: calm below half, amber from half, red from 80%. */
+const BAR_COLORS = { low: "charts.green", mid: "charts.yellow", high: "charts.red" } as const;
 
 export interface StatusBarInput {
   views: readonly SessionView[];
@@ -29,18 +34,30 @@ function sessionsText(counts: Counts, frame: number): string {
   return parts.join("  ");
 }
 
-function usageText(usage: Usage | undefined): string {
-  if (!usage) return "";
-  const session = usage.meters.find((m) => m.key === "session");
-  const week = usage.meters.find((m) => m.key === "weekly_all");
-  const parts = [session && `5h ${session.percent}%`, week && `wk ${week.percent}%`].filter(Boolean);
-  if (parts.length === 0) for (const meter of usage.meters.slice(0, 2)) parts.push(`${meter.label} ${meter.percent}%`);
-  return parts.join(" · ");
+/** The meter the status bar shows: the 5-hour window, the one that runs out first; the hover has the rest. */
+function sessionMeter(usage: Usage | undefined): UsageMeter | undefined {
+  return usage?.meters.find((m) => m.key === "session") ?? usage?.meters[0];
 }
 
-function spokenText(counts: Counts, usage: string): string {
+/** A bar of ten cells for a percentage, e.g. ▰▰▱▱▱▱▱▱▱▱ for 18%. */
+export function usageBar(percent: number): string {
+  const filled = Math.max(0, Math.min(BAR_CELLS, Math.round(percent / (100 / BAR_CELLS))));
+  return `${"▰".repeat(filled)}${"▱".repeat(BAR_CELLS - filled)}`;
+}
+
+function usageLevel(percent: number): keyof typeof BAR_COLORS {
+  return percent >= 80 ? "high" : percent >= 50 ? "mid" : "low";
+}
+
+function usageText(usage: Usage | undefined): string {
+  const meter = sessionMeter(usage);
+  return meter ? `${usageBar(meter.percent)} ${meter.percent}%` : "";
+}
+
+function spokenText(counts: Counts, usage: Usage | undefined): string {
   const sessions = `Lookout: ${counts.working} working, ${counts.waiting} waiting for you, ${counts.done} finished, ${counts.idle + counts.unknown} idle`;
-  return usage ? `${sessions}. Usage ${usage}` : sessions;
+  const meter = sessionMeter(usage);
+  return meter ? `${sessions}. Usage ${meter.label} ${meter.percent}%` : sessions;
 }
 
 function resetText(resetsAt: number | undefined, now: number): string {
@@ -85,7 +102,7 @@ export class StatusBar implements vscode.Disposable {
   private readonly item: vscode.StatusBarItem;
   private readonly warning = new vscode.ThemeColor("statusBarItem.warningBackground");
   private readonly error = new vscode.ThemeColor("statusBarItem.errorBackground");
-  private shown = { visible: false, text: "", spoken: "", tooltip: "", background: "" };
+  private shown = { visible: false, text: "", spoken: "", tooltip: "", background: "", color: "" };
   private input: StatusBarInput = { views: [], usage: undefined, enabled: true, showUsage: true, canRefreshUsage: false };
   private counts: Counts = countStates([]);
   private frame = 0;
@@ -110,14 +127,19 @@ export class StatusBar implements vscode.Disposable {
       return;
     }
     this.writeText();
-    const spoken = spokenText(this.counts, input.showUsage ? usageText(input.usage) : "");
+    const spoken = spokenText(this.counts, input.showUsage ? input.usage : undefined);
     if (spoken !== this.shown.spoken) {
       this.item.accessibilityInformation = { label: spoken };
       this.shown.spoken = spoken;
     }
     this.writeTooltip(now);
-    const peak = Math.max(0, ...(input.usage && !input.usage.stale ? input.usage.meters.map((m) => m.percent) : []));
-    const background = this.counts.waiting > 0 ? "warning" : input.showUsage && peak >= USAGE_ERROR_AT ? "error" : "";
+    const meter = input.showUsage ? sessionMeter(input.usage) : undefined;
+    const color = meter ? BAR_COLORS[usageLevel(meter.percent)] : "";
+    if (color !== this.shown.color) {
+      this.item.color = color ? new vscode.ThemeColor(color) : undefined;
+      this.shown.color = color;
+    }
+    const background = this.counts.waiting > 0 ? "warning" : meter && !input.usage?.stale && meter.percent >= USAGE_ERROR_AT ? "error" : "";
     if (background !== this.shown.background) {
       this.item.backgroundColor = background === "warning" ? this.warning : background === "error" ? this.error : undefined;
       this.shown.background = background;
