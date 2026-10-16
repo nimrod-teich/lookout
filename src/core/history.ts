@@ -1,4 +1,7 @@
 import * as fs from "node:fs";
+import { matchesAll, matchRanges, termsOf } from "./terms";
+
+export { termsOf };
 
 const NEWLINE = 0x0a;
 
@@ -12,6 +15,8 @@ export interface HistoryMessage {
 }
 
 export interface SearchHit {
+  /** Position of the message in the conversation. */
+  index: number;
   role: "you" | "agent";
   at?: number;
   /** The matching message, cut around its first match, whitespace collapsed. */
@@ -27,11 +32,6 @@ export interface SearchResult {
   count: number;
   /** The newest matching messages, up to the limit asked for. */
   hits: SearchHit[];
-}
-
-/** The words of a query, lowercased. A message matches when it contains every one of them. */
-export function termsOf(query: string): string[] {
-  return query.toLowerCase().split(/\s+/).filter(Boolean);
 }
 
 /** Characters kept before and after the first match: few before, so the match sits on the first line of a narrow card. */
@@ -51,19 +51,7 @@ export function snippetOf(text: string, terms: string[]): { snippet: string; ran
   let snippet = text.slice(start, end).replace(/\s+/g, " ").trim();
   if (start > 0) snippet = `…${snippet}`;
   if (end < text.length) snippet = `${snippet}…`;
-  const snippetLower = snippet.toLowerCase();
-  const found: [number, number][] = [];
-  for (const term of terms) {
-    for (let at = snippetLower.indexOf(term); at >= 0; at = snippetLower.indexOf(term, at + term.length)) found.push([at, at + term.length]);
-  }
-  found.sort((a, b) => a[0] - b[0]);
-  const ranges: [number, number][] = [];
-  for (const range of found) {
-    const last = ranges.at(-1);
-    if (last && range[0] < last[1]) last[1] = Math.max(last[1], range[1]);
-    else ranges.push([range[0], range[1]]);
-  }
-  return { snippet, ranges };
+  return { snippet, ranges: matchRanges(snippet, terms) };
 }
 
 /**
@@ -143,10 +131,9 @@ export class HistoryIndex {
     const hits: SearchHit[] = [];
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const message = this.messages[i]!;
-      const lower = message.text.toLowerCase();
-      if (!terms.every((term) => lower.includes(term))) continue;
+      if (!matchesAll(message.text, terms)) continue;
       count++;
-      if (hits.length < limit) hits.push({ role: message.role, at: message.at, ...snippetOf(message.text, terms) });
+      if (hits.length < limit) hits.push({ index: i, role: message.role, at: message.at, ...snippetOf(message.text, terms) });
     }
     return { count, hits };
   }

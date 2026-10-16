@@ -5,6 +5,7 @@ import type { SessionView } from "./core/types";
 import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
+import { Findings } from "./vscode/findings";
 import { Controller } from "./vscode/controller";
 import { jumpToSession, renameSession, revealed } from "./vscode/jump";
 import { createLog } from "./vscode/log";
@@ -42,6 +43,11 @@ export function activate(context: vscode.ExtensionContext): void {
     lastJump = view.id;
     if (revealed(await jumpToSession(view, terminals, log))) controller.markSeen(view.id);
   };
+  const findings = new Findings(context.extensionUri, {
+    sessions: () => controller.sessions,
+    history: (id) => controller.history(id),
+    jump,
+  });
   const board = new Board(context.extensionUri, {
     sessions: () => controller.sessions,
     usage: () => {
@@ -56,6 +62,9 @@ export function activate(context: vscode.ExtensionContext): void {
     markAllSeen: () => controller.markAllSeen(),
     refreshUsage: () => void controller.refreshUsage(),
     search: (query) => controller.search(query),
+    openHit: (query, id, index) => {
+      if (!findings.show(id, query, index)) void vscode.window.showInformationMessage(`Lookout has not found the transcript of "${controller.sessions.find((v) => v.id === id)?.title ?? id}" yet.`);
+    },
   });
   const render = () => {
     statusBar.render({
@@ -75,9 +84,11 @@ export function activate(context: vscode.ExtensionContext): void {
     controller,
     statusBar,
     board,
+    findings,
     controller.onDidChangeUsage(render),
     vscode.window.registerWebviewViewProvider(BOARD_VIEW, board),
     controller.onDidChange(render),
+    controller.onDidChange(() => findings.refresh()),
     controller.onDidStartWaiting(async (view) => {
       if (config.notifyWaiting && (await notifyWaiting(view))) await jump(view);
     }),

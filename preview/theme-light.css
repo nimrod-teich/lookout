@@ -6,6 +6,16 @@
   --vscode-foreground: #3b3b3b;
   --vscode-descriptionForeground: #717171;
   --vscode-sideBar-background: #f8f8f8;
+  --vscode-editor-background: #ffffff;
+  --vscode-input-background: #ffffff;
+  --vscode-input-foreground: #3b3b3b;
+  --vscode-input-placeholderForeground: #767676;
+  --vscode-button-secondaryBackground: #e5e5e5;
+  --vscode-button-secondaryForeground: #3b3b3b;
+  --vscode-button-secondaryHoverBackground: #cccccc;
+  --vscode-textLink-foreground: #005fb8;
+  --vscode-editor-findMatchHighlightBackground: rgba(234, 92, 0, 0.33);
+  --vscode-editor-findMatchBackground: #a8ac94;
   --vscode-sideBarSectionHeader-foreground: #3b3b3b;
   --vscode-sideBarSectionHeader-border: #e5e5e5;
   --vscode-widget-border: #e5e5e5;

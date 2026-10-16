@@ -267,7 +267,10 @@ describe("ClaudeProvider", () => {
       [4, 11],
       [12, 19],
     ]);
+    expect(results[0]?.hits.map((hit) => hit.index)).toEqual([1, 0]);
     expect(provider.search("   ", 5)).toEqual([]);
+    expect(provider.history(first)?.map((m) => m.role)).toEqual(["you", "agent"]);
+    expect(provider.history(sessionId(9))).toBeUndefined();
 
     appendEntries(transcriptPath(configDir, "/work/app", second), [{ type: "assistant", message: { content: [{ type: "text", text: "Billing is not my job here" }] } }]);
     expect(provider.search("billing", 1).map((r) => r.id).sort()).toEqual([first, second]);

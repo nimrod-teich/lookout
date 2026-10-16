@@ -1,4 +1,4 @@
-import type { SearchResult } from "../history";
+import type { HistoryMessage, SearchResult } from "../history";
 
 export type AgentStatus = "working" | "waiting" | "idle" | "unknown";
 
@@ -71,4 +71,6 @@ export interface AgentProvider {
    * newest `limit` matches.
    */
   search?(query: string, limit: number): SearchResult[];
+  /** The conversation of one live session, oldest first; undefined when the agent keeps no transcript for it. */
+  history?(id: string): HistoryMessage[] | undefined;
 }
