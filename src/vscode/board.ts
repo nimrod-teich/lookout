@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { countStates } from "../core/format";
 import type { SearchOutcome } from "../core/agents/agent";
 import type { PastView, SessionView } from "../core/types";
-import type { BoardUsage, FromBoard, ToBoard } from "../webview/protocol";
+import type { BoardUsage, EarlierInfo, EarlierScope, FromBoard, ToBoard } from "../webview/protocol";
 
 export const BOARD_VIEW = "lookout.board";
 
@@ -11,6 +11,10 @@ export interface BoardActions {
   sessions(): readonly SessionView[];
   /** The sessions that are not running, newest first. */
   past(): readonly PastView[];
+  /** Which earlier sessions are listed, and how many there are. */
+  earlier(): EarlierInfo;
+  /** Lists and searches the earlier sessions of this window's folders, or of every project. */
+  setEarlierScope(scope: EarlierScope): void;
   /** Resumes a past session in the agent's panel. */
   resume(id: string): void;
   usage(): BoardUsage | undefined;
@@ -22,7 +26,8 @@ export interface BoardActions {
   /** Dismisses the question a session's last message asks. */
   dismiss(id: string): void;
   /** Searches the live and the past sessions' conversations. */
-  search(query: string): SearchOutcome;
+  /** `zone`: the board's time zone, minutes behind UTC, for the days the query names. */
+  search(query: string, zone?: number): SearchOutcome;
   /** Shows a session's conversation in the findings tab, at one message or at the newest match. */
   openHit(query: string, id: string, index: number | undefined): void;
 }
@@ -61,7 +66,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
     if (this.view) {
       this.view.badge = attention > 0 ? { value: attention, tooltip: `${counts.waiting} need you, ${counts.done} finished` } : undefined;
       if (this.view.visible) {
-        const message: ToBoard = { type: "sessions", sessions: [...sessions], past: [...this.actions.past()], now: Date.now(), usage: this.actions.usage() };
+        const message: ToBoard = { type: "sessions", sessions: [...sessions], past: [...this.actions.past()], now: Date.now(), usage: this.actions.usage(), earlier: this.actions.earlier() };
         void this.view.webview.postMessage(message);
       }
     }
@@ -99,7 +104,8 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         return;
       case "search": {
         if (typeof message.query !== "string") return;
-        const outcome = this.actions.search(message.query);
+        const zone = typeof message.zone === "number" && Math.abs(message.zone) <= 24 * 60 ? message.zone : undefined;
+        const outcome = this.actions.search(message.query, zone);
         const results: ToBoard = { type: "search", query: message.query, results: outcome.results, pending: outcome.pending };
         void this.view?.webview.postMessage(results);
         return;
@@ -110,6 +116,9 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         if (view) this.actions.resume(view.id);
         return;
       }
+      case "earlierScope":
+        if (message.scope === "folders" || message.scope === "all") this.actions.setEarlierScope(message.scope);
+        return;
     }
   }
 

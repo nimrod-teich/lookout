@@ -43,6 +43,8 @@ export interface TranscriptState {
   lastPrompt?: string;
   /** The session's current directory; unlike the session file's, it follows `cd`. */
   cwd?: string;
+  /** The git branch of the latest main-chain entry. */
+  gitBranch?: string;
   /** Tool calls in flight, oldest first. */
   openTools: Map<string, OpenTool>;
   /** First line of the assistant's latest message. */
@@ -431,6 +433,7 @@ export function applyLine(state: TranscriptState, line: string, sidechain = fals
   // What a call is sent with: it goes out right after the last of these.
   if ((e.type === "user" || e.type === "attachment") && Number.isFinite(time)) state.lastInputAt = Math.max(state.lastInputAt ?? time, time);
   if (typeof e.cwd === "string" && e.cwd !== "") state.cwd = e.cwd;
+  if (typeof e.gitBranch === "string" && e.gitBranch.trim() !== "") state.gitBranch = e.gitBranch.trim();
   if (typeof e.slug === "string" && e.slug !== "") state.slug = e.slug;
   if (e.type === "assistant") applyAssistant(state, e);
   else if (e.type === "user") applyUser(state, e);

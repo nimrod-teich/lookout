@@ -8,7 +8,8 @@ export interface FindingsMessage extends HistoryMessage {
 /** Extension → findings tab: a session's whole conversation. */
 export type ToFindings = {
   type: "conversation";
-  session: { id: string; title: string };
+  /** `where`: the session's project, worktree and git branch, e.g. "api · ⎇ fix-login". */
+  session: { id: string; title: string; where?: string };
   messages: FindingsMessage[];
   /** The search to apply; the tab keeps its own afterwards. */
   query: string;

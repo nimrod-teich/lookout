@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import { parseMarkdown, type Block, type Inline } from "../core/markdown";
-import { matchesAll, matchRanges, termsOf } from "../core/terms";
+import { inRange, matchesAll, matchRanges, parseQuery, type TimeRange } from "../core/terms";
 import type { FindingsMessage, FromFindings, ToFindings } from "./findingsProtocol";
 
 declare function acquireVsCodeApi(): { postMessage(message: FromFindings): void };
@@ -26,6 +26,8 @@ function button(className: string, text: string, title: string, onClick: () => v
 /** The conversation on show. */
 let conversation: ToFindings | undefined;
 let terms: string[] = [];
+/** The query's `since:` and `before:`: as on the board, only messages written within them match. */
+let range: TimeRange = {};
 /** Indices of the messages holding every term, in reading order. */
 let matches: number[] = [];
 /** Position in `matches` of the message in view. */
@@ -39,8 +41,9 @@ const heading = el("h1", "heading");
 const mark = el("span", "mark");
 mark.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M6.2 6.5h3.6L11.4 15H4.6z"/><path d="M5 6h6v1.2H5z"/><path d="M6.4 3.4h3.2V6H6.4z"/><path d="M6.6 3.4a1.4 1.4 0 0 1 2.8 0z"/><path d="M7.6 1.2h.8v1.3h-.8z"/><path d="M9.8 4.1L15.6 2.2v4.4z"/></svg>';
 const titleEl = el("span", "title");
+const whereEl = el("span", "where");
 const countEl = el("span", "count");
-heading.append(mark, titleEl, countEl);
+heading.append(mark, titleEl, whereEl, countEl);
 const field = el("label", "field");
 field.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 10l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 const input = el("input", "");
@@ -178,7 +181,7 @@ function timeText(at: number | undefined): string {
 }
 
 function messageBlock(message: FindingsMessage): HTMLElement {
-  const hit = matchesAll(message.text, terms);
+  const hit = matchesAll(message.text, terms) && inRange(message.at, range);
   const block = el("article", `message ${message.role}${hit ? " hit" : terms.length ? " dim" : ""}`);
   block.dataset.index = String(message.index);
   const head = el("header", "head");
@@ -215,7 +218,9 @@ function showCurrent(scroll: boolean): void {
 
 /** Applies a query: marks the terms, dims the rest, and lands on `target`, or the newest match. */
 function applyQuery(query: string, target: number | undefined, scroll: boolean): void {
-  terms = termsOf(query);
+  const parsed = parseQuery(query);
+  terms = parsed.terms;
+  range = { since: parsed.since, before: parsed.before };
   renderMessages();
   current = target === undefined ? matches.length - 1 : matches.indexOf(target);
   if (current < 0 && target !== undefined) {
@@ -242,6 +247,8 @@ window.addEventListener("message", (event: MessageEvent<ToFindings>) => {
   const scrollY = window.scrollY;
   conversation = message;
   titleEl.textContent = message.session.title;
+  whereEl.textContent = message.session.where ?? "";
+  whereEl.title = message.session.where ? "Project and git branch" : "";
   countEl.textContent = `${message.messages.length} ${message.messages.length === 1 ? "message" : "messages"}`;
   if (same) {
     // The conversation grew: keep the search and the place.

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { findLastLine, readLineAt } from "../../jsonlTail";
 import { INTERRUPT } from "./transcript";
+import type { PastScope } from "../agent";
 import { encodeProjectDir } from "./paths";
 
 /** A session that is not running: its transcript is all there is. */
@@ -10,6 +11,10 @@ export interface PastTranscript {
   file: string;
   cwd: string;
   title: string;
+  /** The git branch it last worked on. */
+  branch?: string;
+  /** It is one of the folders' sessions, which Claude Code resumes in their window. */
+  resumable: boolean;
   /** Epoch ms the transcript was last written. */
   modifiedAt: number;
 }
@@ -17,6 +22,13 @@ export interface PastTranscript {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** The generated title and the first prompt are within the first lines. */
 const HEAD_BYTES = 64 * 1024;
+/**
+ * How far in the conversation's start is looked for when the head holds none
+ * of it: Claude Code can write large request records first.
+ */
+const START_SEARCH_BYTES = 1024 * 1024;
+/** Beyond the head, only lines with one of these are parsed: the request records are large and say nothing of use. */
+const START_NEEDLES = ['"type":"user"', '"type":"ai-title"', '"type":"custom-title"', '"cwd":"'];
 /** Titles are stamped again on resume, and renames appended, at the end. */
 const TAIL_SEARCH_BYTES = 256 * 1024;
 const PROMPT_MAX = 80;
@@ -45,36 +57,78 @@ function promptIn(entry: Record<string, unknown>): string | undefined {
   return line.length > PROMPT_MAX ? `${line.slice(0, PROMPT_MAX - 1)}…` : line;
 }
 
-/** Reads the first lines of a transcript. */
-function head(file: string): string[] {
+/** Reads the whole lines within the first `bytes` of a transcript. */
+function head(file: string, bytes: number): string[] {
   const fd = fs.openSync(file, "r");
   try {
-    const buffer = Buffer.alloc(HEAD_BYTES);
-    const got = fs.readSync(fd, buffer, 0, HEAD_BYTES, 0);
+    const buffer = Buffer.alloc(bytes);
+    const got = fs.readSync(fd, buffer, 0, bytes, 0);
     const lines = buffer.toString("utf8", 0, got).split("\n");
-    if (got === HEAD_BYTES) lines.pop();
+    if (got === bytes) lines.pop();
     return lines;
   } finally {
     fs.closeSync(fd);
   }
 }
 
-/**
- * A transcript's title: a rename, else the generated title, else the first
- * prompt; nothing for a transcript that holds no conversation. The head is
- * read for the early stamps, the tail for the latest ones.
- */
+/** What the list shows of a transcript, read once per file version. */
+export interface TranscriptInfo {
+  title?: string;
+  /** Where the session started, from its first entries. */
+  cwd?: string;
+  /** The git branch it last worked on. */
+  branch?: string;
+}
+
+function cwdIn(entry: Record<string, unknown>): string | undefined {
+  return entry.isSidechain !== true && typeof entry.cwd === "string" && entry.cwd !== "" ? entry.cwd : undefined;
+}
+
+function branchIn(entry: Record<string, unknown>): string | undefined {
+  return entry.isSidechain !== true && typeof entry.gitBranch === "string" && entry.gitBranch.trim() !== "" ? entry.gitBranch.trim() : undefined;
+}
+
+/** A transcript's title; see `transcriptInfo`. */
 export function transcriptTitle(file: string): string | undefined {
+  return transcriptInfo(file).title;
+}
+
+/**
+ * A transcript's title, where it started, and its git branch. The title is
+ * a rename, else the generated title, else the first prompt; none for a
+ * transcript that holds no conversation. The head is read for the early
+ * stamps and the directory, further in when request records come first, and
+ * the tail for the latest stamps and branch.
+ */
+export function transcriptInfo(file: string): TranscriptInfo {
   let custom: string | undefined;
   let ai: string | undefined;
   let prompt: string | undefined;
-  for (const line of head(file)) {
+  let cwd: string | undefined;
+  let branch: string | undefined;
+  const take = (line: string) => {
     const entry = parse(line);
-    if (!entry) continue;
+    if (!entry) return;
+    cwd ??= cwdIn(entry);
+    branch = branchIn(entry) ?? branch;
     if (entry.type === "custom-title") custom = titleIn(entry, "customTitle") ?? custom;
     else if (entry.type === "ai-title") ai = titleIn(entry, "aiTitle") ?? ai;
     else if (prompt === undefined) prompt = promptIn(entry);
+  };
+  const first = head(file, HEAD_BYTES);
+  for (const line of first) take(line);
+  if (cwd === undefined || (custom === undefined && ai === undefined && prompt === undefined)) {
+    // The conversation starts after request records: read on, past the lines already taken.
+    for (const line of head(file, START_SEARCH_BYTES).slice(first.length)) if (START_NEEDLES.some((needle) => line.includes(needle))) take(line);
   }
+  // The last main-chain entry's: subagents' entries carry a branch too.
+  const lastBranch = findLastLine(file, '"gitBranch":"', TAIL_SEARCH_BYTES, (line) => {
+    const entry = parse(line);
+    return entry !== undefined && branchIn(entry) !== undefined;
+  });
+  const branchLine = lastBranch === undefined ? undefined : readLineAt(file, lastBranch);
+  const branchEntry = branchLine === undefined ? undefined : parse(branchLine);
+  if (branchEntry) branch = branchIn(branchEntry) ?? branch;
   for (const [type, key] of [
     ["custom-title", "customTitle"],
     ["ai-title", "aiTitle"],
@@ -89,55 +143,129 @@ export function transcriptTitle(file: string): string | undefined {
     if (key === "customTitle") custom = title;
     else if (title) ai = title;
   }
-  return custom ?? ai ?? prompt;
+  return { title: custom ?? ai ?? prompt, cwd, branch };
 }
 
-/** The transcripts of a project that are not running, with their titles; titles are read once per file version. */
+/** A transcript file found, before its contents are read. */
+interface Candidate {
+  id: string;
+  file: string;
+  /** The window's folder it belongs to, if any. */
+  folder?: string;
+  mtimeMs: number;
+  size: number;
+}
+
+/** Every project's transcripts are found again at most this often. */
+const SCAN_ALL_MS = 15_000;
+/** Transcripts whose contents a list reads at most; the rest show in the next lists. */
+const READS_PER_LIST = 120;
+
+/**
+ * The transcripts that are not running, with their titles, directories and
+ * branches; each file's contents are read once per version.
+ */
 export class PastTranscripts {
-  private readonly titles = new Map<string, { mtimeMs: number; size: number; title: string | undefined }>();
+  private readonly infos = new Map<string, { mtimeMs: number; size: number; info: TranscriptInfo }>();
+  private scanned: { at: number; files: Candidate[] } | undefined;
 
-  constructor(private readonly configDir: string) {}
+  constructor(
+    private readonly configDir: string,
+    private readonly now: () => number = Date.now,
+  ) {}
 
-  /** Newest first, without the ids in `exclude` (the live and the archived) and without transcripts that hold no conversation. */
-  list(cwds: readonly string[], exclude: ReadonlySet<string>): PastTranscript[] {
-    const out: PastTranscript[] = [];
+  /**
+   * The newest `limit` of the scope's transcripts, newest first, without the
+   * ids in `exclude` (the live and the archived) and without transcripts that
+   * hold no conversation. `capped` when older conversations were left out;
+   * `incomplete` when transcripts were left unread for the next list.
+   */
+  list(scope: PastScope, exclude: ReadonlySet<string>): { transcripts: PastTranscript[]; capped: boolean; incomplete: boolean } {
     const seen = new Set<string>();
-    for (const cwd of cwds) {
-      const dir = path.join(this.configDir, "projects", encodeProjectDir(cwd));
-      let names: string[];
-      try {
-        names = fs.readdirSync(dir);
-      } catch {
-        continue;
-      }
-      for (const name of names) {
-        if (!name.endsWith(".jsonl")) continue;
-        const id = name.slice(0, -".jsonl".length);
-        if (!UUID.test(id) || exclude.has(id) || seen.has(id)) continue;
-        const file = path.join(dir, name);
-        let st: fs.Stats;
-        try {
-          st = fs.statSync(file);
-        } catch {
+    // The window's own folders first, as their window resumes them: Claude Code keeps a folder's transcripts in the project
+    // directory named after it, found here as the file system names it (without regard to case where it has none).
+    const found = scope.all ? [...this.inFolders(scope.folders), ...this.everywhere()] : this.inFolders(scope.folders);
+    const candidates = found
+      .filter((candidate) => !exclude.has(candidate.id) && !seen.has(candidate.id) && seen.add(candidate.id) !== undefined)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    const out: PastTranscript[] = [];
+    const stale = (candidate: Candidate) => {
+      const cached = this.infos.get(candidate.file);
+      return !cached || cached.mtimeMs !== candidate.mtimeMs || cached.size !== candidate.size;
+    };
+    let reads = 0;
+    let unread = 0;
+    let next = 0;
+    // Transcripts without a conversation do not count toward the limit.
+    for (; next < candidates.length && out.length < scope.limit; next++) {
+      const candidate = candidates[next]!;
+      let cached = this.infos.get(candidate.file);
+      if (!cached || stale(candidate)) {
+        // A long history is read a slice at a time; what is left shows in the next lists.
+        if (reads++ >= READS_PER_LIST) {
+          unread++;
           continue;
         }
-        if (!st.isFile() || st.size === 0) continue;
-        let cached = this.titles.get(file);
-        if (!cached || cached.mtimeMs !== st.mtimeMs || cached.size !== st.size) {
-          let title: string | undefined;
-          try {
-            title = transcriptTitle(file);
-          } catch {
-            title = undefined;
-          }
-          cached = { mtimeMs: st.mtimeMs, size: st.size, title };
-          this.titles.set(file, cached);
+        let info: TranscriptInfo;
+        try {
+          info = transcriptInfo(candidate.file);
+        } catch {
+          info = {};
         }
-        if (!cached.title) continue;
-        seen.add(id);
-        out.push({ id, file, cwd, title: cached.title, modifiedAt: Math.round(st.mtimeMs) });
+        cached = { mtimeMs: candidate.mtimeMs, size: candidate.size, info };
+        this.infos.set(candidate.file, cached);
+      }
+      const { title, cwd, branch } = cached.info;
+      if (!title) continue;
+      // Where it started, as it says: two folders can share a project directory ("my.app" and "my-app").
+      out.push({ id: candidate.id, file: candidate.file, cwd: cwd ?? candidate.folder ?? "", title, branch, resumable: candidate.folder !== undefined, modifiedAt: Math.round(candidate.mtimeMs) });
+    }
+    // Older ones left out: one not read yet, or one read that holds a conversation.
+    const capped = candidates.slice(next).some((candidate) => stale(candidate) || this.infos.get(candidate.file)?.info.title !== undefined);
+    return { transcripts: out, capped, incomplete: unread > 0 };
+  }
+
+  private transcriptsIn(dir: string, folder: string | undefined, into: Candidate[]): void {
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".jsonl")) continue;
+      const id = name.slice(0, -".jsonl".length);
+      if (!UUID.test(id)) continue;
+      const file = path.join(dir, name);
+      try {
+        const st = fs.statSync(file);
+        if (st.isFile() && st.size > 0) into.push({ id, file, folder, mtimeMs: st.mtimeMs, size: st.size });
+      } catch {
+        // Gone meanwhile.
       }
     }
-    return out.sort((a, b) => b.modifiedAt - a.modifiedAt);
+  }
+
+  private inFolders(folders: readonly string[]): Candidate[] {
+    const out: Candidate[] = [];
+    for (const folder of folders) this.transcriptsIn(path.join(this.configDir, "projects", encodeProjectDir(folder)), folder, out);
+    return out;
+  }
+
+  /** Every project's transcripts, found again at most every 15 seconds. */
+  private everywhere(): Candidate[] {
+    const now = this.now();
+    if (this.scanned && now - this.scanned.at < SCAN_ALL_MS) return this.scanned.files;
+    const root = path.join(this.configDir, "projects");
+    const files: Candidate[] = [];
+    let dirs: string[] = [];
+    try {
+      dirs = fs.readdirSync(root);
+    } catch {
+      // No projects yet.
+    }
+    for (const dir of dirs) this.transcriptsIn(path.join(root, dir), undefined, files);
+    this.scanned = { at: now, files };
+    return files;
   }
 }

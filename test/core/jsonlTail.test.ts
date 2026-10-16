@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { JsonlTail, readLineAt } from "../../src/core/jsonlTail";
+import { findLastLine, JsonlTail, readLineAt } from "../../src/core/jsonlTail";
 import { tempConfigDir } from "./helpers";
 
 function file(): string {
@@ -73,6 +73,21 @@ describe("JsonlTail", () => {
     fs.writeFileSync(`${f}.new`, "replaced with a longer body\n");
     fs.renameSync(`${f}.new`, f);
     expect(tail.read()).toMatchObject({ lines: ["replaced with a longer body"], reset: true });
+  });
+});
+
+describe("findLastLine with a check", () => {
+  it("finds the last line with the needle that the check accepts", () => {
+    const f = file();
+    const big = `{"type":"api-request-shape","body":"${"x".repeat(300_000)}"}\n`;
+    const side = '{"cwd":"/work/app/sub","isSidechain":true}\n';
+    const main = '{"cwd":"/work/app","isSidechain":false}\n';
+    const body = big + side + main + big + main + side;
+    fs.writeFileSync(f, body);
+    const mainChain = (line: string) => !line.includes('"isSidechain":true');
+    expect(findLastLine(f, '"cwd":"', 1024 * 1024)).toBe(body.length - side.length);
+    expect(findLastLine(f, '"cwd":"', 1024 * 1024, mainChain)).toBe(body.length - side.length - main.length);
+    expect(findLastLine(f, '"cwd":"', 1024 * 1024, () => false)).toBeUndefined();
   });
 });
 

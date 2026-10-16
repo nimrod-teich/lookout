@@ -13,6 +13,7 @@ import type { PastView, SessionView } from "../core/types";
 import { clockTime } from "../core/format";
 import { addSamples, paceOf, type Pace, type SampleStore } from "../core/pace";
 import { RefreshLedger } from "../core/refreshLedger";
+import { hasFilters, parseQuery } from "../core/terms";
 import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
 import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../core/usageAlerts";
 import { refreshEnv, refreshUsage } from "../core/usageRefresh";
@@ -30,6 +31,12 @@ const POLL_MS = 1000;
 const DEBOUNCE_MS = 50;
 const DONE_KEY = "lookout.done";
 const DISMISSED_KEY = "lookout.dismissed";
+/** Which earlier sessions the board lists and searches: this window's folders, or every project. */
+const EARLIER_SCOPE_KEY = "lookout.earlierScope";
+/** The earlier sessions listed at most, the newest. */
+const EARLIER_LIMIT = 500;
+/** While the earlier sessions are still being read, the next slice is listed this soon. */
+const FILL_MS = 300;
 /** Usage readings, for the pace, per source of numbers; kept across reloads. */
 const SAMPLES_KEY = "lookout.usageReadings";
 /** A window not in front leaves a usage alert this long to a window that is. */
@@ -79,6 +86,9 @@ export interface Usage extends UsageSnapshot {
   pace: Record<string, Pace>;
 }
 
+/** Which earlier sessions are listed and searched. */
+export type EarlierScope = "folders" | "all";
+
 /** How a request for fresh usage numbers went. */
 export type RefreshOutcome = "fetched" | "failed" | "too soon" | "unavailable";
 
@@ -107,9 +117,16 @@ export class Controller implements vscode.Disposable {
   private watchers: { dispose(): void }[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
   private debounce: ReturnType<typeof setTimeout> | undefined;
+  /** Lists the earlier sessions again shortly, while they are still being read. */
+  private fill: ReturnType<typeof setTimeout> | undefined;
   private current: readonly SessionView[] = [];
   private snapshot = "[]";
   private pastViews: PastView[] = [];
+  /** Every earlier session listed in this window, as last listed: a conversation tab outlives a change of scope. */
+  private readonly pastSeen = new Map<string, PastView>();
+  private earlierScope: EarlierScope;
+  /** The scope holds older sessions than the limit lets the board list. */
+  private earlierCapped = false;
   private archived = new ArchivedSessions([]);
   private savedDone = "";
   private savedDismissed = "";
@@ -156,6 +173,7 @@ export class Controller implements vscode.Disposable {
     const done = host.state.get<string[]>(DONE_KEY, []);
     this.attention.restore(done);
     this.savedDone = done.join("\n");
+    this.earlierScope = host.state.get<string>(EARLIER_SCOPE_KEY) === "all" ? "all" : "folders";
     const dismissed = host.state.get<Record<string, string>>(DISMISSED_KEY, {});
     this.attention.restoreDismissals(dismissed);
     this.savedDismissed = JSON.stringify(this.attention.dismissals());
@@ -175,9 +193,35 @@ export class Controller implements vscode.Disposable {
     return this.pastViews;
   }
 
+  /** Which earlier sessions are listed, the most listed, and whether older ones were left out. */
+  get earlier(): { scope: EarlierScope; limit: number; capped: boolean } {
+    return { scope: this.earlierScope, limit: EARLIER_LIMIT, capped: this.earlierCapped };
+  }
+
+  /** Lists and searches the earlier sessions of this window's folders, or of every project; kept for the workspace. */
+  setEarlierScope(scope: EarlierScope): void {
+    if (scope === this.earlierScope) return;
+    this.earlierScope = scope;
+    void this.host.state.update(EARLIER_SCOPE_KEY, scope);
+    this.poll();
+  }
+
+  /** Where a live or a past session works: its project, worktree and git branch. */
+  whereOf(id: string): string | undefined {
+    const view = this.current.find((v) => v.id === id) ?? this.pastView(id);
+    if (!view) return undefined;
+    const project = view.worktree ? `${view.project} · ${view.worktree}` : view.project;
+    return view.branch ? `${project} · ⎇ ${view.branch}` : project;
+  }
+
   /** The title of a live or a past session. */
   titleOf(id: string): string | undefined {
-    return this.current.find((view) => view.id === id)?.title ?? this.pastViews.find((view) => view.id === id)?.title;
+    return this.current.find((view) => view.id === id)?.title ?? this.pastView(id)?.title;
+  }
+
+  /** A session that is not running, as listed now or, when the scope has changed since, as last listed. */
+  pastView(id: string): PastView | undefined {
+    return this.pastViews.find((view) => view.id === id) ?? this.pastSeen.get(id);
   }
 
   /** The usage numbers, or nothing when there are none to show: none cached, unreadable, or another account's. */
@@ -276,10 +320,22 @@ export class Controller implements vscode.Disposable {
     }
     const update = this.attention.update(views, (view) => isWatched(view, this.terminals), { typedQuestions: this.typedQuestions });
     const exclude = new Set<string>([...update.views.map((view) => view.id), ...this.archived.read()]);
-    const folders = this.host.workspaceFolders();
-    const past = this.providers.flatMap((provider) => provider.past?.(folders, exclude) ?? []).map(buildPastView);
+    const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit: EARLIER_LIMIT };
+    let capped = false;
+    let incomplete = false;
+    const past = this.providers
+      .flatMap((provider) => {
+        const list = provider.past?.(scope, exclude);
+        capped ||= list?.capped ?? false;
+        incomplete ||= list?.incomplete ?? false;
+        return list?.sessions ?? [];
+      })
+      .map(buildPastView);
     past.sort((a, b) => b.modifiedAt - a.modifiedAt);
-    this.publish(sortViews(update.views), past);
+    this.earlierCapped = capped || past.length > EARLIER_LIMIT;
+    this.publish(sortViews(update.views), past.slice(0, EARLIER_LIMIT));
+    for (const view of this.pastViews) this.pastSeen.set(view.id, view);
+    if (incomplete) this.scheduleFill();
     this.saveDone();
     for (const view of update.finished) this.announceFinished(view);
     for (const view of update.waiting) this.announce(view);
@@ -434,13 +490,20 @@ export class Controller implements vscode.Disposable {
     return this.ledger.nextAt(this.ledgerKey, manual);
   }
 
-  /** Searches the conversations of the live and the past sessions: the newest few matches per session, for the cards. */
-  search(query: string): SearchOutcome {
+  /**
+   * Searches the conversations of the live and the past sessions: the newest
+   * few matches per session, for the cards. Days go by `zone`, the time zone
+   * of whoever searches (minutes behind UTC): in a remote window the
+   * extension's own clock can be in another.
+   */
+  search(query: string, zone?: number): SearchOutcome {
     const started = Date.now();
+    const parsed = parseQuery(query, started, zone);
     const outcome: SearchOutcome = { results: [], pending: 0 };
+    if (parsed.terms.length === 0 && !hasFilters(parsed)) return outcome;
     for (const provider of this.providers) {
       const left = Math.max(0, SEARCH_BUDGET_MS - (Date.now() - started));
-      const part = provider.search?.(query, SEARCH_HITS, left);
+      const part = provider.search?.(parsed, SEARCH_HITS, left);
       if (!part) continue;
       outcome.results.push(...part.results);
       outcome.pending += part.pending;
@@ -496,6 +559,14 @@ export class Controller implements vscode.Disposable {
     this.timer = setInterval(() => this.poll(), this.watchers.length ? BACKSTOP_MS : POLL_MS);
   }
 
+  private scheduleFill(): void {
+    if (this.fill || this.disposed) return;
+    this.fill = setTimeout(() => {
+      this.fill = undefined;
+      this.poll();
+    }, FILL_MS);
+  }
+
   private schedulePoll(): void {
     if (this.debounce) return;
     this.debounce = setTimeout(() => {
@@ -505,7 +576,7 @@ export class Controller implements vscode.Disposable {
   }
 
   private publish(views: SessionView[], past: PastView[]): void {
-    const snapshot = JSON.stringify([views, past]);
+    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped]);
     if (snapshot === this.snapshot) return;
     this.snapshot = snapshot;
     this.current = views;
@@ -534,6 +605,7 @@ export class Controller implements vscode.Disposable {
     this.pendingAlerts.clear();
     if (this.timer) clearInterval(this.timer);
     if (this.debounce) clearTimeout(this.debounce);
+    if (this.fill) clearTimeout(this.fill);
     for (const timer of this.announcing) clearTimeout(timer);
     this.announcing.clear();
     this.timer = undefined;

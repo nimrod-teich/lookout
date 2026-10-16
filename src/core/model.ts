@@ -92,6 +92,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
     activity: session.activity,
     agents: session.agents ?? 0,
     lastReply: session.lastReply,
+    branch: session.branch,
     model: session.model,
     contextTokens: session.contextTokens,
     contextWindow: session.contextWindow,
@@ -106,7 +107,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
 
 /** The view of a session that is not running. */
 export function buildPastView(session: PastSession): PastView {
-  return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), cwd: session.cwd, modifiedAt: session.modifiedAt };
+  return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), branch: session.branch, cwd: session.cwd, resumable: session.resumable, modifiedAt: session.modifiedAt };
 }
 
 /** A prompt the agent reports blocks it; a question read from a reply does not, so it comes after. */

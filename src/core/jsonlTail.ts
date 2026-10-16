@@ -12,11 +12,12 @@ export interface TailOptions {
 }
 
 /**
- * Offset of the start of the last line containing `needle`, reading the file
- * backwards in chunks, or undefined when none is found within `maxBytes`
- * of the end. The needle must not contain a newline.
+ * Offset of the start of the last line containing `needle` (and that
+ * `accept` takes, when given), reading the file backwards in chunks, or
+ * undefined when none is found within `maxBytes` of the end. The needle must
+ * not contain a newline.
  */
-export function findLastLine(file: string, needle: string, maxBytes: number): number | undefined {
+export function findLastLine(file: string, needle: string, maxBytes: number, accept?: (line: string) => boolean): number | undefined {
   let fd: number;
   let size: number;
   try {
@@ -36,13 +37,14 @@ export function findLastLine(file: string, needle: string, maxBytes: number): nu
       fs.readSync(fd, buffer, 0, buffer.length, start);
       const data = Buffer.concat([buffer, carry]);
       // Lines in this window, except the first, which may continue before `start`.
+      const takes = (line: Buffer) => line.includes(needle) && (!accept || accept(line.toString("utf8")));
       let lineEnd = data.length;
       for (let i = data.length - 1; i >= 0; i--) {
         if (data[i] !== NEWLINE) continue;
-        if (data.subarray(i + 1, lineEnd).includes(needle)) return start + i + 1;
+        if (takes(data.subarray(i + 1, lineEnd))) return start + i + 1;
         lineEnd = i;
       }
-      if (start === 0 && data.subarray(0, lineEnd).includes(needle)) return 0;
+      if (start === 0 && takes(data.subarray(0, lineEnd))) return 0;
       carry = data.subarray(0, lineEnd);
       end = start;
     }

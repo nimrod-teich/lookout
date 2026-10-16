@@ -80,11 +80,16 @@ body {
   white-space: nowrap;
 }
 
-.heading .count {
+.heading .count,
+.heading .where {
   flex: none;
   font-size: var(--vscode-font-size);
   font-weight: 400;
   color: var(--muted);
+}
+
+.heading .where:empty {
+  display: none;
 }
 
 .field {

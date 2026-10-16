@@ -55,6 +55,7 @@
       "state": "waiting",
       "since": 185000,
       "project": "api",
+      "branch": "billing-webhooks",
       "cwd": "/work/api",
       "host": "panel",
       "agents": 0,
@@ -112,6 +113,7 @@
       "state": "done",
       "since": 720000,
       "project": "docs",
+      "branch": "main",
       "cwd": "/work/docs",
       "host": "terminal",
       "terminalPid": 70,
@@ -163,6 +165,7 @@
       "state": "working",
       "since": 240000,
       "project": "web",
+      "branch": "fix/flaky-checkout",
       "cwd": "/work/web",
       "host": "panel",
       "agents": 0,
@@ -220,6 +223,7 @@
       "since": 1920000,
       "project": "api",
       "worktree": "rollup-split",
+      "branch": "rollup-split",
       "cwd": "/work/api/.claude/worktrees/rollup-split",
       "host": "panel",
       "agents": 3,
@@ -267,6 +271,7 @@
       "state": "working",
       "since": 30000,
       "project": "dashboard",
+      "branch": "perf/summary-route",
       "cwd": "/work/dashboard",
       "host": "window",
       "windowLabel": "dashboard",
@@ -301,6 +306,7 @@
       "state": "idle",
       "since": 2760000,
       "project": "infra",
+      "branch": "main",
       "cwd": "/work/infra",
       "host": "panel",
       "agents": 0,
@@ -368,6 +374,8 @@
       "title": "BSC router v1.5.2 consistency pre-validation",
       "project": "smart-router",
       "cwd": "/home/bob/projects/smart-router",
+      "branch": "main",
+      "resumable": true,
       "modifiedAt": 1296000000
     },
     {
@@ -376,6 +384,8 @@
       "title": "Solana peak research",
       "project": "lava-connect",
       "cwd": "/home/bob/projects/lava-connect",
+      "branch": "solana-peak",
+      "resumable": true,
       "modifiedAt": 1814400000
     },
     {
@@ -385,7 +395,54 @@
       "project": "smart-router-infrastructure",
       "worktree": "redis",
       "cwd": "/home/bob/projects/smart-router-infrastructure/.claude/worktrees/redis",
+      "branch": "redis",
+      "resumable": true,
       "modifiedAt": 2419200000
+    },
+    {
+      "id": "p4",
+      "agent": "claude-code",
+      "title": "Rotate the staging certificates",
+      "project": "infra",
+      "cwd": "/home/bob/projects/infra",
+      "branch": "certs-2026",
+      "resumable": false,
+      "modifiedAt": 259200000
+    },
+    {
+      "id": "p5",
+      "agent": "claude-code",
+      "title": "Onboarding emails copy review",
+      "project": "web",
+      "cwd": "/home/bob/projects/web",
+      "branch": "main",
+      "resumable": false,
+      "modifiedAt": 432000000
+    },
+    {
+      "id": "p6",
+      "agent": "claude-code",
+      "title": "Trace the cold-start latency",
+      "project": "api",
+      "worktree": "cold-start",
+      "cwd": "/home/bob/projects/api/.claude/worktrees/cold-start",
+      "branch": "cold-start",
+      "resumable": false,
+      "modifiedAt": 777600000
+    },
+    {
+      "id": "p7",
+      "agent": "claude-code",
+      "title": "Notes on the Q4 roadmap",
+      "project": "notes",
+      "cwd": "/home/bob/notes",
+      "resumable": false,
+      "modifiedAt": 1036800000
     }
-  ]
+  ],
+  "earlier": {
+    "scope": "folders",
+    "limit": 500,
+    "capped": false
+  }
 }

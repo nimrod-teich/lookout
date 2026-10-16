@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PastView, SessionView } from "../../src/core/types";
-import type { BoardUsage } from "../../src/webview/protocol";
+import type { BoardUsage, EarlierInfo } from "../../src/webview/protocol";
 import { Board } from "../../src/vscode/board";
 import { view } from "./helpers";
 import { createWebviewView, stub } from "./stub-vscode";
 
-const PAST: PastView[] = [{ id: "00000000-0000-4000-8000-000000000009", agent: "claude-code", title: "Old one", project: "app", cwd: "/work/app", modifiedAt: 1 }];
+const PAST: PastView[] = [{ id: "00000000-0000-4000-8000-000000000009", agent: "claude-code", title: "Old one", project: "app", cwd: "/work/app", resumable: true, modifiedAt: 1 }];
+const EARLIER: EarlierInfo = { scope: "folders", limit: 500, capped: false };
 
 function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
   const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(),
-    dismiss: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => ({ results: query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [], pending: 0 })), openHit: vi.fn(), past: () => PAST, resume: vi.fn() };
+    dismiss: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => ({ results: query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [], pending: 0 })), openHit: vi.fn(), past: () => PAST, resume: vi.fn(),
+    earlier: () => EARLIER, setEarlierScope: vi.fn() };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
   board.resolveWebviewView(webviewView as never);
@@ -100,6 +102,20 @@ describe("Board", () => {
     expect(webviewView.posted.at(-1)).toEqual({ type: "search", query: "cache", results: [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }], pending: 0 });
   });
 
+  it("passes the board's time zone along with a search, and drops one that is not a zone", () => {
+    const { actions, webviewView } = setup([view()]);
+    webviewView.receive({ type: "search", query: "cache since:today", zone: -180 });
+    webviewView.receive({ type: "search", query: "cache", zone: "UTC" });
+    webviewView.receive({ type: "search", query: "cache", zone: 100_000 });
+    webviewView.receive({ type: "search", query: "cache", zone: Number.NaN });
+    expect(actions.search.mock.calls).toEqual([
+      ["cache since:today", -180],
+      ["cache", undefined],
+      ["cache", undefined],
+      ["cache", undefined],
+    ]);
+  });
+
   it("sends the past sessions with the live ones, and resumes only a past session it showed", () => {
     const { actions, webviewView } = setup([view()]);
     expect(webviewView.posted[0]).toMatchObject({ type: "sessions", past: PAST });
@@ -107,6 +123,16 @@ describe("Board", () => {
     webviewView.receive({ type: "resume", id: "00000000-0000-4000-8000-000000000001" });
     expect(actions.resume).toHaveBeenCalledTimes(1);
     expect(actions.resume).toHaveBeenCalledWith(PAST[0]!.id);
+  });
+
+  it("sends which earlier sessions are listed, and relays a change of scope", () => {
+    const { actions, webviewView } = setup([view()]);
+    expect(webviewView.posted[0]).toMatchObject({ type: "sessions", earlier: EARLIER });
+    webviewView.receive({ type: "earlierScope", scope: "all" });
+    webviewView.receive({ type: "earlierScope", scope: "folders" });
+    webviewView.receive({ type: "earlierScope", scope: "everything" });
+    webviewView.receive({ type: "earlierScope" });
+    expect(actions.setEarlierScope.mock.calls).toEqual([["all"], ["folders"]]);
   });
 
   it("relays the requests to open a conversation in the findings tab, at a message or at the newest match", () => {

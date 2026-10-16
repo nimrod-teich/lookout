@@ -4,7 +4,7 @@ import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
 import { Harbour } from "./harbour";
 import { cacheChip, cardLine, compactedSinceLastCall, compactionChip, contextLevel, contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type Chip, type GroupKey } from "./model";
-import type { BoardUsage, FromBoard, ToBoard } from "./protocol";
+import type { BoardUsage, EarlierInfo, EarlierScope, FromBoard, ToBoard } from "./protocol";
 
 declare function acquireVsCodeApi(): {
   postMessage(message: FromBoard): void;
@@ -30,6 +30,8 @@ let hits = new Map<string, SearchResult>();
 let pending = 0;
 /** The sessions that are not running, newest first. */
 let past: PastView[] = [];
+/** Which earlier sessions are listed, the most listed, and whether older ones were left out. */
+let earlier: EarlierInfo = { scope: "folders", limit: 500, capped: false };
 /** The user opened the Earlier group; kept across reloads. */
 let earlierOpen = vscode.getState()?.earlier === true;
 const pastCards = new Map<string, HTMLElement>();
@@ -76,6 +78,7 @@ function chips(view: SessionView): Chip[] {
   const out: Chip[] = [{ text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
   const where = hostChip(view);
   if (where) out.push({ text: where });
+  if (view.branch) out.push(branchChip(view.branch));
   if (view.model) out.push({ text: shortModel(view.model) });
   // The ring shows the context when the window is known; the chip covers the rest.
   if (view.contextTokens && !view.contextWindow) out.push({ text: `${formatTokens(view.contextTokens)} tokens` });
@@ -83,6 +86,11 @@ function chips(view: SessionView): Chip[] {
   const compacted = compactionChip(view, now());
   if (compacted) out.push(compacted);
   return out;
+}
+
+/** The git branch a session works on. */
+function branchChip(branch: string): Chip {
+  return { text: `⎇ ${branch}`, title: `Git branch: ${branch}`, kind: "branch" };
 }
 
 /** Text, hover and look of a chip, written only when they change. */
@@ -174,6 +182,7 @@ field.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" 
 const input = el("input", "");
 input.type = "search";
 input.placeholder = "Search the conversations";
+input.title = "Every word must appear in one message. Narrow it with since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts";
 input.setAttribute("aria-label", "Search the conversations");
 input.spellcheck = false;
 field.append(input);
@@ -186,10 +195,15 @@ beam.append(search);
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
+/** Asks for the current query's results; the days it names go by this board's time zone. */
+function askSearch(): void {
+  vscode.postMessage({ type: "search", query, zone: new Date().getTimezoneOffset() });
+}
+
 function runSearch(): void {
   const next = input.value.trim();
   if (next === query && next !== "") {
-    vscode.postMessage({ type: "search", query });
+    askSearch();
     return;
   }
   query = next;
@@ -203,7 +217,7 @@ function runSearch(): void {
     return;
   }
   search.classList.add("searching");
-  vscode.postMessage({ type: "search", query });
+  askSearch();
 }
 
 input.addEventListener("input", () => {
@@ -232,14 +246,16 @@ function receiveSearch(message: { query: string; results: SearchResult[]; pendin
   pending = message.pending;
   search.classList.toggle("searching", pending > 0);
   const matches = message.results.reduce((sum, result) => sum + result.count, 0);
-  const found = matches === 0 ? "no matches" : `${matches} ${matches === 1 ? "match" : "matches"} in ${message.results.length} ${message.results.length === 1 ? "session" : "sessions"}`;
+  const picked = `${message.results.length} ${message.results.length === 1 ? "session" : "sessions"}`;
+  // Operators alone pick sessions without words to match.
+  const found = message.results.length === 0 ? "no matches" : matches === 0 ? picked : `${matches} ${matches === 1 ? "match" : "matches"} in ${picked}`;
   summary.textContent = pending > 0 ? `${found} · reading ${pending} more…` : found;
   applyFilters();
   render();
   // Conversations not read within the time given: ask again shortly, until none is left.
   if (pending > 0) {
     setTimeout(() => {
-      if (query === message.query) vscode.postMessage({ type: "search", query });
+      if (query === message.query) askSearch();
     }, 400);
   }
 }
@@ -484,7 +500,8 @@ function updateCard(card: HTMLElement, view: SessionView): void {
 /** The newest matches of a session under its card, the terms marked. */
 function renderHits(hitsEl: Element, result: SearchResult | undefined): void {
   hitsEl.textContent = "";
-  hitsEl.classList.toggle("hidden", result === undefined);
+  // A session that the query's operators picked, with no words to match, shows no snippets.
+  hitsEl.classList.toggle("hidden", result === undefined || (result.hits.length === 0 && result.count === 0));
   if (!result) return;
   const id = (hitsEl.closest(".card") as HTMLElement).dataset.id!;
   for (const hit of result.hits) {
@@ -529,7 +546,11 @@ function createPastCard(view: PastView): HTMLElement {
   row.append(el("span", "title"), el("span", "elapsed"));
   main.append(row, el("span", "chips"), el("span", "hits hidden"));
   card.append(main);
-  card.addEventListener("click", () => vscode.postMessage({ type: "resume", id: view.id }));
+  card.addEventListener("click", () => {
+    // The agent resumes only the sessions of this window's folders; another project's opens its conversation.
+    if (card.dataset.resumable === "true") vscode.postMessage({ type: "resume", id: view.id });
+    else vscode.postMessage({ type: "openHit", query, id: view.id });
+  });
   return card;
 }
 
@@ -538,41 +559,71 @@ function pastElapsed(view: PastView): string {
 }
 
 function updatePastCard(card: HTMLElement, view: PastView): void {
-  card.title = `Not running · last written ${pastElapsed(view)} · click to resume it in the agent's panel`;
+  card.dataset.resumable = String(view.resumable);
+  card.title = view.resumable
+    ? `Not running · last written ${pastElapsed(view)} · click to resume it in the agent's panel`
+    : `Not running · last written ${pastElapsed(view)} · from ${view.cwd || "another project"}, not one of this window's folders: click to read its conversation; the agent resumes it from a window open on that folder`;
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   const chipsEl = card.querySelector(".chips")!;
-  if (chipsEl.childNodes.length === 0) chipsEl.append(el("span", "chip"));
-  const label = view.worktree ? `${view.project} · ${view.worktree}` : view.project;
-  if (chipsEl.firstChild!.textContent !== label) chipsEl.firstChild!.textContent = label;
+  const values: Chip[] = [{ text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
+  if (view.branch) values.push(branchChip(view.branch));
+  while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
+  values.forEach((value, i) => setChip((chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"))) as HTMLElement, value));
   renderHits(card.querySelector(".hits")!, query === "" ? undefined : hits.get(view.id));
 }
 
-/** The sessions that are not running, collapsed under the live ones; open while a search has matches among them. */
+const SCOPES: { scope: EarlierScope; label: string; title: string }[] = [
+  { scope: "folders", label: "This window's folders", title: "List and search the earlier sessions of the folders open in this window" },
+  { scope: "all", label: "All projects", title: "List and search the earlier sessions of every project" },
+];
+
+/**
+ * The sessions that are not running, collapsed under the live ones; open
+ * while a search has matches among them. The heading stays when its scope
+ * holds none, so the scope can be switched.
+ */
 function renderEarlier(after: HTMLElement): void {
   const shown = query === "" ? past : past.filter((view) => hits.has(view.id));
-  if (shown.length === 0) {
-    earlierEl?.remove();
-    earlierEl = undefined;
-    for (const card of pastCards.values()) card.remove();
-    pastCards.clear();
-    return;
-  }
-  const open = earlierOpen || query !== "";
+  const open = (earlierOpen || query !== "") && shown.length > 0;
   if (!earlierEl) {
     earlierEl = el("section", "group group-past");
     const heading = el("h2", "heading");
-    heading.title = "Sessions that are not running. Click to show or hide them; a click on one resumes it in the agent's panel.";
+    heading.title = "Sessions that are not running. Click to show or hide them; a click on one resumes it in the agent's panel, or, for another project's, opens its conversation.";
     heading.append(el("i", "chev", "▸"), el("span", "label", "Earlier"), el("span", "count"));
+    const scopes = el("span", "scopes");
+    scopes.setAttribute("role", "group");
+    scopes.setAttribute("aria-label", "Which earlier sessions to list");
+    for (const option of SCOPES) {
+      const button = el("button", "scope", option.label);
+      button.type = "button";
+      button.title = option.title;
+      button.dataset.scope = option.scope;
+      button.addEventListener("click", (event) => {
+        // A choice of scope, not a click on the heading.
+        event.stopPropagation();
+        if (earlier.scope === option.scope) return;
+        earlier = { ...earlier, scope: option.scope };
+        vscode.postMessage({ type: "earlierScope", scope: option.scope });
+        render();
+      });
+      scopes.append(button);
+    }
+    heading.append(scopes);
     heading.addEventListener("click", () => {
       earlierOpen = !earlierOpen;
       vscode.setState({ hidden: [...hidden], earlier: earlierOpen });
       render();
     });
-    earlierEl.append(heading, el("div", "cards"));
+    earlierEl.append(heading, el("p", "note hidden"), el("div", "cards"));
   }
   earlierEl.classList.toggle("open", open);
+  for (const button of earlierEl.querySelectorAll<HTMLElement>(".scope")) button.setAttribute("aria-pressed", String(button.dataset.scope === earlier.scope));
   earlierEl.querySelector(".count")!.textContent = query === "" ? String(shown.length) : `${shown.length} of ${past.length}`;
+  // More earlier sessions than are listed: the newest only, and searches cover those.
+  const note = earlierEl.querySelector(".note")!;
+  note.classList.toggle("hidden", !earlier.capped || !open);
+  note.textContent = earlier.capped ? `Showing the newest ${earlier.limit}; older sessions are not listed or searched.` : "";
   if (earlierEl.previousElementSibling !== after) root.insertBefore(earlierEl, after.nextSibling);
   const list = earlierEl.querySelector(".cards")!;
   list.classList.toggle("hidden", !open);
@@ -613,14 +664,12 @@ function render(): void {
     for (const group of groupsEl.values()) group.remove();
     groupsEl.clear();
     cards.clear();
-    earlierEl?.remove();
-    earlierEl = undefined;
-    pastCards.clear();
     const empty = el("div", "nothing");
-    if (query !== "") empty.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message. Esc clears the search."));
+    if (query !== "") empty.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message; since:, before:, project:, branch: and file: narrow the search. Esc clears it."));
     else if (allSessions.length > 0) empty.append(el("p", "big", "Everything is hidden"), el("p", "small", "Click a state in the legend to show it again."));
     else empty.append(el("p", "big", "Nothing on the horizon"), el("p", "small", "Sessions appear here as soon as an agent starts."));
     root.append(empty);
+    renderEarlier(empty);
     return;
   }
   const seenIds = new Set<string>();
@@ -706,12 +755,13 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   if (message.type !== "sessions") return;
   allSessions = message.sessions;
   past = message.past ?? [];
+  if (message.earlier) earlier = message.earlier;
   usage = message.usage;
   clockOffset = message.now - Date.now();
   applyFilters();
   render();
   // The conversations go on; keep an open search current.
-  if (query !== "") vscode.postMessage({ type: "search", query });
+  if (query !== "") askSearch();
 });
 
 setInterval(tick, 1000);

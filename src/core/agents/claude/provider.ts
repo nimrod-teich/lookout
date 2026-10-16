@@ -1,12 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { HistoryIndex, termsOf, type HistoryMessage, type SearchResult } from "../../history";
+import { HistoryIndex, type HistoryMessage, type SearchResult } from "../../history";
+import { projectOf } from "../../model";
+import { hasFilters, type Query } from "../../terms";
 import { findLastLine, JsonlTail, LineSearch, lineStartAtOrAfter, readLineAt } from "../../jsonlTail";
-import { messageOf } from "./history";
+import { factsOf } from "./history";
 import { PastTranscripts } from "./past";
 import type { ProcessTable } from "../../proc";
 import type { Evidence } from "../../types";
-import type { AgentProvider, AgentSession, AgentStatus, PastSession, SearchOutcome } from "../agent";
+import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, SearchOutcome } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
@@ -45,6 +47,8 @@ interface Tracked {
 
 /** A process in its first minute has not written its state yet; it is idle, not unknown. */
 const STARTING_MS = 60_000;
+/** A message is stamped before its line is written, so it is never newer than the file; a second covers rounding. */
+const MTIME_SLACK_MS = 1_000;
 
 function starting(file: SessionFile, now: number): boolean {
   return file.startedAt !== undefined && now - file.startedAt < STARTING_MS;
@@ -104,6 +108,8 @@ export class ClaudeProvider implements AgentProvider {
   private readonly pastTranscripts: PastTranscripts;
   /** Transcript file by id, for the past sessions last listed. */
   private pastFiles = new Map<string, string>();
+  /** Where the past sessions last listed ran and when they were last written, for the search's filters. */
+  private pastMeta = new Map<string, { cwd: string; branch?: string; modifiedAt: number }>();
   private readonly pastIndexes = new Map<string, HistoryIndex>();
   /** Plan titles by file, read again when the file changes. */
   private readonly plans = new Map<string, { mtimeMs: number; title: string | undefined }>();
@@ -141,6 +147,7 @@ export class ClaudeProvider implements AgentProvider {
         activity: status === "working" ? activityOf(transcript) : undefined,
         agents: status === "working" ? agentsOf(transcript) : 0,
         lastReply: transcript.lastReply,
+        branch: transcript.gitBranch,
         model: transcript.model,
         contextTokens: transcript.contextTokens,
         contextWindow: contextWindowOf(transcript.model, transcript.contextTokens),
@@ -156,25 +163,34 @@ export class ClaudeProvider implements AgentProvider {
     return sessions;
   }
 
-  past(cwds: readonly string[], exclude: ReadonlySet<string>): PastSession[] {
-    const list = this.pastTranscripts.list(cwds, exclude);
-    this.pastFiles = new Map(list.map((p) => [p.id, p.file]));
+  past(scope: PastScope, exclude: ReadonlySet<string>): PastList {
+    const { transcripts, capped, incomplete } = this.pastTranscripts.list(scope, exclude);
+    this.pastFiles = new Map(transcripts.map((p) => [p.id, p.file]));
+    this.pastMeta = new Map(transcripts.map((p) => [p.id, { cwd: p.cwd, branch: p.branch, modifiedAt: p.modifiedAt }]));
     for (const id of [...this.pastIndexes.keys()]) if (!this.pastFiles.has(id)) this.pastIndexes.delete(id);
-    return list.map((p) => ({ agent: this.id, id: p.id, cwd: p.cwd, title: p.title, modifiedAt: p.modifiedAt }));
+    return { sessions: transcripts.map((p) => ({ agent: this.id, id: p.id, cwd: p.cwd, title: p.title, branch: p.branch, resumable: p.resumable, modifiedAt: p.modifiedAt })), capped, incomplete };
   }
 
   /**
-   * Searches the live and the past sessions' transcripts. Each is read into
+   * Searches the live and the past sessions' transcripts: the words in the
+   * messages written within the query's times, of the sessions its
+   * `project:`, `branch:` and `file:` pick. Each transcript is read into
    * memory on its first search, then only what was appended; a first read
-   * happens only while the budget allows, the live sessions first.
+   * happens only while the budget allows, the live sessions first. A query
+   * of operators alone lists the sessions they pick, without matches.
    */
-  search(query: string, limit: number, budgetMs: number): SearchOutcome {
-    const terms = termsOf(query);
-    if (terms.length === 0) return { results: [], pending: 0 };
+  search(parsed: Query, limit: number, budgetMs: number): SearchOutcome {
+    if (parsed.terms.length === 0 && !hasFilters(parsed)) return { results: [], pending: 0 };
+    const range = { since: parsed.since, before: parsed.before };
+    const timed = parsed.since !== undefined || parsed.before !== undefined;
     const started = Date.now();
     const results: SearchResult[] = [];
     let pending = 0;
     for (const id of [...this.tracked.keys(), ...this.pastFiles.keys()]) {
+      // A transcript last written before the bound holds no message after it: not worth reading.
+      const past = this.tracked.has(id) ? undefined : this.pastMeta.get(id);
+      if (past && parsed.since !== undefined && past.modifiedAt + MTIME_SLACK_MS < parsed.since) continue;
+      if (!this.picked(id, parsed)) continue;
       const index = this.indexFor(id);
       if (!index) continue;
       if (!index.ready && Date.now() - started >= budgetMs) {
@@ -182,10 +198,31 @@ export class ClaudeProvider implements AgentProvider {
         continue;
       }
       index.refresh();
-      const { count, hits } = index.search(terms, limit);
-      if (count > 0) results.push({ id, count, hits });
+      if (parsed.files.length > 0 && !index.touched(parsed.files)) continue;
+      if (parsed.terms.length > 0) {
+        const { count, hits } = index.search(parsed.terms, limit, range);
+        if (count > 0) results.push({ id, count, hits });
+      } else if (!timed || index.hasMessageIn(range)) results.push({ id, count: 0, hits: [] });
     }
     return { results, pending };
+  }
+
+  /** The session's project and branch fit the query's `project:` and `branch:`, any of their values. */
+  private picked(id: string, query: Query): boolean {
+    if (query.projects.length === 0 && query.branches.length === 0) return true;
+    const tracked = this.tracked.get(id);
+    const meta = tracked ? { cwd: tracked.state.cwd ?? "", branch: tracked.state.gitBranch } : this.pastMeta.get(id);
+    if (!meta) return false;
+    if (query.projects.length > 0) {
+      const { project, worktree } = projectOf(meta.cwd);
+      const names = [project, worktree ?? ""].map((name) => name.toLowerCase());
+      if (!query.projects.some((part) => names.some((name) => name.includes(part)))) return false;
+    }
+    if (query.branches.length > 0) {
+      const branch = meta.branch?.toLowerCase();
+      if (!branch || !query.branches.some((part) => branch.includes(part))) return false;
+    }
+    return true;
   }
 
   history(id: string): HistoryMessage[] | undefined {
@@ -200,14 +237,14 @@ export class ClaudeProvider implements AgentProvider {
     const tracked = this.tracked.get(id);
     if (tracked) {
       if (!tracked.file) return undefined;
-      tracked.history ??= new HistoryIndex(tracked.file, messageOf);
+      tracked.history ??= new HistoryIndex(tracked.file, factsOf);
       return tracked.history;
     }
     const file = this.pastFiles.get(id);
     if (!file) return undefined;
     let index = this.pastIndexes.get(id);
     if (!index) {
-      index = new HistoryIndex(file, messageOf);
+      index = new HistoryIndex(file, factsOf);
       this.pastIndexes.set(id, index);
     }
     return index;

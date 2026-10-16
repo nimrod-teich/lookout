@@ -18,18 +18,35 @@
     document.body.className = "vscode-dark";
   }
   if (params.get("motion") === "0") document.body.classList.add("vscode-reduce-motion");
-  // Fake answers for the search box: every other session matches, with the query planted in a snippet.
-  const fakeSearch = (query, sessions) => sessions.filter((s, i) => i % 2 === 0).map((s, i) => {
-    const you = `…search box within each ${query}? It should look through the ${s.project} sessions, and also the chips…`;
-    const agent = `…once; the ${query} is read into memory the first time, then only what was appended, so a second look costs nothing…`;
-    const mark = (text) => { const at = text.toLowerCase().indexOf(query.toLowerCase()); return at < 0 ? [] : [[at, at + query.length]]; };
-    return { id: s.id, count: 2 + i * 3, hits: [{ role: "you", snippet: you, ranges: mark(you) }, { role: "agent", snippet: agent, ranges: mark(agent) }] };
-  });
+  // Fake answers for the search box: project: and branch: pick sessions; of those, every other one matches the
+  // words, with them planted in a snippet; operators alone list what they pick, without matches.
+  const fakeSearch = (query, sessions) => {
+    const words = query.trim().split(/\s+/).filter(Boolean);
+    const ops = words.filter((w) => /^(since|before|project|branch|file):./i.test(w));
+    const text = words.filter((w) => !ops.includes(w)).join(" ");
+    const picked = sessions.filter((s) => ops.every((op) => {
+      const key = op.slice(0, op.indexOf(":")).toLowerCase();
+      const value = op.slice(op.indexOf(":") + 1).toLowerCase();
+      if (key === "project") return `${s.project} ${s.worktree ?? ""}`.toLowerCase().includes(value);
+      if (key === "branch") return (s.branch ?? "").toLowerCase().includes(value);
+      return true;
+    }));
+    if (text === "") return picked.map((s) => ({ id: s.id, count: 0, hits: [] }));
+    return picked.filter((s, i) => i % 2 === 0).map((s, i) => {
+      const you = `…search box within each ${text}? It should look through the ${s.project} sessions, and also the chips…`;
+      const agent = `…once; the ${text} is read into memory the first time, then only what was appended, so a second look costs nothing…`;
+      const mark = (line) => { const at = line.toLowerCase().indexOf(text.toLowerCase()); return at < 0 ? [] : [[at, at + text.length]]; };
+      return { id: s.id, count: 2 + i * 3, hits: [{ role: "you", snippet: you, ranges: mark(you) }, { role: "agent", snippet: agent, ranges: mark(agent) }] };
+    });
+  };
+  /** Posts the fixture; the scope "folders" lists only the past sessions the agent resumes here. */
+  let post = () => {};
   let fixtureSessions = [];
   window.acquireVsCodeApi = () => ({
     postMessage: (m) => {
       console.log("to extension:", JSON.stringify(m));
       if (m.type === "search") setTimeout(() => window.postMessage({ type: "search", query: m.query, results: fakeSearch(m.query, fixtureSessions), pending: 0 }, "*"), 100);
+      if (m.type === "earlierScope") post(m.scope);
     },
     getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), earlier: params.get("earlier") === "1" }),
     setState: () => {},
@@ -53,8 +70,17 @@
       for (const pace of Object.values(usage.pace ?? {})) if (pace.fullAt !== undefined) pace.fullAt = now + pace.fullAt;
     }
     for (const p of fixture.past ?? []) if (p.modifiedAt < 1e12) p.modifiedAt = now - p.modifiedAt;
-    fixtureSessions = [...fixture.sessions, ...(fixture.past ?? [])];
-    window.postMessage({ type: "sessions", sessions: fixture.sessions, past: fixture.past ?? [], now, usage }, "*");
+    const earlier = { scope: "folders", limit: 500, capped: false, ...fixture.earlier };
+    if (params.get("scope")) earlier.scope = params.get("scope");
+    if (params.get("capped") === "1") earlier.capped = true;
+    post = (scope) => {
+      earlier.scope = scope;
+      // As the extension sends them: newest first.
+      const past = (fixture.past ?? []).filter((p) => scope === "all" || p.resumable !== false).sort((a, b) => b.modifiedAt - a.modifiedAt);
+      fixtureSessions = [...fixture.sessions, ...past];
+      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, earlier: { ...earlier } }, "*");
+    };
+    post(earlier.scope);
     const q = params.get("q");
     if (q) setTimeout(() => { const input = document.querySelector(".search input"); input.value = q; input.dispatchEvent(new Event("input")); }, 200);
     const hoverId = params.get("hover");
