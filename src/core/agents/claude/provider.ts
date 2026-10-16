@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { HistoryIndex, termsOf, type HistoryMessage, type SearchResult } from "../../history";
-import { findLastLine, JsonlTail, readLineAt } from "../../jsonlTail";
+import { findLastLine, JsonlTail, LineSearch, lineStartAtOrAfter, readLineAt } from "../../jsonlTail";
 import { messageOf } from "./history";
 import { PastTranscripts } from "./past";
 import type { ProcessTable } from "../../proc";
@@ -10,7 +10,7 @@ import type { AgentProvider, AgentSession, AgentStatus, PastSession, SearchOutco
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
-import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseOf, spendOf, titleOf, type OpenTool, type TranscriptState } from "./transcript";
+import { activityOf, agentsOf, applyLine, cacheOf, contextWindowOf, emptyTranscript, pulseMarksOf, pulseOf, recordCompactionLine, spendOf, titleOf, type OpenTool, type TranscriptState } from "./transcript";
 import { planFileTitle, questionOf, reasonOf } from "./waiting";
 
 export const CLAUDE_CODE = "claude-code";
@@ -31,6 +31,8 @@ const SUBAGENT_TAIL_BYTES = 256 * 1024;
 
 interface Tracked {
   tail?: JsonlTail;
+  /** The search for compactions in the part of the transcript before the tail, while it runs. */
+  scan?: LineSearch;
   state: TranscriptState;
   nextLookupAt: number;
   /** The transcript file, once found. */
@@ -73,6 +75,12 @@ function evidenceOf(file: SessionFile, now: number): Evidence {
 }
 
 /** Applies the last title entries of each kind, wherever they are in the file; lines read later override them in order. */
+/** The marks of a compaction, as they appear in a transcript line. */
+const COMPACTION_NEEDLES = ['"subtype":"compact_boundary"', '"isCompactSummary":true'];
+/** How much of a transcript's unread part the search for compactions reads per poll. */
+const SCAN_BYTES_PER_POLL = 16 * 1024 * 1024;
+
+/** Whatever is skipped, the title must not be: Claude Code stamps it once, and again on resume just before a checkpoint. */
 function seedTitles(file: string, state: TranscriptState): void {
   for (const needle of ['"type":"custom-title"', '"type":"ai-title"']) {
     const at = findLastLine(file, needle, CHECKPOINT_SEARCH_BYTES);
@@ -137,6 +145,10 @@ export class ClaudeProvider implements AgentProvider {
         contextTokens: transcript.contextTokens,
         contextWindow: contextWindowOf(transcript.model, transcript.contextTokens),
         pulse: pulseOf(transcript, now, file.startedAt),
+        pulseMarks: pulseMarksOf(transcript, now, file.startedAt),
+        compactions: transcript.compactions || undefined,
+        compactedAt: transcript.compactedAt.at(-1),
+        cache: cacheOf(transcript),
         spend: spendOf(transcript),
       };
     });
@@ -222,16 +234,40 @@ export class ClaudeProvider implements AgentProvider {
       const transcript = findTranscript(this.configDir, file.cwd, file.sessionId);
       if (transcript) {
         tracked.file = transcript;
-        tracked.tail = this.openTranscript(transcript, tracked.state);
+        Object.assign(tracked, this.openTranscript(transcript, tracked.state));
       } else tracked.nextLookupAt = now + TRANSCRIPT_LOOKUP_MS;
     }
-    const read = tracked.tail?.read();
+    let read = tracked.tail?.read();
+    if (read?.reset && tracked.file) {
+      // Replaced or cut short: start over as with a new transcript, so what lies before the part read is found again.
+      tracked.state = emptyTranscript();
+      tracked.scan = undefined;
+      Object.assign(tracked, this.openTranscript(tracked.file, tracked.state));
+      read = tracked.tail?.read();
+    }
     if (read) {
       if (read.reset) tracked.state = emptyTranscript();
       for (const line of read.lines) applyLine(tracked.state, line);
       tracked.writtenAt = Math.round(read.mtimeMs);
     }
+    this.scanOn(tracked);
     return tracked.state;
+  }
+
+  /**
+   * Counts the compactions in the part of a transcript the tail skipped: every
+   * one counts, however long ago. A slice per poll, so a huge transcript does
+   * not hold the poll up; lines that only mention a mark are told apart when
+   * parsed.
+   */
+  private scanOn(tracked: Tracked): void {
+    const scan = tracked.scan;
+    if (!scan || !tracked.file) return;
+    for (const at of scan.step(SCAN_BYTES_PER_POLL)) {
+      const line = readLineAt(tracked.file, at);
+      if (line !== undefined) recordCompactionLine(tracked.state, line);
+    }
+    if (scan.done) tracked.scan = undefined;
   }
 
   /**
@@ -299,16 +335,14 @@ export class ClaudeProvider implements AgentProvider {
    * complete, unless that is too far back; then the last megabyte is read and
    * the spend is marked partial.
    */
-  private openTranscript(file: string, state: TranscriptState): JsonlTail {
+  private openTranscript(file: string, state: TranscriptState): { tail: JsonlTail; scan?: LineSearch } {
     let size = 0;
     try {
       size = fs.statSync(file).size;
     } catch {
       // Opening the tail reports the missing file.
     }
-    if (size <= BACKFILL_BYTES) return new JsonlTail(file, { startAt: 0 });
-    // Whatever is skipped, the title must not be: Claude Code stamps it once,
-    // and again on resume just before a checkpoint.
+    if (size <= BACKFILL_BYTES) return { tail: new JsonlTail(file, { startAt: 0 }) };
     seedTitles(file, state);
     const checkpoint = findLastLine(file, '"type":"cost-state"', CHECKPOINT_SEARCH_BYTES);
     if (checkpoint !== undefined && size - checkpoint <= CHECKPOINT_READ_BYTES) {
@@ -317,9 +351,11 @@ export class ClaudeProvider implements AgentProvider {
       // and asked. Usage before the checkpoint is dropped when it is read.
       const reply = findLastLine(file, '"type":"assistant"', CHECKPOINT_SEARCH_BYTES);
       const start = reply !== undefined && size - reply <= CHECKPOINT_READ_BYTES ? Math.min(reply, checkpoint) : checkpoint;
-      return new JsonlTail(file, { startAt: start });
+      return { tail: new JsonlTail(file, { startAt: start }), scan: new LineSearch(file, COMPACTION_NEEDLES, start) };
     }
     state.joinedLate = true;
-    return new JsonlTail(file, { backfillBytes: BACKFILL_BYTES });
+    // The tail and the search meet at one line start, so nothing written meanwhile falls between them.
+    const start = lineStartAtOrAfter(file, size - BACKFILL_BYTES);
+    return { tail: new JsonlTail(file, { startAt: start }), scan: new LineSearch(file, COMPACTION_NEEDLES, start) };
   }
 }

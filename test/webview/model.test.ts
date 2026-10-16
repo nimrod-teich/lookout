@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardLine, contextPercent, groupSessions, HARBOUR, hostChip, layoutBoats, pulseBars, secondLine, waterline } from "../../src/webview/model";
+import { cacheChip, cardLine, compactedSinceLastCall, compactionChip, contextLevel, contextPercent, groupSessions, HARBOUR, hostChip, layoutBoats, pulseBars, secondLine, waterline } from "../../src/webview/model";
 import { view } from "../vscode/helpers";
 
 describe("groupSessions", () => {
@@ -138,5 +138,41 @@ describe("card telemetry", () => {
     expect(contextPercent(view({ contextTokens: 1_200_000, contextWindow: 1_000_000 }))).toBe(100);
     expect(contextPercent(view({ contextTokens: 150_000 }))).toBeUndefined();
     expect(contextPercent(view({ contextWindow: 200_000 }))).toBeUndefined();
+  });
+
+  it("turns the context ring amber from 75% and red from 90%", () => {
+    expect([0, 74, 75, 89, 90, 100].map(contextLevel)).toEqual(["ok", "ok", "high", "high", "full", "full"]);
+  });
+
+  it("says how often the conversation was compacted, and when last", () => {
+    const now = new Date(2026, 9, 16, 15, 0).getTime();
+    expect(compactionChip(view(), now)).toBeUndefined();
+    const once = compactionChip(view({ compactions: 1, compactedAt: new Date(2026, 9, 16, 14, 5).getTime() }), now);
+    expect(once?.text).toBe("compacted ×1");
+    expect(once?.title).toMatch(/^The agent compacted this conversation once, the last time at 14:05: it replaced the older part with a summary/);
+    expect(compactionChip(view({ compactions: 3 }), now)?.title).toMatch(/compacted this conversation 3 times: /);
+  });
+
+  it("counts down to when the prompt cache lets the conversation go, then calls it cold", () => {
+    const MIN_15 = 15 * 60_000;
+    const lastCallAt = new Date(2026, 9, 16, 14, 0).getTime();
+    const idle = view({ state: "idle", contextTokens: 142_000, cache: { lastCallAt, ttlMs: 5 * 60_000 } });
+    const warm = cacheChip(idle, lastCallAt + 2 * 60_000 + 10_000);
+    expect(warm).toMatchObject({ text: "cache warm, full price in 3m", kind: "cache warm" });
+    expect(warm?.title).toBe(
+      "The model's prompt cache keeps this conversation for 5 minutes after each call; the last went out at 14:00. A message sent before 14:05 reads its 142k tokens from the cache, for a fraction of the input price. After that, the conversation is written to the cache again, which costs more than the input price.",
+    );
+    const cold = cacheChip(idle, lastCallAt + 5 * 60_000);
+    expect(cold).toMatchObject({ text: "cache cold", kind: "cache cold" });
+    expect(cold?.title).toBe("The model's prompt cache let this conversation go at 14:05, 5 minutes after the agent's last call went out. The next message writes its 142k tokens to the cache again, which costs more than the input price.");
+    expect(cacheChip(view({ state: "waiting", cache: { lastCallAt, ttlMs: 3_600_000 } }), lastCallAt + 10 * 60_000)?.text).toBe("cache warm, full price in 50m");
+    // Compacted since the last call: the conversation is shorter than the count.
+    const compacted = view({ state: "idle", contextTokens: 142_000, compactions: 1, compactedAt: lastCallAt + 30_000, cache: { lastCallAt, ttlMs: 3_600_000 } });
+    expect(compactedSinceLastCall(compacted)).toBe(true);
+    expect(cacheChip(compacted, lastCallAt + MIN_15)?.title).toContain("A message sent before 15:00 reads it from the cache");
+    expect(compactedSinceLastCall({ ...compacted, compactedAt: lastCallAt - 1 })).toBe(false);
+    // While it works, every call keeps the cache warm; before its first call there is none.
+    expect(cacheChip(view({ state: "working", cache: { lastCallAt, ttlMs: 3_600_000 } }), lastCallAt)).toBeUndefined();
+    expect(cacheChip(view({ state: "idle" }), lastCallAt)).toBeUndefined();
   });
 });

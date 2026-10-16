@@ -1,9 +1,9 @@
 /// <reference lib="dom" />
-import { describeEvidence, describePace, describeReason, formatElapsed, formatTokens, formatUntil, formatUsd, quietFor, shortModel } from "../core/format";
+import { clockTime, describeEvidence, describePace, describeReason, formatElapsed, formatTokens, formatUntil, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
 import { Harbour } from "./harbour";
-import { cardLine, contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type GroupKey } from "./model";
+import { cacheChip, cardLine, compactedSinceLastCall, compactionChip, contextLevel, contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type Chip, type GroupKey } from "./model";
 import type { BoardUsage, FromBoard, ToBoard } from "./protocol";
 
 declare function acquireVsCodeApi(): {
@@ -72,15 +72,34 @@ function stateTitle(view: SessionView): string {
   }
 }
 
-function chips(view: SessionView): string[] {
-  const out = [view.worktree ? `${view.project} · ${view.worktree}` : view.project];
+function chips(view: SessionView): Chip[] {
+  const out: Chip[] = [{ text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
   const where = hostChip(view);
-  if (where) out.push(where);
-  if (view.model) out.push(shortModel(view.model));
+  if (where) out.push({ text: where });
+  if (view.model) out.push({ text: shortModel(view.model) });
   // The ring shows the context when the window is known; the chip covers the rest.
-  if (view.contextTokens && !view.contextWindow) out.push(`${formatTokens(view.contextTokens)} tokens`);
-  if (view.agents > 0) out.push(view.agents === 1 ? "1 agent" : `${view.agents} agents`);
+  if (view.contextTokens && !view.contextWindow) out.push({ text: `${formatTokens(view.contextTokens)} tokens` });
+  if (view.agents > 0) out.push({ text: view.agents === 1 ? "1 agent" : `${view.agents} agents` });
+  const compacted = compactionChip(view, now());
+  if (compacted) out.push(compacted);
   return out;
+}
+
+/** Text, hover and look of a chip, written only when they change. */
+function setChip(chip: HTMLElement, value: Chip): void {
+  if (chip.textContent !== value.text) chip.textContent = value.text;
+  const className = value.kind ? `chip ${value.kind}` : "chip";
+  if (chip.className !== className) chip.className = className;
+  if (chip.title !== (value.title ?? "")) chip.title = value.title ?? "";
+}
+
+/** The card's prompt cache chip; its countdown moves with the clock. */
+function renderCache(card: HTMLElement, view: SessionView): void {
+  const chip = card.querySelector(".costs .cache-slot") as HTMLElement;
+  const value = cacheChip(view, now());
+  chip.classList.toggle("hidden", value === undefined);
+  if (value) setChip(chip, { ...value, kind: `cache-slot ${value.kind}` });
+  card.querySelector(".costs")!.classList.toggle("hidden", value === undefined && view.spend === undefined);
 }
 
 // The harbour: the lighthouse, its beam, and the sessions as boats.
@@ -119,11 +138,13 @@ function showHover(id: string | undefined): void {
   if (second && view.state !== "unknown") hover.append(el("div", "hover-line", second));
   const evidence = describeEvidence(view.evidence, now());
   if (evidence) hover.append(el("div", "hover-evidence", evidence));
-  const meta = chips(view);
+  const meta = chips(view).map((chip) => chip.text);
   if (view.spend) {
     const tokens = view.spend.input + view.spend.output + view.spend.cacheRead + view.spend.cacheWrite;
     meta.push(`${formatTokens(tokens)} tokens${typeof view.spend.costUsd !== "number" ? "" : ` · ${view.spend.estimated ? "~" : ""}${formatUsd(view.spend.costUsd)}`}`);
   }
+  const cache = cacheChip(view, now());
+  if (cache) meta.push(cache.text);
   hover.append(el("div", "hover-meta", meta.join(" · ")));
   hover.append(el("div", "hover-hint", "Click to jump"));
   const boat = harbour.boatFor(view.id);
@@ -341,9 +362,10 @@ function createCard(view: SessionView): HTMLElement {
   const options = el("span", "options hidden");
   const pulse = el("span", "pulse");
   const chipsEl = el("span", "chips");
-  const spend = el("span", "chip spend");
+  const costs = el("span", "costs");
+  costs.append(el("span", "chip spend"), el("span", "chip cache-slot hidden"));
   const hitsEl = el("span", "hits hidden");
-  main.append(row, line, options, pulse, chipsEl, spend, hitsEl);
+  main.append(row, line, options, pulse, chipsEl, costs, hitsEl);
   card.append(main);
   const ring = el("span", "ring");
   ring.append(el("span", "ring-value"));
@@ -411,26 +433,35 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   seen.title = typed ? "Dismiss the question: the session goes back to idle until it asks another" : "Mark as seen";
   const pulse = card.querySelector(".pulse") as HTMLElement;
   const bars = pulseBars(view.pulse);
-  pulse.title = bars.length < 15 ? "Tool calls per minute since the session started" : "Tool calls per minute, last 15 minutes";
-  pulse.classList.toggle("empty", bars.length === 0 || bars.every((b) => b === 0));
+  // The minutes the conversation was compacted carry a pin.
+  const marks = new Set(view.pulseMarks ?? []);
+  pulse.title = `${bars.length < 15 ? "Tool calls per minute since the session started" : "Tool calls per minute, last 15 minutes"}${marks.size > 0 ? "; a pin marks the minute the conversation was compacted" : ""}`;
+  pulse.classList.toggle("empty", bars.length === 0 || (bars.every((b) => b === 0) && marks.size === 0));
   while (pulse.childNodes.length > bars.length) pulse.lastChild!.remove();
   bars.forEach((height, i) => {
     const bar = (pulse.childNodes[i] ?? pulse.appendChild(el("i", "bar"))) as HTMLElement;
     bar.style.height = `${Math.max(12, Math.round(height * 100))}%`;
     bar.classList.toggle("quiet", height === 0);
+    bar.classList.toggle("compacted", marks.has(i));
   });
   const ring = card.querySelector(".ring") as HTMLElement;
   const percent = contextPercent(view);
   ring.classList.toggle("hidden", percent === undefined);
   if (percent !== undefined) {
+    const level = contextLevel(percent);
     ring.style.setProperty("--p", String(percent));
-    ring.classList.toggle("warn", percent >= 80);
+    ring.classList.toggle("warn", level === "high");
+    ring.classList.toggle("full", level === "full");
     ring.querySelector(".ring-value")!.textContent = `${percent}%`;
-    ring.title = `Context window ${percent}% full (${formatTokens(view.contextTokens ?? 0)} of ${formatTokens(view.contextWindow ?? 0)})`;
+    const since = compactedSinceLastCall(view) && view.compactedAt !== undefined ? ` It was compacted at ${clockTime(view.compactedAt, now())}, after this reading: the next call starts with less.` : "";
+    ring.title = `Context window ${percent}% full (${formatTokens(view.contextTokens ?? 0)} of ${formatTokens(view.contextWindow ?? 0)}) at the agent's last call; amber from 75%, red from 90%. When it fills, the agent compacts the conversation.${since}`;
   }
+  renderCache(card, view);
   const spendEl = card.querySelector(".spend") as HTMLElement;
   const spend = view.spend;
   spendEl.classList.toggle("hidden", spend === undefined);
+  // A row with no chips takes no room.
+  card.querySelector(".costs")!.classList.toggle("hidden", spend === undefined && cacheChip(view, now()) === undefined);
   if (spend) {
     const tokens = spend.input + spend.output + spend.cacheRead + spend.cacheWrite;
     const cost = typeof spend.costUsd !== "number" ? "" : ` · ${spend.estimated ? "~" : ""}${formatUsd(spend.costUsd)}`;
@@ -445,12 +476,9 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   }
   renderHits(card.querySelector(".hits")!, query === "" ? undefined : hits.get(view.id));
   const chipsEl = card.querySelector(".chips")!;
-  const labels = chips(view);
-  while (chipsEl.childNodes.length > labels.length) chipsEl.lastChild!.remove();
-  labels.forEach((label, i) => {
-    const chip = chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"));
-    if (chip.textContent !== label) chip.textContent = label;
-  });
+  const values = chips(view);
+  while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
+  values.forEach((value, i) => setChip((chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"))) as HTMLElement, value));
 }
 
 /** The newest matches of a session under its card, the terms marked. */
@@ -653,11 +681,12 @@ function tick(): void {
     const card = cards.get(view.id);
     if (!card) continue;
     card.querySelector(".elapsed")!.textContent = elapsedText(view);
-    // The quiet mark and the evidence's age move with the clock.
+    // The quiet mark, the evidence's age and the cache's countdown move with the clock.
     if (view.state === "working") {
       card.classList.toggle("quiet", quietFor(view, now()) !== undefined);
       card.querySelector(".line .kind")!.textContent = cardLine(view, now()).label ?? "";
     }
+    renderCache(card, view);
     card.title = cardTitle(view);
   }
   for (const view of past) {
