@@ -188,6 +188,13 @@ function run(file: string, args: string[], env?: NodeJS.ProcessEnv): Promise<str
   });
 }
 
+/** As `run`, but a failure that still printed something gives what it printed: `lsof` fails when one of the processes it was asked about has ended. */
+function runLoose(file: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { timeout: 15_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout) => (err && !stdout ? reject(err) : resolve(stdout)));
+  });
+}
+
 const WINDOWS_COMMAND =
   "Get-CimInstance Win32_Process | ForEach-Object { '{0},{1},{2}' -f $_.ProcessId, $_.ParentProcessId, $(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 }) }";
 
@@ -286,6 +293,12 @@ export interface NamedProcess {
 export interface ProcessFinder {
   /** The processes as last read; on platforms that list them in the background, possibly a few seconds old. */
   find(): NamedProcess[];
+  /**
+   * The files one of them holds open, by path, where the platform tells it and
+   * the finder was made to read them: Linux from `/proc`, macOS from `lsof`.
+   * Undefined where it cannot be told.
+   */
+  heldFiles?(pid: number): string[] | undefined;
   /** Set by the owner to learn that a background read brought news. */
   onDidUpdate?: () => void;
 }
@@ -368,6 +381,25 @@ export class LinuxProcessFinder implements ProcessFinder {
     return (this.found = found);
   }
 
+  /** The targets of the process's file descriptors in `/proc/<pid>/fd`. */
+  heldFiles(pid: number): string[] | undefined {
+    let fds: string[];
+    try {
+      fds = fs.readdirSync(`${this.root}/${pid}/fd`);
+    } catch {
+      return undefined;
+    }
+    const files: string[] = [];
+    for (const fd of fds) {
+      try {
+        files.push(fs.readlinkSync(`${this.root}/${pid}/fd/${fd}`));
+      } catch {
+        // Closed meanwhile.
+      }
+    }
+    return files;
+  }
+
   private bootMs(): number | undefined {
     if (this.boot === null) {
       try {
@@ -413,6 +445,22 @@ export function parseLsofCwd(text: string): string | undefined {
   return /^n(.+)$/m.exec(text)?.[1];
 }
 
+/** Parses `lsof -p <pid>,<pid> -Fpn`: a `p` line names the process, the `n` lines after it the files it holds. */
+export function parseLsofFiles(text: string): Map<number, string[]> {
+  const files = new Map<number, string[]>();
+  let current: string[] | undefined;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("p")) {
+      const pid = Number(line.slice(1));
+      current = Number.isInteger(pid) ? [] : undefined;
+      if (current) files.set(pid, current);
+    } else if (line.startsWith("n") && current) {
+      current.push(line.slice(1));
+    }
+  }
+  return files;
+}
+
 /**
  * macOS and Windows: the program's processes from a process list read in the
  * background, at most every 3 seconds; on macOS each new process's directory
@@ -425,16 +473,23 @@ export class SnapshotProcessFinder implements ProcessFinder {
   private pending: Promise<void> | undefined;
   /** Directories by pid and start time, read once. */
   private readonly cwds = new Map<string, string | undefined>();
+  /** The files each process held at the last read, when the finder reads them. */
+  private files = new Map<number, string[]>();
 
   constructor(
     private readonly list: () => Promise<NamedProcess[]>,
     private readonly cwdOf?: (pid: number) => Promise<string | undefined>,
     private readonly now: () => number = Date.now,
+    private readonly filesOf?: (pids: number[]) => Promise<Map<number, string[]>>,
   ) {}
 
   find(): NamedProcess[] {
     if (this.now() - this.readAt >= MIN_REFRESH_INTERVAL_MS) void this.refresh();
     return this.found;
+  }
+
+  heldFiles(pid: number): string[] | undefined {
+    return this.filesOf ? (this.files.get(pid) ?? []) : undefined;
   }
 
   refresh(): Promise<void> {
@@ -450,8 +505,10 @@ export class SnapshotProcessFinder implements ProcessFinder {
         }
         const live = new Set(found.map((process) => `${process.pid}:${process.startedMs}`));
         for (const key of this.cwds.keys()) if (!live.has(key)) this.cwds.delete(key);
+        const filesBefore = JSON.stringify([...this.files]);
+        if (this.filesOf) this.files = found.length ? await this.filesOf(found.map((process) => process.pid)).catch(() => new Map<number, string[]>()) : new Map();
         this.found = found;
-        if (JSON.stringify(found) !== before) this.onDidUpdate?.();
+        if (JSON.stringify(found) !== before || JSON.stringify([...this.files]) !== filesBefore) this.onDidUpdate?.();
       })
       .catch(() => {
         // No list: the program's sessions are not found until one can be read.
@@ -463,8 +520,11 @@ export class SnapshotProcessFinder implements ProcessFinder {
   }
 }
 
-/** The finder for one program on this platform. */
-export function createProcessFinder(name: string, platform: NodeJS.Platform = process.platform): ProcessFinder {
+/**
+ * The finder for one program on this platform. `files`: read which files its
+ * processes hold open, where the platform tells it (not on Windows).
+ */
+export function createProcessFinder(name: string, platform: NodeJS.Platform = process.platform, options: { files?: boolean } = {}): ProcessFinder {
   if (platform === "linux") return new LinuxProcessFinder(name);
   if (platform === "win32") {
     const command = `Get-CimInstance Win32_Process -Filter "Name='${name}.exe'" | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProcessId, $_.ParentProcessId, $(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 }), $_.CommandLine }`;
@@ -473,5 +533,7 @@ export function createProcessFinder(name: string, platform: NodeJS.Platform = pr
   return new SnapshotProcessFinder(
     async () => parsePsNamedProcesses(await run("ps", ["-axww", "-o", "pid=,ppid=,lstart=,args="], { ...process.env, LC_ALL: "C", TZ: "UTC" }), name),
     async (pid) => parseLsofCwd(await run("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"])),
+    Date.now,
+    options.files ? async (pids) => parseLsofFiles(await runLoose("lsof", ["-p", pids.join(","), "-Fpn"])) : undefined,
   );
 }

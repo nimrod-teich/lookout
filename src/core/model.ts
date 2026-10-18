@@ -108,7 +108,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
 
 /** The view of a session that is not running. */
 export function buildPastView(session: PastSession): PastView {
-  return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), branch: session.branch, cwd: session.cwd, resumable: session.resumable, modifiedAt: session.modifiedAt };
+  return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), branch: session.branch, cwd: session.cwd, resumable: session.resumable, modifiedAt: session.modifiedAt, ...(session.resumesIn ? { resumesIn: session.resumesIn } : {}) };
 }
 
 /** The agent's tabs open in a window: their labels, and the label it gives a title. */

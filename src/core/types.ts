@@ -116,6 +116,8 @@ export interface PastView {
   resumable: boolean;
   /** Epoch ms the transcript was last written. */
   modifiedAt: number;
+  /** Where it resumes, when not where its agent's sessions do. */
+  resumesIn?: "panel" | "terminal";
 }
 
 export interface SessionSpend {

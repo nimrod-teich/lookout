@@ -25,6 +25,7 @@ interface Candidate {
 
 interface Read {
   cwd?: string;
+  originator?: string;
   /** The first prompt, for a thread Codex has not named. */
   prompt?: string;
 }
@@ -38,6 +39,8 @@ export interface PastRollout {
   /** It worked in one of the window's folders. */
   inFolders: boolean;
   modifiedAt: number;
+  /** Who wrote it (`session_meta.originator`): `codex_vscode` for the VS Code extension's threads. */
+  originator?: string;
 }
 
 export { within };
@@ -127,7 +130,7 @@ export class PastRollouts {
     let read = this.reads.get(candidate.file);
     if (!read) {
       const meta = metaOf(readLineAt(candidate.file, 0, META_MAX_BYTES), candidate.file);
-      read = { cwd: meta?.cwd, prompt: this.names.get(candidate.id) ? undefined : firstPromptOf(candidate.file) };
+      read = { cwd: meta?.cwd, originator: meta?.originator, prompt: this.names.get(candidate.id) ? undefined : firstPromptOf(candidate.file) };
       this.reads.set(candidate.file, read);
     }
     const name = this.names.get(candidate.id);
@@ -135,7 +138,7 @@ export class PastRollouts {
     // No title: nothing was ever sent in it.
     if (!title) return undefined;
     const cwd = read.cwd ?? "";
-    return { id: candidate.id, file: candidate.file, cwd, title, inFolders: cwd !== "" && within(cwd, folders), modifiedAt: Math.round(candidate.mtimeMs) };
+    return { id: candidate.id, file: candidate.file, cwd, title, inFolders: cwd !== "" && within(cwd, folders), modifiedAt: Math.round(candidate.mtimeMs), ...(read.originator ? { originator: read.originator } : {}) };
   }
 
   /** Every rollout in the tree, found again at most every 15 seconds. */

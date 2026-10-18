@@ -1,7 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { invocationOf } from "../../../../src/core/agents/codex/process";
+import { lockedThread } from "../../../../src/core/agents/codex/paths";
+import { invocationOf, serverOf } from "../../../../src/core/agents/codex/process";
 
 const ID = "01a14ee6-c111-70e2-9f36-f32a6f1197e4";
+
+describe("which codex processes serve threads", () => {
+  it("tells an editor's app-server, the terminal sessions' daemon and an exec run apart", () => {
+    expect(serverOf(["/ext/openai.chatgpt/bin/linux-x86_64/codex", "-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled"])).toBe("app-server");
+    expect(serverOf(["/home/u/.codex/packages/app-server-daemon/bin/codex", "app-server", "--listen", "unix://", "--managed-daemon"])).toBe("daemon");
+    expect(serverOf(["codex", "app-server", "daemon", "pid-update-loop"])).toBe("daemon");
+    expect(serverOf(["codex", "exec", "summarise the changes"])).toBe("exec");
+    expect(serverOf(["codex", "-m", "gpt-6.1-sol", "e", "fix it"])).toBe("exec");
+    expect(serverOf(["codex"])).toBeUndefined();
+    expect(serverOf(["codex", "resume", ID])).toBeUndefined();
+    expect(serverOf(["codex", "--help"])).toBeUndefined();
+  });
+
+  it("reads the thread a held file locks", () => {
+    expect(lockedThread(`/home/u/.codex/thread-writer-locks/${ID}.lock`)).toBe(ID);
+    expect(lockedThread(`C:\\Users\\u\\.codex\\thread-writer-locks\\${ID.toUpperCase()}.lock`)).toBe(ID);
+    expect(lockedThread(`/home/u/.codex/sessions/2026/10/18/rollout-2026-10-18T15-05-07-${ID}.jsonl`)).toBeUndefined();
+    expect(lockedThread("/home/u/.codex/thread-writer-locks/.coordination.lock")).toBeUndefined();
+  });
+});
 
 describe("which codex processes are sessions", () => {
   it("counts the interactive program, with or without a prompt and options", () => {

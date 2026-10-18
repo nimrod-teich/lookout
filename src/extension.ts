@@ -138,8 +138,8 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     if (!canResume(view)) return;
-    // An agent of the terminal resumes in a new terminal, in the folder the session worked in.
-    if (agentInfo(view.agent).resumesIn === "terminal") {
+    // An agent of the terminal resumes in a new terminal, in the folder the session worked in; a session can say otherwise.
+    if ((view.resumesIn ?? agentInfo(view.agent).resumesIn) === "terminal") {
       const command = controller.resumeCommand(id);
       if (command) resumeInTerminal(view.agent, view.title, command);
       else void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}": its folder is not known.`);

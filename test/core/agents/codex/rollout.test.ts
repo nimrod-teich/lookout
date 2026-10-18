@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { activityOf, applyRolloutLine, approvalCall, emptyRollout, execCall, isContext, turnRunning, waitReason, type RolloutState } from "../../../../src/core/agents/codex/rollout";
 import { APPROVAL, ASKED_IN_REPLY, FIXTURES, fixtureFile, fixtureLines, IDLE, QUESTION, WORKING } from "./fixtures";
 
+const PANEL_FILE = (id: string) => path.join(FIXTURES, "extra", "panel", fs.readdirSync(path.join(FIXTURES, "extra", "panel")).find((n) => n.includes(id))!);
+
 function read(file: string, from = 0): RolloutState {
   const state = emptyRollout();
   for (const line of fixtureLines(file).slice(from)) applyRolloutLine(state, line);
@@ -19,6 +21,16 @@ describe("a Codex rollout", () => {
     expect(state.effort).toBeUndefined();
     expect(turnRunning(state)).toBe(false);
     expect(waitReason(state)).toBeUndefined();
+  });
+
+  it("reads a thread of the VS Code extension as a terminal's: its originator, its reply as agent_message, its approval", () => {
+    const answered = read(PANEL_FILE("01a14f98-8a19-7a12-bb1b-f3a74309ea7f"));
+    expect(answered).toMatchObject({ originator: "codex_vscode", cwd: "/work/panel", turnOpen: false });
+    expect(answered.lastReply).toMatchObject({ text: "4", final: true });
+    const asking = read(PANEL_FILE("01a14f9b-ad80-7b82-adf4-949abb052b7a"));
+    expect(asking.lastReply).toMatchObject({ text: "I’ll run the command to create the file in your home directory.", final: false });
+    expect(turnRunning(asking)).toBe(true);
+    expect(waitReason(asking)).toEqual({ kind: "permission", ask: "touch ~/lookout-panel-approval.txt", raw: "May I create ~/lookout-panel-approval.txt outside the writable workspace?" });
   });
 
   it("waits for approval while a command that asked to leave the sandbox has no result, quoting the command and Codex's reason", () => {

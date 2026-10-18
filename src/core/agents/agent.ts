@@ -81,6 +81,8 @@ export interface PastSession {
   resumable: boolean;
   /** Epoch ms the transcript was last written. */
   modifiedAt: number;
+  /** Where it resumes, when not where its agent's sessions do: a Codex thread of the VS Code extension resumes in its panel. */
+  resumesIn?: "panel" | "terminal";
 }
 
 /** Which past sessions to list: those of this window's folders, or of every project; at most `limit`, the newest. */

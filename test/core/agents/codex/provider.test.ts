@@ -5,13 +5,25 @@ import { quietFor } from "../../../../src/core/format";
 import { buildView } from "../../../../src/core/model";
 import type { NamedProcess, ProcessFinder } from "../../../../src/core/proc";
 import { parseQuery } from "../../../../src/core/terms";
-import { APPROVAL, ASKED_IN_REPLY, EDITED, homeFile, IDLE, NOW, QUESTION, STARTED, tempCodexHome, WORKING } from "./fixtures";
+import { addPanelThreads, APPROVAL, ASKED_IN_REPLY, EDITED, homeFile, IDLE, lockOf, NOW, PANEL_APPROVAL, PANEL_IDLE, QUESTION, STARTED, tempCodexHome, WORKING } from "./fixtures";
 
 class FakeFinder implements ProcessFinder {
-  constructor(public processes: NamedProcess[] = []) {}
+  /** `held`: the files each process holds; none given, the platform tells none, as on Windows. */
+  constructor(
+    public processes: NamedProcess[] = [],
+    public held?: Map<number, string[]>,
+  ) {}
   find(): NamedProcess[] {
     return this.processes;
   }
+  heldFiles(pid: number): string[] | undefined {
+    return this.held ? (this.held.get(pid) ?? []) : undefined;
+  }
+}
+
+/** The VS Code extension's app-server, a child of the window's extension host, in VS Code's own folder. */
+function appServer(pid: number): NamedProcess {
+  return { pid, ppid: 900, args: ["/ext/openai.chatgpt/bin/linux-x86_64/codex", "-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled"], cwd: "/opt/vscode", startedMs: STARTED };
 }
 
 function codex(pid: number, cwd: string, args: string[] = ["codex"], startedMs = STARTED): NamedProcess {
@@ -198,5 +210,63 @@ describe("CodexProvider", () => {
     fs.utimesSync(homeFile(home, WORKING), NOW / 1000, NOW / 1000);
     expect(provider.usage(NOW)?.fetchedAt).toBe(Date.parse("2026-10-18T12:06:29.128Z"));
     expect(provider.usage(NOW + 8 * 86_400_000)).toBeUndefined();
+  });
+});
+
+describe("CodexProvider, threads held by an app-server or an exec run", () => {
+  it("reports each thread the extension's app-server holds as a session of its panel, with its state", () => {
+    const home = tempCodexHome();
+    addPanelThreads(home);
+    const finder = new FakeFinder([appServer(40)], new Map([[40, [lockOf(home, PANEL_APPROVAL), "/dev/null", lockOf(home, PANEL_IDLE), homeFile(home, PANEL_IDLE)]]]));
+    const sessions = new CodexProvider(home, finder).poll(NOW);
+    expect(sessions.map((s) => [s.id, s.pid, s.panel, s.status]).sort()).toEqual([
+      [PANEL_IDLE, 40, true, "idle"],
+      [PANEL_APPROVAL, 40, true, "waiting"],
+    ]);
+    expect(sessions.find((s) => s.id === PANEL_APPROVAL)).toMatchObject({
+      title: "Create approval marker",
+      cwd: "/work/panel",
+      reason: { kind: "permission", ask: "touch ~/lookout-panel-approval.txt", raw: "May I create ~/lookout-panel-approval.txt outside the writable workspace?" },
+      evidence: { source: "rollout tail" },
+    });
+    expect(sessions.find((s) => s.id === PANEL_IDLE)).toMatchObject({ title: "Calculate 2+2", model: "gpt-6.1-sol" });
+  });
+
+  it("leaves the terminal sessions' daemon to the terminals, and keeps a thread a process holds from a terminal", () => {
+    const home = tempCodexHome();
+    const daemon: NamedProcess = { pid: 50, args: ["/home/u/.codex/packages/app-server-daemon/bin/codex", "app-server", "--listen", "unix://", "--managed-daemon"], startedMs: STARTED };
+    // The daemon still holds the thread of a terminal that ended, and of one that runs: the terminal's match stands.
+    const viaDaemon = new CodexProvider(home, new FakeFinder([daemon, codex(11, "/work/a", ["codex", "What is 2+2?"])], new Map([[50, [lockOf(home, IDLE), lockOf(home, APPROVAL)]]]))).poll(NOW);
+    expect(viaDaemon.map((s) => [s.id, s.pid])).toEqual([[IDLE, 11]]);
+    // An exec run holds it: the run is its session, and the terminal in the same folder does not take it.
+    const exec: NamedProcess = { pid: 60, args: ["codex", "exec", "What is 2+2?"], cwd: "/work/a", startedMs: STARTED };
+    const viaExec = new CodexProvider(home, new FakeFinder([exec, codex(11, "/work/a")], new Map([[60, [lockOf(home, IDLE)]]]))).poll(NOW);
+    expect(viaExec.find((s) => s.pid === 60)).toMatchObject({ id: IDLE, panel: false, status: "idle" });
+    expect(viaExec.find((s) => s.pid === 11)).toMatchObject({ empty: true });
+  });
+
+  it("where held files cannot be read, takes the extension's threads written in the last 10 minutes, and no terminal's", () => {
+    const home = tempCodexHome(NOW - 60_000);
+    addPanelThreads(home, NOW - 60_000);
+    const recent = new CodexProvider(home, new FakeFinder([appServer(40)])).poll(NOW);
+    expect(recent.map((s) => [s.id, s.pid, s.panel]).sort()).toEqual([
+      [PANEL_IDLE, 40, true],
+      [PANEL_APPROVAL, 40, true],
+    ]);
+    const stale = tempCodexHome(NOW - 60_000);
+    addPanelThreads(stale, NOW - 20 * 60_000);
+    expect(new CodexProvider(stale, new FakeFinder([appServer(40)])).poll(NOW)).toEqual([]);
+  });
+
+  it("resumes an earlier thread of the extension in its panel, and a terminal's with codex resume", () => {
+    const home = tempCodexHome();
+    addPanelThreads(home);
+    const provider = new CodexProvider(home, new FakeFinder());
+    const past = provider.past({ folders: ["/work"], all: false, limit: 50 }, new Set());
+    const byId = new Map(past.sessions.map((s) => [s.id, s]));
+    expect(byId.get(PANEL_IDLE)).toMatchObject({ title: "Calculate 2+2", resumesIn: "panel", resumable: true });
+    expect(provider.resumeCommand(PANEL_IDLE)).toBeUndefined();
+    expect(byId.get(IDLE)?.resumesIn).toBeUndefined();
+    expect(provider.resumeCommand(IDLE)).toEqual({ args: ["codex", "resume", IDLE], cwd: "/work/a" });
   });
 });
