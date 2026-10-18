@@ -77,7 +77,7 @@ describe("the agent catalog", () => {
   it("shows in the README's Supported agents table exactly what the catalog lets each agent do", () => {
     const readme = read("README.md");
     const section = readme.slice(readme.indexOf("## Supported agents"), readme.indexOf("## Install"));
-    // The section's first table; the tables after it say where each agent runs and what it lacks.
+    // The section's only table; where each agent runs and what it lacks are in docs/agents.md.
     const lines = section.split("\n");
     const start = lines.findIndex((line) => line.startsWith("|"));
     const end = lines.findIndex((line, i) => i > start && !line.startsWith("|"));
@@ -94,6 +94,14 @@ describe("the agent catalog", () => {
       expect(agent, row[0]).toBeDefined();
       expect(row.slice(2).map((cell) => cell.startsWith("✓")), agent!.label).toEqual(order.map((name) => agent!.capabilities[name]));
     }
+  });
+
+  it("names every agent of the catalog in the README's badge, and no other", () => {
+    const badge = /img\.shields\.io\/badge\/works%20with-([^-"]+)-/.exec(read("README.md"));
+    expect(badge).not.toBeNull();
+    const names = decodeURIComponent(badge![1]!).split(" | ");
+    expect(names).toHaveLength(AGENTS.length);
+    for (const agent of AGENTS) expect(names.some((name) => name.includes(agent.label)), agent.label).toBe(true);
   });
 });
 

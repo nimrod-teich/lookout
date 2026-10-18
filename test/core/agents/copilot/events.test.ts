@@ -51,9 +51,10 @@ describe("a Copilot session's events", () => {
 
 describe("Copilot's files", () => {
   it("are under COPILOT_HOME, or the setting, or ~/.copilot", () => {
-    expect(copilotHome(undefined, {}, "/home/u")).toBe("/home/u/.copilot");
-    expect(copilotHome("", { COPILOT_HOME: "/data/copilot" }, "/home/u")).toBe("/data/copilot");
-    expect(copilotHome("~/c", { COPILOT_HOME: "/data/copilot" }, "/home/u")).toBe("/home/u/c");
+    // Joined by the platform's path module: backslashes, and a drive before an absolute path, on Windows.
+    expect(copilotHome(undefined, {}, "/home/u")).toBe(path.join("/home/u", ".copilot"));
+    expect(copilotHome("", { COPILOT_HOME: "/data/copilot" }, "/home/u")).toBe(path.resolve("/data/copilot"));
+    expect(copilotHome("~/c", { COPILOT_HOME: "/data/copilot" }, "/home/u")).toBe(path.join("/home/u", "c"));
   });
 
   it("read a workspace's flat fields, quoted or not", () => {

@@ -87,6 +87,19 @@ async function placed(): Promise<void> {
   }, WAIT);
 }
 
+/**
+ * Waits until the board places the session in one of this window's terminals:
+ * on platforms that list processes in the background, that takes until the
+ * list arrives, and a turn that ends before then leaves no finished mark.
+ */
+async function placedInTerminal(): Promise<void> {
+  boardStates();
+  await vi.waitFor(() => {
+    const last = statesBoard!.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions: { host: string }[] } | undefined;
+    expect(last?.sessions.map((session) => session.host)).toEqual(["terminal"]);
+  }, WAIT);
+}
+
 function infoMessages(): string[] {
   return stub.ops.filter(([target, action]) => target === "window" && action === "info").map(([, , text]) => String(text));
 }
@@ -209,6 +222,7 @@ describe("the extension", () => {
       stub.activate(group.tabs[0]!);
       activate(context());
       await vi.waitFor(() => expect(boardStates()).toBe("idle 1"), WAIT);
+      await placedInTerminal();
 
       // The user sends the prompt in its terminal, then goes to a tab while it works.
       stub.activeTerminal = terminal;
