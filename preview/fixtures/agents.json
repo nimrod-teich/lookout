@@ -306,7 +306,7 @@
       "project": "infra",
       "branch": "fix/s3-retries",
       "cwd": "/work/infra",
-      "model": "gpt-5.4",
+      "model": "gpt-6-luna",
       "pulse": [
         0,
         0,
@@ -325,10 +325,22 @@
         2
       ],
       "evidence": {
-        "source": "transcript",
+        "source": "session file",
         "at": 9000
       },
-      "lastWriteAt": 9000
+      "lastWriteAt": 9000,
+      "effort": "medium",
+      "contextWindow": 272000,
+      "spend": {
+        "input": 2400,
+        "output": 310,
+        "cacheRead": 38000,
+        "cacheWrite": 15800,
+        "estimated": false,
+        "partial": false,
+        "basis": "Copilot bills premium requests, not tokens, so no price is shown"
+      },
+      "contextTokens": 56000
     },
     {
       "id": "6",
@@ -387,11 +399,23 @@
       "project": "api",
       "branch": "main",
       "cwd": "/work/api",
-      "model": "claude-sonnet-5-5",
+      "model": "gpt-6-luna",
       "evidence": {
-        "source": "transcript",
+        "source": "session file",
         "at": 2280000
-      }
+      },
+      "effort": "medium",
+      "contextWindow": 272000,
+      "spend": {
+        "input": 2400,
+        "output": 310,
+        "cacheRead": 38000,
+        "cacheWrite": 15800,
+        "estimated": false,
+        "partial": false,
+        "basis": "Copilot bills premium requests, not tokens, so no price is shown"
+      },
+      "contextTokens": 18000
     }
   ],
   "past": [

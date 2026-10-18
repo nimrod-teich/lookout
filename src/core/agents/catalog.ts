@@ -81,7 +81,7 @@ export const AGENTS: readonly AgentInfo[] = [
     colors: { dark: "#9373ea", light: "#5a35c8" },
     // A ferry: a long hull, two decks with a row of windows, a funnel.
     glyph: { icon: "lookout-ferry", path: "M.6 10.4h14.8l-1.8 4H2.4zM2.4 7.2h10.8v3.2H2.4zM3.6 8.2v1.2h1.4V8.2zm2.7 0v1.2h1.4V8.2zm2.7 0v1.2h1.4V8.2zM4.4 4.6h6v2.6h-6zM10.9 2.6h1.6v4.6h-1.6z", lamp: [7.4, 3.9] },
-    capabilities: { jumpTerminal: true, jumpPanel: false, rename: false, resume: false, search: true, usage: false },
+    capabilities: { jumpTerminal: true, jumpPanel: false, rename: false, resume: true, search: true, usage: false },
     resumesIn: "terminal",
   },
 ];

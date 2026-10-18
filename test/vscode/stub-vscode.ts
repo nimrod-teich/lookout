@@ -71,7 +71,7 @@ export const stub = {
   reset(): void {
     this.ops.length = 0;
     // Agents found by their running processes stay off unless a test turns them on: tests never read the real agent homes.
-    this.config = { "lookout.agents.codex": false };
+    this.config = { "lookout.agents.codex": false, "lookout.agents.copilot": false };
     this.commands.clear();
     this.groups = [];
     this.activeGroup = undefined;

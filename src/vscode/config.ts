@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { agentByKey, markerSetting, type MarkerSetting } from "../core/agents/catalog";
 import { resolveConfigDir } from "../core/agents/claude/paths";
 import { codexHome } from "../core/agents/codex/paths";
+import { copilotHome } from "../core/agents/copilot/paths";
 import { envFlag, NONESSENTIAL_TRAFFIC, type RefreshMode } from "../core/usage";
 
 export interface Config {
@@ -33,6 +34,10 @@ export interface Config {
   codexEnabled: boolean;
   /** Codex's home, where its sessions are: the setting, `CODEX_HOME`, or `~/.codex`. */
   codexHome: string;
+  /** Watch Copilot CLI's sessions. */
+  copilotEnabled: boolean;
+  /** Copilot's home: the setting, `COPILOT_HOME`, or `~/.copilot`. */
+  copilotHome: string;
 }
 
 interface EnvVar {
@@ -86,5 +91,7 @@ export function readConfig(): Config {
     usageAgent: usageAgent(lookout.get<string>("statusBar.usageAgent")),
     codexEnabled: lookout.get<boolean>("agents.codex", true),
     codexHome: codexHome(lookout.get<string>("codexHome")),
+    copilotEnabled: lookout.get<boolean>("agents.copilot", true),
+    copilotHome: copilotHome(lookout.get<string>("copilotHome")),
   };
 }

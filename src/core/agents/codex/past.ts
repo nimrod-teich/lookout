@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { quoteAsk } from "../../asks";
+import { within } from "../../folders";
 import { readLineAt } from "../../jsonlTail";
 import type { PastScope } from "../agent";
 import { rolloutId, type ThreadNames } from "./paths";
@@ -39,15 +40,7 @@ export interface PastRollout {
   modifiedAt: number;
 }
 
-/** Inside one of the folders, or the folder itself. */
-export function within(dir: string, folders: readonly string[]): boolean {
-  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
-  const d = norm(dir);
-  return folders.some((folder) => {
-    const f = norm(folder);
-    return d === f || d.startsWith(`${f}/`);
-  });
-}
+export { within };
 
 /** The first thing you wrote in a rollout: the first user message after Codex's own context. */
 export function firstPromptOf(file: string): string | undefined {

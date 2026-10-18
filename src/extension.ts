@@ -256,7 +256,12 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!event.affectsConfiguration("lookout") && !event.affectsConfiguration("claudeCode.environmentVariables")) return;
       const next = readConfig();
       // A different place to read, or an agent switched on or off: start over.
-      const moved = next.claudeConfigDir !== config.claudeConfigDir || next.codexEnabled !== config.codexEnabled || next.codexHome !== config.codexHome;
+      const moved =
+        next.claudeConfigDir !== config.claudeConfigDir ||
+        next.codexEnabled !== config.codexEnabled ||
+        next.codexHome !== config.codexHome ||
+        next.copilotEnabled !== config.copilotEnabled ||
+        next.copilotHome !== config.copilotHome;
       config = next;
       gate.setCooldown(config.notifyCooldownMs);
       if (moved) controller.start(config);
