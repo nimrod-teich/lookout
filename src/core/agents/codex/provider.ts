@@ -2,13 +2,14 @@ import * as fs from "node:fs";
 import { questionIn, quoteAsk } from "../../asks";
 import { branchAt } from "../../git";
 import { HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
-import { JsonlTail, readLineAt } from "../../jsonlTail";
+import { findLastLine, JsonlTail, readLineAt } from "../../jsonlTail";
 import type { NamedProcess, ProcessFinder } from "../../proc";
 import { pulseBins } from "../../pulse";
 import { searchConversations, type Searchable } from "../../search";
 import type { Query } from "../../terms";
 import type { Evidence } from "../../types";
-import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, PastSession, ResumeCommand, SearchOutcome } from "../agent";
+import type { UsageSnapshot } from "../../usage";
+import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, PastSession, ResumeCommand, SearchOutcome, SessionSpend } from "../agent";
 import { factsOf } from "./history";
 import { PastRollouts, type PastRollout } from "./past";
 import { matchRollouts, type LiveProcess, type RolloutInfo } from "./match";
@@ -16,9 +17,18 @@ import { CODEX, sessionIndexFile, sessionsDir, ThreadNames } from "./paths";
 import { invocationOf } from "./process";
 import { activityOf, applyRolloutLine, approvalCall, emptyRollout, turnRunning, waitReason, type RolloutState } from "./rollout";
 import { RolloutCatalog } from "./rollouts";
+import { metersOf } from "./usage";
 
-/** The first read of a rollout starts this far before its end; `session_meta` is read on its own. */
-const BACKFILL_BYTES = 2 * 1024 * 1024;
+/**
+ * The first read of a rollout starts this far before its end; `session_meta`
+ * is read on its own. A longer rollout's earlier replies go unpriced, so its
+ * price is left out.
+ */
+const BACKFILL_BYTES = 8 * 1024 * 1024;
+/** With no session running, the limits come from the newest rollout of this many days. */
+const USAGE_DAYS = 7;
+/** How a Codex session's price is reached. */
+const PRICE_BASIS = "Lookout's sum of each reply's tokens at OpenAI's API list prices; a ChatGPT plan is not billed per token";
 /** Codex names a thread after its first exchange; until then the first prompt, cut to this length, stands in. */
 const TITLE_MAX = 60;
 
@@ -31,6 +41,8 @@ interface Tracked {
   mtimeMs?: number;
   /** The last read failed. */
   unreadable: boolean;
+  /** The first read started past the beginning: replies before it were not priced. */
+  joinedLate: boolean;
 }
 
 /**
@@ -225,7 +237,58 @@ export class CodexProvider implements AgentProvider {
       contextTokens: state.contextTokens,
       contextWindow: state.contextWindow,
       pulse: pulseBins(state.toolCallTimes, now, process.startedMs),
+      spend: this.spendOf(tracked),
     };
+  }
+
+  /** The thread's tokens so far, and what they would cost through the API, when every reply's model has a price. */
+  private spendOf(tracked: Tracked): SessionSpend | undefined {
+    const totals = tracked.state.totals;
+    if (!totals) return undefined;
+    const { state } = tracked;
+    const priced = !tracked.joinedLate && !state.unpriced && state.priced.size > 0;
+    return {
+      input: Math.max(0, totals.input - totals.cached - totals.cacheWrite),
+      cacheRead: totals.cached,
+      cacheWrite: totals.cacheWrite,
+      output: totals.output,
+      costUsd: priced ? state.costUsd : undefined,
+      estimated: true,
+      partial: false,
+      basis: PRICE_BASIS,
+    };
+  }
+
+  /** The newest file of the limits read with no session running, and what it said. */
+  private lastUsage: { file: string; mtimeMs: number; snapshot: UsageSnapshot | undefined } | undefined;
+
+  /**
+   * The account's limits as Codex last recorded them (`token_count`
+   * `rate_limits`): from the live sessions' rollouts, or, with none running,
+   * from the newest rollout of the last week. When Codex runs on an API key it
+   * records none.
+   */
+  usage(now: number): UsageSnapshot | undefined {
+    let newest: { at: number; snapshot: UsageSnapshot } | undefined;
+    for (const file of this.liveFiles.values()) {
+      const limits = this.tracked.get(file)?.state.rateLimits;
+      if (!limits || (newest && newest.at >= limits.at)) continue;
+      const meters = metersOf(limits);
+      if (meters.length) newest = { at: limits.at, snapshot: { fetchedAt: limits.at, meters } };
+    }
+    if (newest) return newest.snapshot;
+    const latest = this.catalog.recent(now - USAGE_DAYS * 86_400_000, now).sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+    if (!latest) return undefined;
+    if (this.lastUsage?.file !== latest.file || this.lastUsage.mtimeMs !== latest.mtimeMs) {
+      const state = emptyRollout();
+      // A token_count without limits says "rate_limits":null; the last one with them counts.
+      const at = findLastLine(latest.file, '"rate_limits":{', BACKFILL_BYTES);
+      const line = at === undefined ? undefined : readLineAt(latest.file, at);
+      if (line !== undefined) applyRolloutLine(state, line);
+      const meters = state.rateLimits ? metersOf(state.rateLimits) : [];
+      this.lastUsage = { file: latest.file, mtimeMs: latest.mtimeMs, snapshot: state.rateLimits && meters.length ? { fetchedAt: state.rateLimits.at, meters } : undefined };
+    }
+    return this.lastUsage.snapshot;
   }
 
   /** The state is Codex's own records, read from the rollout's end: the hover says so, and how old they are. */
@@ -241,7 +304,13 @@ export class CodexProvider implements AgentProvider {
       const state = emptyRollout();
       const first = readLineAt(file, 0, 4 * 1024 * 1024);
       if (first !== undefined) applyRolloutLine(state, first);
-      tracked = { tail: new JsonlTail(file, { backfillBytes: BACKFILL_BYTES }), state, unreadable: false };
+      let size = 0;
+      try {
+        size = fs.statSync(file).size;
+      } catch {
+        // Read below, and found unreadable there.
+      }
+      tracked = { tail: new JsonlTail(file, { backfillBytes: BACKFILL_BYTES }), state, unreadable: false, joinedLate: size > BACKFILL_BYTES };
       this.tracked.set(file, tracked);
     }
     let read = tracked.tail.read();

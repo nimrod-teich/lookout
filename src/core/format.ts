@@ -1,5 +1,6 @@
 import type { Evidence, Reason, ReasonKind, SessionView, State } from "./types";
 import type { UsageMeter } from "./usage";
+import { AGENTS, agentInfo } from "./agents/catalog";
 
 /** A working session whose transcript has not changed for this long is quiet. */
 export const QUIET_MS = 10 * 60_000;
@@ -114,7 +115,8 @@ export function windowName(meter: UsageMeter): string {
 
 /** What a usage alert says: "Your 5-hour limit is at 72%; it resets at 17:05." */
 export function describeAlert(meter: UsageMeter, now: number = Date.now()): { text: string; title: string; body: string } {
-  const name = windowName(meter);
+  // Another agent's limit says whose it is: "Codex 5-hour limit".
+  const name = meter.agent && meter.agent !== AGENTS[0]!.id ? `${agentInfo(meter.agent).label} ${windowName(meter)}` : windowName(meter);
   const resets = meter.resetsAt === undefined ? undefined : clockTime(meter.resetsAt, now);
   return {
     text: `Your ${name} is at ${meter.percent}%${resets ? `; it resets at ${resets}` : ""}.`,
