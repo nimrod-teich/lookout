@@ -71,6 +71,8 @@ export interface SessionView {
   worktree?: string;
   cwd: string;
   host: Host;
+  /** VS Code's address for the session, when VS Code runs it in its Chat view. */
+  vscodeSession?: string;
   /** Shell pid of the integrated terminal the session runs in, when `host` is "terminal". */
   terminalPid?: number;
   /** Name of the other VS Code window the session runs in, when `host` is "window". */
@@ -120,6 +122,8 @@ export interface PastView {
   modifiedAt: number;
   /** Where it resumes, when not where its agent's sessions do. */
   resumesIn?: "panel" | "terminal";
+  /** VS Code's address for it, when VS Code ran it in its Chat view. */
+  vscodeSession?: string;
 }
 
 export interface SessionSpend {

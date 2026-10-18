@@ -61,6 +61,22 @@ describe("Monitor", () => {
     expect(views[0]?.terminalPid).toBeUndefined();
   });
 
+  it("places a session VS Code runs in its Chat by its folder: this window's, another window's, or one without Lookout", () => {
+    const { proc, monitor } = setup([
+      session({ id: "here", pid: 11, cwd: "/work/app/src", vscodeSession: "agent-host-copilotcli:/a" }),
+      session({ id: "there", pid: 11, cwd: "/work/api", vscodeSession: "agent-host-copilotcli:/b" }),
+      session({ id: "nowhere", pid: 11, cwd: "/work/other", vscodeSession: "agent-host-copilotcli:/c" }),
+    ]);
+    // VS Code's agent host runs them all, under no window's extension host.
+    proc.procs.set(11, { ppid: 7000 }).set(7000, { ppid: 1 });
+    const views = monitor.poll({ hostPid: HOST, terminalPids: new Set(), folders: ["/work/app"], windows: new Map([[4242, { label: "api", terminals: [], folders: ["/work/api"] }]]) });
+    expect(views.map((v) => [v.id, v.host, v.windowLabel, v.vscodeSession])).toEqual([
+      ["here", "panel", undefined, "agent-host-copilotcli:/a"],
+      ["there", "window", "api", "agent-host-copilotcli:/b"],
+      ["nowhere", "editor", undefined, "agent-host-copilotcli:/c"],
+    ]);
+  });
+
   it("names the other VS Code window a session runs in", () => {
     const { proc, monitor } = setup([session({ id: "other", pid: 11 }), session({ id: "mine", pid: 12 })]);
     proc.procs.set(11, { ppid: 4242 }).set(12, { ppid: HOST });

@@ -30,6 +30,16 @@ describe("WindowRegistry", () => {
     expect([...registry.read(100, 10_000)]).toEqual([[300, { label: "late", terminals: [] }]]);
   });
 
+  it("publishes each window's folders, for the sessions VS Code runs in its Chat", () => {
+    const { dir, proc, registry } = setup();
+    proc.procs.set(200, {});
+    const other = new WindowRegistry(dir, proc);
+    other.register(200, "api", [71], ["/work/api", "/work/shared"]);
+    expect(registry.read(100, 0).get(200)).toEqual({ label: "api", terminals: [71], folders: ["/work/api", "/work/shared"] });
+    fs.writeFileSync(path.join(dir, "200.json"), '{"pid":200,"label":"api","folders":["/work/api",3]}');
+    expect(registry.read(100, 10_000).get(200)).toEqual({ label: "api", terminals: [], folders: ["/work/api"] });
+  });
+
   it("publishes each window's terminals, and their changes", () => {
     const { dir, proc, registry } = setup();
     proc.procs.set(200, {});

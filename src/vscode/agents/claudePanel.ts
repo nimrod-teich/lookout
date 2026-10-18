@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { SessionView } from "../../core/types";
 import type { Log } from "../log";
 import type { PanelAdapter, PanelReveal } from "./panel";
+import { activateTab } from "./tabs";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** The Claude Code extension's command that reveals the tab or sidebar holding a session. */
@@ -23,16 +24,6 @@ const CLAUDE_FOCUS_INPUT = "claude-vscode.focus";
 /** Time for the chat to scroll to its newest message before the prompt box takes the focus. */
 const SCROLL_SETTLE_MS = 150;
 const CLAUDE_PANEL_VIEW_TYPE = "claudeVSCodePanel";
-const FOCUS_GROUP = [
-  "workbench.action.focusFirstEditorGroup",
-  "workbench.action.focusSecondEditorGroup",
-  "workbench.action.focusThirdEditorGroup",
-  "workbench.action.focusFourthEditorGroup",
-  "workbench.action.focusFifthEditorGroup",
-  "workbench.action.focusSixthEditorGroup",
-  "workbench.action.focusSeventhEditorGroup",
-  "workbench.action.focusEighthEditorGroup",
-];
 
 /** The label the Claude Code extension gives a session's tab. */
 export function claudeTabLabel(title: string): string {
@@ -60,18 +51,6 @@ function findClaudeTab(title: string): vscode.Tab | undefined {
   const matches = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => isClaudeTab(tab, label));
   // Two tabs with one label can't be told apart; guessing could open the wrong session.
   return matches.length === 1 ? matches[0] : undefined;
-}
-
-async function activateTab(tab: vscode.Tab): Promise<boolean> {
-  const column = tab.group.viewColumn;
-  const focusGroup = FOCUS_GROUP[column - 1];
-  // Asking for a group past the last one creates a new, empty group.
-  if (!focusGroup || column > vscode.window.tabGroups.all.length) return false;
-  const index = tab.group.tabs.indexOf(tab);
-  if (index < 0) return false;
-  await vscode.commands.executeCommand(focusGroup);
-  await vscode.commands.executeCommand("workbench.action.openEditorAtIndex", index);
-  return true;
 }
 
 /**

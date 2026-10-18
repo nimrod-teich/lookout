@@ -190,6 +190,10 @@ export class TabInputWebview {
 
 export class TabInputTerminal {}
 
+export class TabInputText {
+  constructor(public uri: unknown) {}
+}
+
 export class TabInputCustom {
   constructor(
     public uri: { toString(): string },
@@ -237,6 +241,7 @@ function createWebviewPanel(viewType: string, title: string): StubWebviewPanel {
 
 export const Uri = {
   joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: [base.fsPath, ...parts].join("/"), path: [base.fsPath, ...parts].join("/") }),
+  parse: (text: string) => ({ toString: () => text }),
   from: (parts: { scheme: string; authority?: string; path?: string }) => {
     const text = `${parts.scheme}://${parts.authority ?? ""}${parts.path ?? ""}`;
     return { ...parts, toString: () => text };

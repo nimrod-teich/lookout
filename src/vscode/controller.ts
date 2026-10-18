@@ -1,6 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { AgentHostSessions } from "../core/agentHost";
 import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents/agent";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
@@ -178,9 +179,9 @@ export class Controller implements vscode.Disposable {
   ) {
     this.proc.onDidUpdate = () => this.poll();
     this.windows = new WindowRegistry(host.sharedDir, this.proc);
-    this.windows.register(host.pid, host.label, terminals.pids);
+    this.windows.register(host.pid, host.label, terminals.pids, host.workspaceFolders());
     // The other windows find this one's terminal sessions by their shells.
-    this.terminalsChanged = terminals.onDidChange(() => this.windows.register(host.pid, host.label, terminals.pids));
+    this.terminalsChanged = terminals.onDidChange(() => this.windows.register(host.pid, host.label, terminals.pids, host.workspaceFolders()));
     const done = host.state.get<string[]>(DONE_KEY, []);
     this.attention.restore(done);
     this.savedDone = done.join("\n");
@@ -343,7 +344,11 @@ export class Controller implements vscode.Disposable {
       // Copilot's sessions name the process holding them; the finder tells which of those still run.
       const finder = createProcessFinder("copilot");
       finder.onDidUpdate = () => this.schedulePoll();
-      this.providers.push(new CopilotProvider(config.copilotHome, finder, this.proc));
+      // VS Code's own Copilot sessions are held by the runtime its agent host runs.
+      const runtimes = createProcessFinder("copilot-runtime");
+      runtimes.onDidUpdate = () => this.schedulePoll();
+      const agentHost = new AgentHostSessions(path.resolve(this.host.globalStorageDir, "..", "..", "agentSessionData"));
+      this.providers.push(new CopilotProvider(config.copilotHome, finder, this.proc, Date.now, runtimes, agentHost));
     }
     this.monitor = new Monitor(this.providers, this.proc);
     const cacheFile = usageCacheFile(config.claudeConfigDir);
@@ -371,6 +376,12 @@ export class Controller implements vscode.Disposable {
     this.poll();
   }
 
+  /** The window's folders changed: other windows place the sessions VS Code runs in them by its folders. */
+  foldersChanged(): void {
+    this.windows.register(this.host.pid, this.host.label, this.terminals.pids, this.host.workspaceFolders());
+    this.poll();
+  }
+
   /** Reads the sessions now, without waiting for the next tick. */
   poll(): void {
     if (!this.monitor) return;
@@ -379,6 +390,7 @@ export class Controller implements vscode.Disposable {
       views = this.monitor.poll({
         hostPid: this.host.pid,
         terminalPids: this.terminals.pids,
+        folders: this.host.workspaceFolders(),
         windows: this.windows.read(this.host.pid),
       });
     } catch (err) {

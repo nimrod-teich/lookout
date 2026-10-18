@@ -28,6 +28,12 @@ export interface AgentSession {
   cwd: string;
   /** Runs in the agent's own editor panel, as opposed to a terminal. */
   panel: boolean;
+  /**
+   * VS Code's address for the session, when VS Code runs it in its Chat view
+   * through its agent host (`agent-host-copilotcli:/<id>`): a jump opens it
+   * there, and its folder says which window's it is.
+   */
+  vscodeSession?: string;
   /** Nothing sent yet: an open tab or terminal without a conversation. */
   empty?: boolean;
   /** What the session is doing right now, e.g. "Bash · npm test". */
@@ -83,6 +89,8 @@ export interface PastSession {
   modifiedAt: number;
   /** Where it resumes, when not where its agent's sessions do: a Codex thread of the VS Code extension resumes in its panel. */
   resumesIn?: "panel" | "terminal";
+  /** VS Code's address for it, when VS Code ran it in its Chat view: a resume opens it there. */
+  vscodeSession?: string;
 }
 
 /** Which past sessions to list: those of this window's folders, or of every project; at most `limit`, the newest. */
