@@ -190,6 +190,10 @@ export class TabInputWebview {
 
 export class TabInputTerminal {}
 
+export class TabInputText {
+  constructor(public uri: unknown) {}
+}
+
 export class TabInputCustom {
   constructor(
     public uri: { toString(): string },

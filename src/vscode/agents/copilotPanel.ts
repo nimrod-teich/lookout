@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { PastView, SessionView } from "../../core/types";
 import type { Log } from "../log";
 import type { PanelAdapter, PanelReveal } from "./panel";
+import { activateTab } from "./tabs";
 
 /**
  * VS Code's command that moves a chat session into an editor of the active
@@ -11,8 +12,30 @@ import type { PanelAdapter, PanelReveal } from "./panel";
  */
 const OPEN_IN_EDITOR = "workbench.action.chat.openSessionInEditorGroup";
 
-/** Opens a session VS Code runs in its Chat, by its address there. */
-async function open(address: string | undefined, log: Log): Promise<PanelReveal> {
+/** A chat's editor tab, which VS Code names after the session: one other kind of tab can share the name. */
+function isChatTab(tab: vscode.Tab, title: string): boolean {
+  const input = tab.input;
+  return (
+    tab.label === title &&
+    !(input instanceof vscode.TabInputText) &&
+    !(input instanceof vscode.TabInputTerminal) &&
+    !(input instanceof vscode.TabInputWebview) &&
+    !(input instanceof vscode.TabInputCustom)
+  );
+}
+
+/**
+ * Opens a session VS Code runs in its Chat: the editor tab that shows it,
+ * when one carries its title; else, by its address, in an editor of the
+ * active group. A session the Copilot extension started in a tab of its own
+ * keeps its approval prompt in that tab, so the tab goes first.
+ */
+async function open(address: string | undefined, log: Log, title?: string): Promise<PanelReveal> {
+  if (title) {
+    const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => isChatTab(tab, title));
+    // Two tabs of one name cannot be told apart.
+    if (tabs.length === 1 && (await activateTab(tabs[0]!))) return "revealed-by-tab";
+  }
   if (!address) return "failed";
   try {
     await vscode.commands.executeCommand(OPEN_IN_EDITOR, { resource: vscode.Uri.parse(address) });
@@ -25,7 +48,7 @@ async function open(address: string | undefined, log: Log): Promise<PanelReveal>
 
 /** Copilot's sessions in VS Code's Chat: each opens in an editor, with any approval it waits on. */
 export const copilotPanel: PanelAdapter = {
-  reveal: (view: SessionView, log: Log) => open(view.vscodeSession, log),
+  reveal: (view: SessionView, log: Log) => open(view.vscodeSession, log, view.title),
 
   /** The chat's editor is the one in front: VS Code names its tab after the session. */
   isActive(view: SessionView): boolean {

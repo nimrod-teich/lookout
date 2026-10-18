@@ -20,10 +20,18 @@ import { resumeIdOf } from "./process";
 const CLI_CLIENT = "github/cli";
 /** VS Code, running Copilot in its Chat view through its agent host (the "Copilot" session type). */
 const VSCODE_CLIENT = "vscode-agent-host";
+/** The Copilot extension, running Copilot CLI in its extension host (the "Copilot CLI" session type of VS Code's Chat). */
+const EXTENSION_CLIENT = "vscode";
 
 /** A session Lookout watches: the terminal program's, or VS Code's. */
 function watched(workspace: Workspace | undefined): boolean {
-  return !workspace?.clientName || workspace.clientName === CLI_CLIENT || workspace.clientName === VSCODE_CLIENT;
+  const client = workspace?.clientName;
+  return !client || client === CLI_CLIENT || client === VSCODE_CLIENT || client === EXTENSION_CLIENT;
+}
+
+/** A session of VS Code's Chat, of either kind. */
+function ofVscode(workspace: Workspace | undefined): boolean {
+  return workspace?.clientName === VSCODE_CLIENT || workspace?.clientName === EXTENSION_CLIENT;
 }
 const TITLE_MAX = 60;
 /** The first read of a session's events starts this far before their end. */
@@ -108,8 +116,13 @@ export class CopilotProvider implements AgentProvider {
     private readonly agentHost?: AgentHostSessions,
   ) {}
 
-  /** VS Code's address for one of its sessions: `agent-host-copilotcli:/<VS Code id>`. */
+  /**
+   * VS Code's address for one of its sessions: `agent-host-copilotcli:/<VS
+   * Code id>` for the agent host's, `copilotcli:/<id>` for the Copilot
+   * extension's, which keeps Copilot's id.
+   */
   private vscodeSessionOf(id: string, workspace: Workspace | undefined): string | undefined {
+    if (workspace?.clientName === EXTENSION_CLIENT) return `copilotcli:/${id}`;
     if (workspace?.clientName !== VSCODE_CLIENT) return undefined;
     const vscodeId = this.agentHost?.idOf(id, workspace.createdAt);
     return vscodeId ? `agent-host-copilotcli:/${vscodeId}` : undefined;
@@ -160,10 +173,12 @@ export class CopilotProvider implements AgentProvider {
     }
     for (const id of resumed.keys()) candidates.set(id, path.join(sessionStateDir(this.home), id));
     for (const [id, dir] of candidates) {
-      const pid = lockPids(dir).find(alive) ?? resumed.get(id);
-      if (pid === undefined) continue;
       const workspace = readWorkspace(dir);
       if (!watched(workspace)) continue;
+      // The Copilot extension runs Copilot in its window's extension host, which its lock names.
+      const holds = workspace?.clientName === EXTENSION_CLIENT ? (pid: number) => this.proc.get(pid) !== null : alive;
+      const pid = lockPids(dir).find(holds) ?? resumed.get(id);
+      if (pid === undefined) continue;
       const file = path.join(dir, "events.jsonl");
       const session = this.session(id, pid, file, workspace, open.get(id), running.find((p) => p.pid === pid)?.startedMs ?? this.proc.get(pid)?.startedMs, now);
       sessions.push(session);
@@ -216,7 +231,7 @@ export class CopilotProvider implements AgentProvider {
       since: since ?? startedMs,
       title: workspace?.name ?? (state.firstPrompt ? quoteAsk(state.firstPrompt, TITLE_MAX) : undefined),
       cwd,
-      panel: workspace?.clientName === VSCODE_CLIENT,
+      panel: ofVscode(workspace),
       vscodeSession: this.vscodeSessionOf(id, workspace),
       // Nothing sent yet: no prompt, and no name Copilot gave it.
       empty: state.promptAt === undefined && !workspace?.name,
@@ -293,7 +308,7 @@ export class CopilotProvider implements AgentProvider {
     for (const id of [...this.pastIndexes.keys()]) if (!this.pastListed.has(id)) this.pastIndexes.delete(id);
     const session = (f: Folder & { title: string; cwd: string }): PastSession => {
       const base: PastSession = { agent: this.id, id: f.id, cwd: f.cwd, title: f.title, resumable: f.cwd !== "" && within(f.cwd, scope.folders), modifiedAt: Math.round(f.mtimeMs) };
-      if (f.workspace?.clientName !== VSCODE_CLIENT) return base;
+      if (!ofVscode(f.workspace)) return base;
       // VS Code's own session: it opens again in VS Code's Chat, not with `copilot --resume`.
       const vscodeSession = base.resumable ? this.vscodeSessionOf(f.id, f.workspace) : undefined;
       return { ...base, resumesIn: "panel", ...(vscodeSession ? { vscodeSession } : {}) };
@@ -327,7 +342,7 @@ export class CopilotProvider implements AgentProvider {
   /** `copilot --resume <id>`, in the folder the session worked in. */
   resumeCommand(id: string): ResumeCommand | undefined {
     const past = this.pastListed.get(id);
-    if (!past?.cwd || past.workspace?.clientName === VSCODE_CLIENT) return undefined;
+    if (!past?.cwd || ofVscode(past.workspace)) return undefined;
     return { args: ["copilot", "--resume", id], cwd: past.cwd };
   }
 

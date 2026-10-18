@@ -130,6 +130,25 @@ describe("CopilotProvider, VS Code's Copilot sessions", () => {
     expect(ended.poll(NOW).some((s) => s.id === VSCODE)).toBe(false);
   });
 
+  it("lists a session of the Copilot extension's own Copilot CLI while the extension host its lock names runs", () => {
+    const EXTENSION = "2bbb5061-8cf5-43b1-ae9d-a9a36cce38d2";
+    const proc = new FakeProc();
+    // The window's extension host; no copilot process runs.
+    proc.procs.set(4102, {});
+    const provider = new CopilotProvider(homeWithVscode(), finder([]), proc, () => NOW, runtime([]), agentHost);
+    expect(provider.poll(NOW).find((s) => s.id === EXTENSION)).toMatchObject({
+      pid: 4102,
+      panel: true,
+      vscodeSession: `copilotcli:/${EXTENSION}`,
+      status: "waiting",
+      reason: { kind: "permission", ask: "touch lookout-copilotcli-4.txt" },
+      title: "Run terminal command touch",
+    });
+    // A copilot process running elsewhere does not stand in for the host.
+    const other = new CopilotProvider(homeWithVscode(), finder([4001]), new FakeProc(), () => NOW, runtime([]), agentHost);
+    expect(other.poll(NOW).some((s) => s.id === EXTENSION)).toBe(false);
+  });
+
   it("resumes an earlier session of VS Code in VS Code's Chat, not with copilot --resume", () => {
     const provider = new CopilotProvider(homeWithVscode(), finder([]), new FakeProc(), () => NOW, runtime([]), agentHost);
     const past = provider.past({ folders: ["/work"], all: false, limit: 50 }, new Set());
