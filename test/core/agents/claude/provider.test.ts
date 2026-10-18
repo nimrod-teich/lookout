@@ -366,17 +366,30 @@ describe("ClaudeProvider", () => {
     expect(provider.search(parseQuery("deploy since:2026-08-01", now), 3, 1_000).results.map((r) => r.id)).toEqual([stale]);
   });
 
-  it("counts the shell commands an idle session left running in the background, not its other children", () => {
+  it("counts an idle session with background jobs as working, how long they were busy, and flags them when they stall", () => {
     const { configDir, proc, provider } = setup();
     writeSession(configDir, proc, { pid: 11, sessionId: sessionId(1), status: "idle" });
+    let cpu = 100;
+    proc.cpu = () => cpu;
     proc.kids.set(11, [
       { pid: 21, args: "/bin/bash -c source /home/u/.claude/shell-snapshots/snapshot-bash-1-x.sh && eval 'make backfill'", startedMs: 5_000 },
-      { pid: 22, args: "/bin/bash -c source /home/u/.claude/shell-snapshots/snapshot-bash-1-x.sh && eval 'sleep 9'", startedMs: 3_000 },
       { pid: 23, args: "node /usr/lib/node_modules/@playwright/mcp/cli.js", startedMs: 1_000 },
     ]);
-    expect(provider.poll(10_000)[0]?.background).toEqual({ count: 2, since: 3_000 });
+    expect(provider.poll(10_000)[0]).toMatchObject({ status: "working", background: { count: 1, since: 5_000, activeMs: 0 } });
+    cpu = 150;
+    expect(provider.poll(40_000)[0]?.background).toMatchObject({ activeMs: 30_000, idleMs: undefined });
+    // No CPU for 15 minutes: may be stuck.
+    expect(provider.poll(40_000 + 15 * 60_000)[0]?.background).toMatchObject({ activeMs: 30_000, idleMs: 15 * 60_000 });
+    // Output written counts as busy too: work in a container uses no CPU of its own.
+    proc.out = () => ({ size: 10, deleted: false });
+    provider.poll(40_000 + 16 * 60_000);
+    proc.out = () => ({ size: 20, deleted: false });
+    expect(provider.poll(40_000 + 16 * 60_000 + 20_000)[0]?.background).toMatchObject({ activeMs: 50_000, idleMs: undefined });
+    // Its output file deleted: Claude Code no longer follows it.
+    proc.out = () => ({ size: 20, deleted: true });
+    expect(provider.poll(40_000 + 17 * 60_000)[0]?.background).toMatchObject({ orphaned: 1 });
     proc.kids.set(11, [{ pid: 23, args: "node mcp-server.js" }]);
-    expect(provider.poll(11_000)[0]?.background).toBeUndefined();
+    expect(provider.poll(2_000_000)[0]).toMatchObject({ status: "idle", background: undefined });
   });
 
   it("drops a session when its process exits", () => {

@@ -81,8 +81,8 @@ export interface SessionView {
   /** The git branch it works on. */
   branch?: string;
   model?: string;
-  /** Shell commands it left running in the background while not working: how many, and since when. */
-  background?: { count: number; since?: number };
+  /** Shell commands it left running after its turn: it counts as working while they run. */
+  background?: Background;
   /** The reasoning effort the model last answered with. */
   effort?: string;
   /** Tokens in the context window at the last model call. */
@@ -124,4 +124,17 @@ export interface SessionSpend {
   estimated: boolean;
   /** Earlier usage is missing: the transcript was joined late. */
   partial: boolean;
+}
+
+/** Shell commands a session left running after its turn. */
+export interface Background {
+  count: number;
+  /** Epoch ms the oldest started. */
+  since?: number;
+  /** How long they have used CPU, as Lookout has seen it. */
+  activeMs: number;
+  /** How long none of them has used CPU or written output, once that is long enough to look stuck. */
+  idleMs?: number;
+  /** How many of them Claude Code forgot: their output file is deleted, so nothing will read what they print. */
+  orphaned?: number;
 }

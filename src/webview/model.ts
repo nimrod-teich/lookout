@@ -51,6 +51,8 @@ export interface CardLine {
   text?: string;
   /** The answers a question offers. */
   options?: string[];
+  /** A background job that looks stuck. */
+  stuck?: boolean;
 }
 
 export function cardLine(view: SessionView, now: number): CardLine {
@@ -63,18 +65,21 @@ export function cardLine(view: SessionView, now: number): CardLine {
       return { label: reasonLabel(reason.kind), text, options: reason.options };
     }
     case "working": {
+      const job = view.background;
+      if (job) {
+        const count = job.count === 1 ? "1 background job" : `${job.count} background jobs`;
+        const ran = job.since === undefined ? "" : ` · ${formatElapsed(now - job.since)}`;
+        if (job.orphaned) return { label: `${count}${ran}`, text: job.orphaned === job.count ? "orphaned: the agent no longer follows it" : `${job.orphaned} orphaned: the agent no longer follows them`, stuck: true };
+        if (job.idleMs !== undefined) return { label: `${count}${ran}`, text: `idle ${formatElapsed(job.idleMs)}: may be stuck`, stuck: true };
+        return { label: `${count}${ran}`, text: job.activeMs > 0 ? `busy ${formatElapsed(job.activeMs)}` : undefined };
+      }
       // What it does is on its pulse and in its hover; the card says only when it went quiet.
       const quiet = quietFor(view, now);
       return quiet === undefined ? {} : { label: `quiet ${formatElapsed(quiet)}` };
     }
     case "done":
-    case "idle": {
-      // Its turn is over, but commands it started still run.
-      const job = view.background;
-      if (!job) return {};
-      const count = job.count === 1 ? "1 background job" : `${job.count} background jobs`;
-      return { label: job.since === undefined ? count : `${count} · ${formatElapsed(now - job.since)}` };
-    }
+    case "idle":
+      return {};
     case "unknown":
       return { text: view.evidence?.note };
   }

@@ -1412,3 +1412,12 @@ body.vscode-high-contrast-light .card {
 .card:has(> .ring:not(.hidden)) :is(.line, .options, .pulse, .chips, .costs, .hits) {
   margin-right: 38px;
 }
+
+/* Working in the background: the turn is over, commands it started still run. */
+.card.background .line .kind {
+  color: var(--muted);
+}
+
+.line.stuck .text {
+  color: var(--waiting);
+}
