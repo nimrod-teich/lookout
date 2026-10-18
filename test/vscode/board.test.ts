@@ -166,6 +166,10 @@ describe("Board", () => {
     webviewView.receive({ type: "openSearch", query: "cache since:3d" });
     webviewView.receive({ type: "openSearch", query: 3 });
     expect(actions.openSearch.mock.calls).toEqual([["cache since:3d"]]);
+    // The agents hidden in the legend go along, and nothing else.
+    webviewView.receive({ type: "openSearch", query: "cache", hide: ["codex", 4] });
+    webviewView.receive({ type: "openSearch", query: "cache", hide: "codex" });
+    expect(actions.openSearch.mock.calls.slice(1)).toEqual([["cache", ["codex"]], ["cache"]]);
   });
 
   it("stops sending after the view is disposed", () => {

@@ -4,6 +4,8 @@ import * as path from "node:path";
 
 /** One usage limit: a window and how much of it is used. */
 export interface UsageMeter {
+  /** Id of the agent whose limit it is; set where the numbers are grouped per agent. */
+  agent?: string;
   key: string;
   label: string;
   percent: number;

@@ -1,12 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { boardAgents, canJump, canRename, canResume, markersShown } from "./core/agents/catalog";
 import { describeAlert, noticeBody } from "./core/format";
 import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
 import type { SessionView } from "./core/types";
+import { pickBar } from "./core/usageGroups";
 import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
@@ -75,6 +77,10 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   /** The session the last "next" jump went to, so repeated presses cycle through them. */
   let lastJump: string | undefined;
+  /** Tell the agents apart, as `lookout.agentMarkers` says: by default once the board shows two or more, running, earlier or in the usage. */
+  const markers = () => markersShown(config.agentMarkers, boardAgents({ sessions: controller.sessions, past: controller.past, usage: controller.usageGroups }));
+  /** The agent of a live or a past session. */
+  const agentOf = (id: string) => (controller.sessions.find((view) => view.id === id) ?? controller.pastView(id))?.agent;
 
   // Sessions hosted by the other windows on this host are jumped to through those windows.
   const crossWindow = new CrossWindowJumps({
@@ -113,6 +119,8 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const jump = async (view: SessionView) => {
+    // The UI offers no jump the agent does not allow; this keeps any other way in from failing.
+    if (!canJump(view)) return;
     lastJump = view.id;
     if (view.host === "window") return jumpToOtherWindow(view);
     if (revealed(await jumpToSession(view, terminals, log))) controller.markSeen(view.id);
@@ -128,10 +136,13 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.window.showInformationMessage(`"${view.title}" is from ${view.cwd || "another project"}, not one of this window's folders: the agent resumes it from a window open on that folder.`);
       return;
     }
+    if (!canResume(view)) return;
     if (!(await panelAdapter(view.agent)?.resume(id, log))) void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}".`);
   };
   const findings = new Findings(context.extensionUri, {
     titleOf: (id) => controller.titleOf(id) ?? id,
+    agentOf,
+    markers,
     whereOf: (id) => controller.whereOf(id),
     history: (id) => controller.history(id),
     open: async (id) => {
@@ -147,6 +158,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const searchPage = new SearchPage(context.extensionUri, {
     search: (query, zone) => controller.search(query, zone, { hits: PAGE_HITS, snippet: PAGE_SNIPPET }),
     titleOf: (id) => controller.titleOf(id) ?? id,
+    agentOf,
+    markers,
     whereOf: (id) => controller.whereOf(id),
     isLive: (id) => controller.sessions.some((view) => view.id === id && !view.restored),
     spanOf: (id) => {
@@ -163,13 +176,12 @@ export function activate(context: vscode.ExtensionContext): void {
     favourites: () => controller.favourites,
     toggleFavourite: (id) => controller.toggleFavourite(id),
     resume: (id) => void resume(id),
-    usage: () => {
-      const usage = controller.usage;
-      return { fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: usage?.meters ?? [], canRefresh: controller.canRefreshUsage };
-    },
+    usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
+    usageBar: () => pickBar(controller.usageGroups, config.usageAgent)?.group.agent,
+    markers,
     jump,
     rename: async (view) => {
-      await renameSession(view, terminals, log);
+      if (canRename(view)) await renameSession(view, terminals, log);
     },
     markSeen: (id) => controller.markSeen(id),
     markAllSeen: () => controller.markAllSeen(),
@@ -178,13 +190,16 @@ export function activate(context: vscode.ExtensionContext): void {
     refreshUsage: () => void vscode.commands.executeCommand(REFRESH_USAGE),
     search: (query, zone) => controller.search(query, zone),
     openHit,
-    openSearch: (query) => searchPage.show(query),
+    openSearch: (query, hide) => searchPage.show(query, hide),
   });
   const render = () => {
     statusBar.render({
       // A tab restored after a reload runs nothing until it is opened.
       views: controller.sessions.filter((view) => !view.restored),
       usage: controller.usage,
+      usageGroups: controller.usageGroups,
+      usageAgent: config.usageAgent,
+      markers: markers(),
       enabled: config.statusBarEnabled,
       showUsage: config.statusBarUsage,
       showReset: config.statusBarUsageReset,
@@ -244,7 +259,8 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showInformationMessage("Lookout: no agent sessions are running.");
         return;
       }
-      const view = await pickSession(() => controller.sessions, controller.onDidChange);
+      // Only the sessions their agent lets Lookout bring forward.
+      const view = await pickSession(() => controller.sessions.filter(canJump), controller.onDidChange, markers);
       if (view) await jump(view);
     }),
     vscode.commands.registerCommand(JUMP_NEXT_ATTENTION, async () => {

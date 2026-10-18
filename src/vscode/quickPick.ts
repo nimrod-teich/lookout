@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
+import { agentInfo } from "../core/agents/catalog";
 import { describeLocation, describeState } from "../core/format";
 import type { SessionView } from "../core/types";
-import { escapeIcons, iconFor } from "./icons";
+import { agentIcon, escapeIcons, iconFor } from "./icons";
 
 /** How often the elapsed times in the open list are refreshed. */
 const REFRESH_MS = 1000;
@@ -23,11 +24,14 @@ function hostLabel(view: SessionView): string | undefined {
   }
 }
 
-export function toItem(view: SessionView, now: number): SessionItem {
+/** With `markers`, the agent's boat leads the item and its name the description. */
+export function toItem(view: SessionView, now: number, markers = false): SessionItem {
   const where = hostLabel(view);
   const detail = where ? `${describeState(view, now)} · ${where}` : describeState(view, now);
-  // The asks quote commands verbatim; only Lookout's own icon is meant as one.
-  return { label: `${iconFor(view, now)} ${escapeIcons(view.title)}`, description: escapeIcons(describeLocation(view)), detail: escapeIcons(detail), view };
+  const mark = markers ? `${agentIcon(view.agent)} ` : "";
+  const agent = markers ? `${agentInfo(view.agent).label} · ` : "";
+  // The asks quote commands verbatim; only Lookout's own icons are meant as such.
+  return { label: `${mark}${iconFor(view, now)} ${escapeIcons(view.title)}`, description: `${escapeIcons(agent)}${escapeIcons(describeLocation(view))}`, detail: escapeIcons(detail), view };
 }
 
 /**
@@ -35,7 +39,7 @@ export function toItem(view: SessionView, now: number): SessionItem {
  * open and its elapsed times tick; the list is already ordered with what
  * needs attention first.
  */
-export function pickSession(sessions: () => readonly SessionView[], onDidChange: vscode.Event<unknown>): Promise<SessionView | undefined> {
+export function pickSession(sessions: () => readonly SessionView[], onDidChange: vscode.Event<unknown>, markers: () => boolean = () => false): Promise<SessionView | undefined> {
   const picker = vscode.window.createQuickPick<SessionItem>();
   picker.placeholder = "Jump to a session";
   picker.matchOnDescription = true;
@@ -43,7 +47,7 @@ export function pickSession(sessions: () => readonly SessionView[], onDidChange:
 
   const refresh = () => {
     const activeId = picker.activeItems[0]?.view.id;
-    picker.items = sessions().map((view) => toItem(view, Date.now()));
+    picker.items = sessions().map((view) => toItem(view, Date.now(), markers()));
     const active = picker.items.find((item) => item.view.id === activeId);
     if (active) picker.activeItems = [active];
   };

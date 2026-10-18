@@ -12,6 +12,11 @@
   --mark: rgba(255, 176, 0, 0.32);
   --mark-strong: rgba(255, 176, 0, 0.62);
   --mono: var(--vscode-editor-font-family, ui-monospace, Menlo, Consolas, monospace);
+  /* Each agent's accent on the night palette (src/core/agents/catalog.ts lists the same values). */
+  --agent-claude: #f7906c;
+  --agent-codex: #7ae8df;
+  --agent-copilot: #9373ea;
+  --agent-other: #9fb0c0;
 }
 
 body {
@@ -209,6 +214,15 @@ body {
   margin-left: 4px;
 }
 
+/* The session's agent, while the markers show: its mark before the title, its name first on the line below. */
+.head-top .glyph {
+  flex: none;
+}
+
+.head-meta .agent {
+  color: var(--ink);
+}
+
 .tag {
   flex: none;
   padding: 0 6px;
@@ -292,6 +306,26 @@ mark {
 }
 
 .more:hover {
+  text-decoration: underline;
+}
+
+/* The agents hidden on the board the page came from: their sessions are left out until shown. */
+.left-out {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: calc(var(--vscode-font-size) - 1px);
+}
+
+.left-out .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.left-out .link:hover {
   text-decoration: underline;
 }
 

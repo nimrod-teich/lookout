@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the findings tab outside VS Code: npm run build, then open this file. ?q=<query>&target=<index>&theme=light -->
+<!-- Dev preview of the findings tab outside VS Code: npm run build, then open this file. ?q=<query>&target=<index>&theme=light&agent=codex&markers=1 -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -28,7 +28,7 @@
     { index: 5, role: "agent", at: at(3), text: "Smoke passed: 14 routes, every expected audit_log row present. The billing.canceled row carries switch_to_free as its reason." },
   ];
   const target = params.has("target") ? Number(params.get("target")) : undefined;
-  const view = { type: "conversation", session: { id: "1", title: "Migrate billing webhooks", where: "api · ⎇ billing-webhooks" }, messages, query: params.get("q") ?? "", target };
+  const view = { type: "conversation", session: { id: "1", title: "Migrate billing webhooks", where: "api · ⎇ billing-webhooks", agent: params.get("agent") ?? "claude-code" }, messages, query: params.get("q") ?? "", target, markers: params.get("markers") === "1" };
   window.addEventListener("load", () => window.postMessage(view, "*"));
 </script>
 <script src="../dist/findings.js"></script>

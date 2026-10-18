@@ -33,6 +33,14 @@ function setup() {
 describe("SearchPage", () => {
   beforeEach(() => stub.reset());
 
+  it("passes on the agents hidden on the board, to leave them out", () => {
+    const { page } = setup();
+    page.show("deploy", ["codex"]);
+    expect(stub.panels[0]!.posted.at(-1)).toEqual({ type: "query", query: "deploy", hide: ["codex"] });
+    page.show("deploy");
+    expect(stub.panels[0]!.posted.at(-1)).toEqual({ type: "query", query: "deploy" });
+  });
+
   it("opens one tab with the query in its box, and runs a search the page asks for", () => {
     const { page, actions } = setup();
     page.show("deploy");

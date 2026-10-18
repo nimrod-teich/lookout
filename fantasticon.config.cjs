@@ -7,5 +7,5 @@ module.exports = {
   assetTypes: [],
   normalize: true,
   fontHeight: 1000,
-  codepoints: { lighthouse: 0xe900 },
+  codepoints: { lighthouse: 0xe900, sloop: 0xe901, cutter: 0xe902, ferry: 0xe903 },
 };

@@ -1,0 +1,58 @@
+import { describe, expect, it } from "vitest";
+import type { UsageMeter } from "../../src/core/usage";
+import { barMeter, groupHeading, pickBar, sortGroups, type UsageGroup } from "../../src/core/usageGroups";
+
+const HOUR = 3_600_000;
+
+function meter(key: string, percent: number, windowMs?: number): UsageMeter {
+  return { key, label: key, percent, windowMs };
+}
+
+function group(agent: string, meters: UsageMeter[], stale = false): UsageGroup {
+  return { agent, fetchedAt: 0, stale, meters };
+}
+
+describe("barMeter", () => {
+  it("takes the session window, else the shortest, else the first", () => {
+    expect(barMeter([meter("weekly_all", 90, 168 * HOUR), meter("session", 10, 5 * HOUR)])?.key).toBe("session");
+    expect(barMeter([meter("secondary", 90, 168 * HOUR), meter("primary", 10, 5 * HOUR)])?.key).toBe("primary");
+    expect(barMeter([meter("a", 1), meter("b", 2)])?.key).toBe("a");
+    expect(barMeter([])).toBeUndefined();
+  });
+});
+
+describe("pickBar", () => {
+  const claude = group("claude-code", [meter("session", 18, 5 * HOUR), meter("weekly_scoped:Fable", 84, 168 * HOUR)]);
+  const codex = group("codex", [meter("primary", 64, 5 * HOUR), meter("secondary", 22, 168 * HOUR)]);
+
+  it("shows the window under the most pressure across the agents' bars", () => {
+    expect(pickBar([claude, codex])).toMatchObject({ group: { agent: "codex" }, meter: { key: "primary" } });
+    expect(pickBar([claude])).toMatchObject({ group: { agent: "claude-code" }, meter: { key: "session", percent: 18 } });
+  });
+
+  it("goes by fresh numbers before stale ones, and by the catalog's order on a tie", () => {
+    expect(pickBar([claude, { ...codex, stale: true }])?.group.agent).toBe("claude-code");
+    const even = group("codex", [meter("primary", 18, 5 * HOUR)]);
+    expect(pickBar([even, claude])?.group.agent).toBe("claude-code");
+  });
+
+  it("shows a pinned agent's bar, and leaves the bar to auto while that agent reports none", () => {
+    expect(pickBar([claude, codex], "claude")?.group.agent).toBe("claude-code");
+    expect(pickBar([claude, codex], "copilot")?.group.agent).toBe("codex");
+    expect(pickBar([claude, group("codex", [])], "codex")?.group.agent).toBe("claude-code");
+  });
+
+  it("has no bar while no agent reports numbers", () => {
+    expect(pickBar([group("claude-code", [])])).toBeUndefined();
+    expect(pickBar([])).toBeUndefined();
+  });
+});
+
+describe("usage groups", () => {
+  it("come in the catalog's order, a group without an agent counted as Claude's, and are headed by the agent's name", () => {
+    expect(sortGroups([{ agent: "copilot" }, { agent: "unlisted" }, { agent: "codex" }, { agent: "claude-code" }]).map((g) => g.agent)).toEqual(["claude-code", "codex", "copilot", "unlisted"]);
+    expect(sortGroups([{ agent: "codex" }, {}]).map((g) => g.agent)).toEqual([undefined, "codex"]);
+    expect(groupHeading("claude-code")).toBe("Claude usage");
+    expect(groupHeading("codex")).toBe("Codex usage");
+  });
+});

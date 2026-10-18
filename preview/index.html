@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the board outside VS Code: npm run build, then open this file. -->
+<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting. -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -54,7 +54,7 @@
         post(earlierScope);
       }
     },
-    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), earlier: params.get("earlier") === "1" }),
+    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), earlier: params.get("earlier") === "1", agents: (params.get("hideAgents") ?? "").split(",").filter(Boolean) }),
     setState: () => {},
   });
   window.addEventListener("load", async () => {
@@ -67,11 +67,16 @@
       s.lastWriteAt = ago(s.lastWriteAt);
       if (s.evidence) s.evidence.at = ago(s.evidence.at);
     }
+    // One agent's usage, or one group per agent.
     const usage = fixture.usage;
-    if (usage) {
-      if (usage.fetchedAt !== undefined) usage.fetchedAt = now - usage.fetchedAt;
-      for (const m of usage.meters) if (m.resetsAt) m.resetsAt = now + m.resetsAt;
+    for (const group of Array.isArray(usage) ? usage : usage ? [usage] : []) {
+      if (group.fetchedAt !== undefined) group.fetchedAt = now - group.fetchedAt;
+      for (const m of group.meters) if (m.resetsAt) m.resetsAt = now + m.resetsAt;
     }
+    // As lookout.agentMarkers: auto shows them once the board shows two or more agents, running, earlier or in the usage.
+    const markersSetting = params.get("markers") ?? "auto";
+    const onBoard = [...fixture.sessions, ...(fixture.past ?? []), ...(Array.isArray(usage) ? usage : usage ? [usage] : []).filter((g) => g.meters.length > 0)];
+    const markers = markersSetting === "always" || (markersSetting === "auto" && new Set(onBoard.map((s) => s.agent ?? "claude-code")).size >= 2);
     for (const p of fixture.past ?? []) if (p.modifiedAt < 1e12) p.modifiedAt = now - p.modifiedAt;
     const earlier = { scope: "folders", limit: 500, capped: false, ...fixture.earlier };
     if (params.get("scope")) earlier.scope = params.get("scope");
@@ -85,7 +90,7 @@
       fixtureSessions = [...fixture.sessions, ...past];
       // Starred sessions that are not running and that the scope does not list come along.
       const favourites = { ids: favouriteIds, past: (fixture.past ?? []).filter((p) => favouriteIds.includes(p.id) && !past.includes(p)) };
-      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, earlier: { ...earlier }, favourites }, "*");
+      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, markers, earlier: { ...earlier }, favourites }, "*");
     };
     post(earlier.scope);
     const q = params.get("q");

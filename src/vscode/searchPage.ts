@@ -12,6 +12,10 @@ export interface SearchPageActions {
   search(query: string, zone: number | undefined): SearchOutcome;
   /** The title of a live or a past session. */
   titleOf(id: string): string;
+  /** The agent of a live or a past session. */
+  agentOf?(id: string): string | undefined;
+  /** Tell the agents apart. */
+  markers?(): boolean;
   /** Its project, worktree and git branch. */
   whereOf(id: string): string | undefined;
   /** When its conversation began and last moved: its first and last message. */
@@ -36,12 +40,12 @@ export class SearchPage implements vscode.Disposable {
     private readonly actions: SearchPageActions,
   ) {}
 
-  /** Opens the page, or brings it forward, with this query in its box. */
-  show(query: string): void {
+  /** Opens the page, or brings it forward, with this query in its box; `hide`: agents to leave out, as on the board. */
+  show(query: string, hide?: string[]): void {
     this.query = query;
     const panel = this.ensurePanel();
     panel.reveal(undefined, false);
-    this.post({ type: "query", query });
+    this.post(hide?.length ? { type: "query", query, hide } : { type: "query", query });
   }
 
   /** The sessions with matches, the newest match first; sessions that operators alone picked come last. */
@@ -50,6 +54,7 @@ export class SearchPage implements vscode.Disposable {
     const sessions: SearchPageSession[] = outcome.results.map((result) => ({
       id: result.id,
       title: this.actions.titleOf(result.id),
+      agent: this.actions.agentOf?.(result.id),
       where: this.actions.whereOf(result.id),
       live: this.actions.isLive(result.id),
       ...this.actions.spanOf(result.id),
@@ -58,7 +63,7 @@ export class SearchPage implements vscode.Disposable {
     }));
     const newest = (session: SearchPageSession) => session.hits[0]?.at ?? -Infinity;
     sessions.sort((a, b) => newest(b) - newest(a));
-    return { type: "results", query, sessions, pending: outcome.pending };
+    return { type: "results", query, sessions, pending: outcome.pending, markers: this.actions.markers?.() };
   }
 
   private post(message: ToSearch): void {

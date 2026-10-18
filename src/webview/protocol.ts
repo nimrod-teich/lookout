@@ -2,7 +2,10 @@ import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
 import type { UsageMeter } from "../core/usage";
 
+/** One agent's usage on the board. */
 export interface BoardUsage {
+  /** Id of the agent; none from an extension that showed only Claude's, the first agent of the catalog. */
+  agent?: string;
   /** Epoch ms the numbers were fetched; none when there are no numbers to show. */
   fetchedAt?: number;
   /** Old, and nothing will bring them up to date. */
@@ -30,7 +33,20 @@ export interface Favourites {
 
 /** Extension → webview. */
 export type ToBoard =
-  | { type: "sessions"; sessions: SessionView[]; past: PastView[]; now: number; usage?: BoardUsage; earlier?: EarlierInfo; favourites?: Favourites }
+  | {
+      type: "sessions";
+      sessions: SessionView[];
+      past: PastView[];
+      now: number;
+      /** One agent's usage, or each agent's. */
+      usage?: BoardUsage | BoardUsage[];
+      /** The agent whose bar the status bar shows; the tide follows it. */
+      usageBar?: string;
+      /** Tell the agents apart: hue, silhouette, name. */
+      markers?: boolean;
+      earlier?: EarlierInfo;
+      favourites?: Favourites;
+    }
   /** `pending` sessions were not read yet; the board asks again. */
   | { type: "search"; query: string; results: SearchResult[]; pending: number };
 
@@ -43,13 +59,15 @@ export type FromBoard =
   /** Dismiss the question the session's last message asks. */
   | { type: "dismiss"; id: string }
   | { type: "seenAll" }
-  | { type: "refreshUsage" }
+  /** Fetch an agent's usage again; Claude's when none is named. */
+  | { type: "refreshUsage"; agent?: string }
   /** `zone`: the board's time zone, as `Date.getTimezoneOffset` gives it: in a remote window the extension's clock can be in another. */
   | { type: "search"; query: string; zone?: number }
   /** Open the session's conversation in the findings tab, at one message or at the newest match. */
   | { type: "openHit"; query: string; id: string; index?: number }
   /** Open the search page with this query. */
-  | { type: "openSearch"; query: string }
+  /** `hide`: the agents hidden in the legend, left out there too. */
+  | { type: "openSearch"; query: string; hide?: string[] }
   /** Resume a session that is not running, in the agent's panel. */
   | { type: "resume"; id: string }
   /** List and search the earlier sessions of this window's folders, or of every project. */
