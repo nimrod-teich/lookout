@@ -9,7 +9,7 @@ import { factsOf } from "./history";
 import { PastTranscripts } from "./past";
 import type { ProcessTable } from "../../proc";
 import type { Evidence } from "../../types";
-import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, PastSession, SearchOutcome } from "../agent";
+import type { AgentProvider, AgentSession, Background, AgentStatus, PastList, PastScope, PastSession, SearchOutcome } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
@@ -44,6 +44,8 @@ interface Tracked {
   writtenAt?: number;
 }
 
+/** A background job whose processes used no CPU for this long may be stuck, or waiting on something that will not come. */
+const STALLED_MS = 15 * 60_000;
 /** A process in its first minute has not written its state yet; it is idle, not unknown. */
 const STARTING_MS = 60_000;
 /** A message is stamped before its line is written, so it is never newer than the file; a second covers rounding. */
@@ -109,6 +111,8 @@ export class ClaudeProvider implements AgentProvider {
   /** Plan titles by file, read again when the file changes. */
   private readonly plans = new Map<string, { mtimeMs: number; title: string | undefined }>();
   /** The open tool call of the subagent transcript last read, by file version. */
+  /** Background jobs by pid: their CPU at the last look, and how long they have been busy. */
+  private readonly jobs = new Map<number, { startedMs?: number; ticks?: number; size?: number; lastAt: number; busyAt: number; activeMs: number }>();
   private subagentCall: { file: string; mtimeMs: number; tool: OpenTool | undefined } | undefined;
 
   constructor(
@@ -125,7 +129,10 @@ export class ClaudeProvider implements AgentProvider {
     const sessions = files.map((file): AgentSession => {
       live.add(file.sessionId);
       const transcript = this.readTranscript(file, now);
-      const status = statusOf(file, now);
+      const reported = statusOf(file, now);
+      // A turn that is over while commands it started still run: still at work, in the background.
+      const background = reported === "idle" ? this.backgroundOf(file.pid, now) : undefined;
+      const status = background ? "working" : reported;
       return {
         agent: this.id,
         id: file.sessionId,
@@ -139,9 +146,9 @@ export class ClaudeProvider implements AgentProvider {
         title: titleOf(transcript),
         cwd: transcript.cwd ?? file.cwd,
         panel: file.entrypoint === PANEL_ENTRYPOINT,
-        activity: status === "working" ? activityOf(transcript) : undefined,
-        agents: status === "working" ? agentsOf(transcript) : 0,
-        background: status === "working" ? undefined : this.backgroundOf(file.pid),
+        activity: status === "working" && !background ? activityOf(transcript) : undefined,
+        agents: status === "working" && !background ? agentsOf(transcript) : 0,
+        background,
         // Claude Code stamps the branch of the checkout it started in; a session working in a worktree is on that one's.
         branch: (transcript.cwd ? branchAt(transcript.cwd) : undefined) ?? transcript.gitBranch,
         effort: transcript.effort,
@@ -226,12 +233,42 @@ export class ClaudeProvider implements AgentProvider {
    * its process started from Claude Code's shell snapshot. Their count, and
    * when the oldest started.
    */
-  private backgroundOf(pid: number): { count: number; since?: number } | undefined {
+  private backgroundOf(pid: number, now: number): Background | undefined {
     const shells = (this.proc.children?.(pid) ?? []).filter((child) => child.args.includes("/shell-snapshots/snapshot-"));
     if (shells.length === 0) return undefined;
+    let activeMs = 0;
+    let orphaned = 0;
+    let lastBusyAt = -Infinity;
+    for (const shell of shells) {
+      const ticks = this.proc.cpuTicks?.(shell.pid);
+      const output = this.proc.output?.(shell.pid);
+      // Claude Code deletes a job's output file when it forgets the job, as on a restart: nobody waits on it any more.
+      if (output?.deleted) orphaned++;
+      let seen = this.jobs.get(shell.pid);
+      if (!seen || seen.startedMs !== shell.startedMs) {
+        seen = { startedMs: shell.startedMs, ticks, size: output?.size, lastAt: now, busyAt: shell.startedMs ?? now, activeMs: 0 };
+        this.jobs.set(shell.pid, seen);
+      } else {
+        // Busy since the last look when it used CPU or wrote output meanwhile (work in a container uses no CPU of its own);
+        // a long gap counts a minute at most.
+        const used = ticks !== undefined && seen.ticks !== undefined && ticks > seen.ticks;
+        const wrote = output !== undefined && seen.size !== undefined && output.size > seen.size;
+        if (used || wrote) {
+          seen.activeMs += Math.min(now - seen.lastAt, 60_000);
+          seen.busyAt = now;
+        }
+        seen.ticks = ticks;
+        seen.size = output?.size;
+        seen.lastAt = now;
+      }
+      activeMs += seen.activeMs;
+      lastBusyAt = Math.max(lastBusyAt, seen.busyAt);
+    }
     const starts = shells.map((shell) => shell.startedMs).filter((at): at is number => at !== undefined);
-    return { count: shells.length, since: starts.length ? Math.min(...starts) : undefined };
+    const quietMs = now - lastBusyAt;
+    return { count: shells.length, since: starts.length ? Math.min(...starts) : undefined, activeMs, idleMs: quietMs >= STALLED_MS ? quietMs : undefined, orphaned: orphaned || undefined };
   }
+
 
   history(id: string): HistoryMessage[] | undefined {
     const index = this.indexFor(id);

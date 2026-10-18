@@ -38,7 +38,8 @@ export function describeReason(reason: Reason | undefined): string {
 
 /** How long a working session's transcript has been silent, counted from when it started working at the earliest, when that is longer than `QUIET_MS`. */
 export function quietFor(view: SessionView, now: number): number | undefined {
-  if (view.state !== "working" || view.lastWriteAt === undefined) return undefined;
+  // A background job's silence is its own, told by its CPU.
+  if (view.state !== "working" || view.background || view.lastWriteAt === undefined) return undefined;
   const quiet = now - Math.max(view.lastWriteAt, view.since ?? -Infinity);
   return quiet > QUIET_MS ? quiet : undefined;
 }

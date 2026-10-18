@@ -26,6 +26,17 @@ export class FakeProc implements ProcessTable {
   readonly kids = new Map<number, { pid: number; args: string; startedMs?: number }[]>();
   domain: string | undefined = DOMAIN;
 
+  cpu: (pid: number) => number | undefined = () => undefined;
+  out: (pid: number) => { size: number; deleted: boolean } | undefined = () => undefined;
+
+  output(pid: number): { size: number; deleted: boolean } | undefined {
+    return this.out(pid);
+  }
+
+  cpuTicks(pid: number): number | undefined {
+    return this.cpu(pid);
+  }
+
   children(pid: number): { pid: number; args: string; startedMs?: number }[] {
     return this.kids.get(pid) ?? [];
   }

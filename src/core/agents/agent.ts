@@ -1,6 +1,7 @@
 import type { HistoryMessage, SearchResult, SnippetSize } from "../history";
 import type { Query } from "../terms";
-import type { Evidence, Reason, TypedQuestion } from "../types";
+import type { Background, Evidence, Reason, TypedQuestion } from "../types";
+export type { Background };
 
 export type AgentStatus = "working" | "waiting" | "idle" | "unknown";
 
@@ -33,8 +34,8 @@ export interface AgentSession {
   /** The git branch it works on. */
   branch?: string;
   model?: string;
-  /** Shell commands it left running in the background while not working: how many, and since when. */
-  background?: { count: number; since?: number };
+  /** Shell commands it left running after its turn: it counts as working while they run. */
+  background?: Background;
   /** The reasoning effort the model last answered with. */
   effort?: string;
   /** Tokens in the context window at the last model call. */

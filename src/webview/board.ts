@@ -468,6 +468,8 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   line.querySelector(".kind")!.textContent = second.label ?? "";
   line.querySelector(".text")!.textContent = second.text === undefined ? "" : typed ? `“${second.text}”` : second.text;
   line.classList.toggle("empty", second.text === undefined && second.label === undefined);
+  line.classList.toggle("stuck", second.stuck === true);
+  card.classList.toggle("background", view.background !== undefined);
   const options = card.querySelector(".options") as HTMLElement;
   const answers = second.options ?? [];
   options.classList.toggle("hidden", answers.length === 0);

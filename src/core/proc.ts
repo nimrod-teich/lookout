@@ -22,6 +22,10 @@ export interface ProcessTable {
   onDidUpdate?: () => void;
   /** A process's children, with their command lines; Linux only. */
   children?(pid: number): { pid: number; args: string; startedMs?: number }[];
+  /** Where a process writes its output, when that is a file: its size, and whether the file was deleted; Linux only. */
+  output?(pid: number): { size: number; deleted: boolean } | undefined;
+  /** CPU time a process and every process under it have used, in clock ticks; Linux only. */
+  cpuTicks?(pid: number): number | undefined;
 }
 
 /** Parent pids of a process, nearest first, as far as they are known. */
@@ -80,6 +84,37 @@ class LinuxProcessTable implements ProcessTable {
       }
     }
     return out;
+  }
+
+  output(pid: number): { size: number; deleted: boolean } | undefined {
+    try {
+      const target = fs.readlinkSync(`/proc/${pid}/fd/1`);
+      if (!target.startsWith("/")) return undefined;
+      return { size: fs.statSync(`/proc/${pid}/fd/1`).size, deleted: target.endsWith(" (deleted)") };
+    } catch {
+      return undefined;
+    }
+  }
+
+  cpuTicks(pid: number, depth = 0): number | undefined {
+    let total: number;
+    try {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+      const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      // utime and stime, fields 14 and 15, and cutime and cstime, 16 and 17: what its ended children used.
+      total = Number(rest[11]) + Number(rest[12]) + Number(rest[13]) + Number(rest[14]);
+    } catch {
+      return undefined;
+    }
+    if (depth > 16) return total;
+    let kids: string[] = [];
+    try {
+      kids = fs.readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean);
+    } catch {
+      // No children list: the process alone.
+    }
+    for (const kid of kids) total += this.cpuTicks(Number(kid), depth + 1) ?? 0;
+    return Number.isFinite(total) ? total : undefined;
   }
 
   private boot: number | undefined | null = null;
