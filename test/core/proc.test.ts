@@ -1,7 +1,11 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ancestorsOf,
   createProcessTable,
+  LinuxProcessFinder,
   parseProcStat,
   parsePsProcessList,
   parseWindowsProcessList,
@@ -142,4 +146,31 @@ describe("the process table of this platform", () => {
     expect(ancestorsOf(table, process.pid)[0]).toBe(process.ppid);
     expect(table.get(2_147_483_000)).toBeNull();
   }, 30_000);
+});
+
+// The Linux finder reads a /proc tree; Windows resolves the fake cwd symlink to a drive path.
+describe.skipIf(process.platform === "win32")("LinuxProcessFinder", () => {
+  /** A fake /proc with one process: its command line names the program, its thread name does not. */
+  function fakeProc(comm: string, program: string): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-proc-"));
+    fs.writeFileSync(path.join(root, "stat"), "cpu 1 2 3 4\nbtime 1700000000\n");
+    const dir = path.join(root, "4242");
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, "comm"), comm + "\n");
+    fs.writeFileSync(path.join(dir, "cmdline"), [program, "--allow-all-tools", ""].join("\0"));
+    fs.writeFileSync(path.join(dir, "stat"), "4242 (" + comm + ") S 100 4242 4242 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 500 0 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25");
+    fs.symlinkSync("/work/infra", path.join(dir, "cwd"));
+    return root;
+  }
+
+  it("finds a program whose main thread is renamed, by its command line", () => {
+    const root = fakeProc("MainThread", "/opt/copilot-linux-x64/copilot");
+    const found = new LinuxProcessFinder("copilot", root, () => 1_000).find();
+    expect(found).toEqual([{ pid: 4242, ppid: 100, args: ["/opt/copilot-linux-x64/copilot", "--allow-all-tools"], cwd: "/work/infra", startedMs: 1700000000000 + 500 * 10 }]);
+  });
+
+  it("skips a process whose command line names another program", () => {
+    const root = fakeProc("copilot", "/usr/bin/node");
+    expect(new LinuxProcessFinder("copilot", root, () => 1_000).find()).toEqual([]);
+  });
 });

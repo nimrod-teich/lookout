@@ -388,8 +388,8 @@ export class LinuxProcessFinder implements ProcessFinder {
       if (!/^\d+$/.test(entry)) continue;
       const dir = `${this.root}/${entry}`;
       try {
-        // `comm` is cut at 15 characters; the program name is checked again against the command line.
-        if (fs.readFileSync(`${dir}/comm`, "utf8").trim() !== this.name.slice(0, 15)) continue;
+        // The command line names the program; `comm` would be cheaper to check first, but it is cut at
+        // 15 characters and a program may rename its main thread (Copilot CLI's reads "MainThread").
         const args = fs.readFileSync(`${dir}/cmdline`, "utf8").split("\0").filter((arg, i, all) => arg !== "" || i < all.length - 1);
         if (args.length === 0 || programName(args[0]!) !== this.name) continue;
         const stat = parseProcStat(fs.readFileSync(`${dir}/stat`, "utf8"));
