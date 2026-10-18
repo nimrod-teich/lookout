@@ -21,7 +21,7 @@
     getState: () => undefined,
     setState: () => {},
     postMessage: (m) => {
-      if (m.type === "ready") setTimeout(() => window.postMessage({ type: "query", query: params.get("q") ?? "webhook" }, "*"), 50);
+      if (m.type === "ready") setTimeout(() => window.postMessage({ type: "query", query: params.get("q") ?? "webhook", ...(params.get("hide") ? { hide: params.get("hide").split(",") } : {}) }, "*"), 50);
       if (m.type !== "search") return;
       const word = m.query.split(/\s+/).find((w) => !w.includes(":")) ?? "";
       const results = sessions.map((s) => ({

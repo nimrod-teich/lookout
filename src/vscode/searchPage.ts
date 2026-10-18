@@ -40,12 +40,12 @@ export class SearchPage implements vscode.Disposable {
     private readonly actions: SearchPageActions,
   ) {}
 
-  /** Opens the page, or brings it forward, with this query in its box. */
-  show(query: string): void {
+  /** Opens the page, or brings it forward, with this query in its box; `hide`: agents to leave out, as on the board. */
+  show(query: string, hide?: string[]): void {
     this.query = query;
     const panel = this.ensurePanel();
     panel.reveal(undefined, false);
-    this.post({ type: "query", query });
+    this.post(hide?.length ? { type: "query", query, hide } : { type: "query", query });
   }
 
   /** The sessions with matches, the newest match first; sessions that operators alone picked come last. */

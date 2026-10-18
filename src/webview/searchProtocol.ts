@@ -21,8 +21,8 @@ export interface SearchPageSession {
 
 /** Extension → search page. */
 export type ToSearch =
-  /** Put this query in the box and run it. */
-  | { type: "query"; query: string }
+  /** Put this query in the box and run it; `hide`: the agents hidden on the board it was opened from, left out. */
+  | { type: "query"; query: string; hide?: string[] }
   /** `pending` conversations were not read yet; the page asks again. */
   /** `markers`: tell the agents apart. */
   | { type: "results"; query: string; sessions: SearchPageSession[]; pending: number; markers?: boolean };

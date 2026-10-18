@@ -37,8 +37,8 @@ export interface BoardActions {
   /** Searches the live and the past sessions' conversations. */
   /** `zone`: the board's time zone, minutes behind UTC, for the days the query names. */
   search(query: string, zone?: number): SearchOutcome;
-  /** Opens the search page with this query. */
-  openSearch(query: string): void;
+  /** Opens the search page with this query, leaving out the agents hidden on the board. */
+  openSearch(query: string, hide?: string[]): void;
   /** Shows a session's conversation in the findings tab, at one message or at the newest match. */
   openHit(query: string, id: string, index: number | undefined): void;
 }
@@ -123,9 +123,13 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
           this.actions.openHit(message.query, message.id, message.index);
         }
         return;
-      case "openSearch":
-        if (typeof message.query === "string") this.actions.openSearch(message.query);
+      case "openSearch": {
+        if (typeof message.query !== "string") return;
+        const hide = Array.isArray(message.hide) ? message.hide.filter((agent): agent is string => typeof agent === "string") : [];
+        if (hide.length) this.actions.openSearch(message.query, hide);
+        else this.actions.openSearch(message.query);
         return;
+      }
       case "search": {
         if (typeof message.query !== "string") return;
         const zone = typeof message.zone === "number" && Math.abs(message.zone) <= 24 * 60 ? message.zone : undefined;

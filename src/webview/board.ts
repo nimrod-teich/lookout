@@ -234,7 +234,9 @@ const summary = el("button", "summary");
 summary.type = "button";
 summary.title = "Open every match on the search page";
 summary.addEventListener("click", () => {
-  if (query !== "") vscode.postMessage({ type: "openSearch", query });
+  // The page leaves out the agents hidden here, and says so.
+  const hide = markers && hiddenAgents.size ? [...hiddenAgents] : undefined;
+  if (query !== "") vscode.postMessage(hide ? { type: "openSearch", query, hide } : { type: "openSearch", query });
 });
 search.append(field, clear, summary);
 beam.append(search);
@@ -289,13 +291,10 @@ function receiveSearch(message: { query: string; results: SearchResult[]; pendin
   // An answer to an older query is of no use.
   if (message.query !== query) return;
   hits = new Map(message.results.map((result) => [result.id, result]));
+  results = message.results;
   pending = message.pending;
   search.classList.toggle("searching", pending > 0);
-  const matches = message.results.reduce((sum, result) => sum + result.count, 0);
-  const picked = `${message.results.length} ${message.results.length === 1 ? "session" : "sessions"}`;
-  // Operators alone pick sessions without words to match.
-  const found = message.results.length === 0 ? "no matches" : matches === 0 ? picked : `${matches} ${matches === 1 ? "match" : "matches"} in ${picked}`;
-  summary.textContent = pending > 0 ? `${found} · reading ${pending} more…` : found;
+  summarise();
   applyFilters();
   render();
   // Conversations not read within the time given: ask again shortly, until none is left.
@@ -304,6 +303,24 @@ function receiveSearch(message: { query: string; results: SearchResult[]; pendin
       if (query === message.query) askSearch();
     }, 400);
   }
+}
+
+/** The search's results, as last received. */
+let results: SearchResult[] = [];
+
+/** The agent of a session the board holds, running or not. */
+function agentOfId(id: string): string | undefined {
+  return (allSessions.find((view) => view.id === id) ?? past.find((view) => view.id === id) ?? favourites.past.find((view) => view.id === id))?.agent;
+}
+
+/** How much the search found, among the agents shown: those hidden in the legend are left out of the count as of the cards. */
+function summarise(): void {
+  const shown = results.filter((result) => agentShown(agentOfId(result.id)));
+  const matches = shown.reduce((sum, result) => sum + result.count, 0);
+  const picked = `${shown.length} ${shown.length === 1 ? "session" : "sessions"}`;
+  // Operators alone pick sessions without words to match.
+  const found = shown.length === 0 ? "no matches" : matches === 0 ? picked : `${matches} ${matches === 1 ? "match" : "matches"} in ${picked}`;
+  summary.textContent = pending > 0 ? `${found} · reading ${pending} more…` : found;
 }
 
 /** The agent's chip in the legend is on: its sessions and usage show. Without markers there are no chips, and every agent shows. */
@@ -330,6 +347,7 @@ function toggleAgent(agent: string): void {
   if (hiddenAgents.has(agent)) hiddenAgents.delete(agent);
   else hiddenAgents.add(agent);
   saveState();
+  if (query !== "") summarise();
   applyFilters();
   render();
 }

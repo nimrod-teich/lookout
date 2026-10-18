@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { agentInfo } from "../core/agents/catalog";
+import { AGENTS, agentInfo } from "../core/agents/catalog";
 import { describeSpan, shortSpan } from "../core/format";
 import type { SearchHit } from "../core/history";
 import { agentGlyph } from "./glyph";
@@ -27,6 +27,10 @@ const OPERATORS = "since:3d, before:yesterday, since:2026-10-01, project:api, br
 let query = "";
 /** Tell the agents apart: each session's mark and its agent's name. */
 let markers = false;
+/** Agents hidden on the board the page was opened from: their sessions are left out until "Show them". */
+let hiddenAgents = new Set<string>();
+/** The results on show, kept to show them again with every agent. */
+let shown: Extract<ToSearch, { type: "results" }> | undefined;
 
 // The top: what this is, how much it found, and the box.
 
@@ -158,18 +162,22 @@ function sessionBlock(session: SearchPageSession): HTMLElement {
 function receive(message: Extract<ToSearch, { type: "results" }>): void {
   // An answer to an older query is of no use.
   if (message.query !== query) return;
+  shown = message;
   markers = message.markers === true;
-  const matches = message.sessions.reduce((sum, session) => sum + session.count, 0);
-  const sessions = `${message.sessions.length} ${message.sessions.length === 1 ? "session" : "sessions"}`;
-  const found = message.sessions.length === 0 ? "no matches" : matches === 0 ? sessions : `${matches} ${matches === 1 ? "match" : "matches"} in ${sessions}`;
+  const left = message.sessions.filter((session) => hiddenAgents.has(session.agent ?? AGENTS[0]!.id));
+  const kept = message.sessions.filter((session) => !left.includes(session));
+  const matches = kept.reduce((sum, session) => sum + session.count, 0);
+  const sessions = `${kept.length} ${kept.length === 1 ? "session" : "sessions"}`;
+  const found = kept.length === 0 ? "no matches" : matches === 0 ? sessions : `${matches} ${matches === 1 ? "match" : "matches"} in ${sessions}`;
   summary.textContent = message.pending > 0 ? `${found} · reading ${message.pending} more…` : found;
   list.textContent = "";
-  if (message.sessions.length === 0) {
+  if (left.length > 0) list.append(leftOut(left));
+  if (kept.length === 0) {
     const empty = el("div", "empty");
     empty.append(el("p", "big", message.pending > 0 ? "Searching…" : "No conversation mentions that"), el("p", "small", `Every word must appear in one message; ${OPERATORS} narrow the search.`));
     list.append(empty);
   }
-  for (const session of message.sessions) list.append(sessionBlock(session));
+  for (const session of kept) list.append(sessionBlock(session));
   // Conversations not read within the time given: ask again shortly, until none is left.
   if (message.pending > 0)
     setTimeout(() => {
@@ -177,9 +185,25 @@ function receive(message: Extract<ToSearch, { type: "results" }>): void {
     }, 300);
 }
 
+/** Says whose sessions the page leaves out, as the board hides them, with a button to show them here. */
+function leftOut(left: SearchPageSession[]): HTMLElement {
+  const note = el("p", "left-out");
+  const names = [...new Set(left.map((session) => agentInfo(session.agent ?? AGENTS[0]!.id).label))].join(" and ");
+  note.append(el("span", "", `${left.length} ${left.length === 1 ? "session" : "sessions"} of ${names} left out, as on the board. `));
+  const show = el("button", "link", "Show them");
+  show.type = "button";
+  show.addEventListener("click", () => {
+    hiddenAgents = new Set();
+    if (shown) receive(shown);
+  });
+  note.append(show);
+  return note;
+}
+
 window.addEventListener("message", (event: MessageEvent<ToSearch>) => {
   const message = event.data;
   if (message.type === "query") {
+    hiddenAgents = new Set(message.hide ?? []);
     input.value = message.query || input.value;
     run();
     input.focus();

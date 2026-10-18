@@ -190,7 +190,7 @@ export function activate(context: vscode.ExtensionContext): void {
     refreshUsage: () => void vscode.commands.executeCommand(REFRESH_USAGE),
     search: (query, zone) => controller.search(query, zone),
     openHit,
-    openSearch: (query) => searchPage.show(query),
+    openSearch: (query, hide) => searchPage.show(query, hide),
   });
   const render = () => {
     statusBar.render({

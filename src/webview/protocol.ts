@@ -66,7 +66,8 @@ export type FromBoard =
   /** Open the session's conversation in the findings tab, at one message or at the newest match. */
   | { type: "openHit"; query: string; id: string; index?: number }
   /** Open the search page with this query. */
-  | { type: "openSearch"; query: string }
+  /** `hide`: the agents hidden in the legend, left out there too. */
+  | { type: "openSearch"; query: string; hide?: string[] }
   /** Resume a session that is not running, in the agent's panel. */
   | { type: "resume"; id: string }
   /** List and search the earlier sessions of this window's folders, or of every project. */
