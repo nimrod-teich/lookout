@@ -12,6 +12,7 @@
 - **A search page.** Every conversation's matches in an editor tab, with the room to read them: `Lookout: Search All Sessions`, the search icon on the board's title bar, or a click on the board's match count. Sessions with matches are listed newest match first, with their project, branch and whether they are running, and up to 20 matches each, cut wider than on the cards; a click opens the conversation at that message. The page takes the board's operators.
 - **Favourites.** A small star on every card stars the session; starred sessions are gathered at the top of the board, running or not and whatever project they belong to, and a click jumps to them, resumes them, or opens their conversation. Stars are kept for the machine, so every window shows them.
 - **Tabs restored after a reload.** The agent restores its tabs after a window reload but starts a session only once its tab is opened; until then the board keeps the session, idle, on a card that says "Tab open · not started", and a click opens the tab. A tab or terminal with nothing sent is left off the board while it is idle.
+- **A jump lands on the newest message.** A jump to a session in the agent's panel, from a card, the jump list or a notification, brings its tab to the front at the newest message, or at the prompt it waits on, through Claude Code's own "Focus last message"; it no longer opens where the tab was last scrolled.
 
 ## 0.1.0
 

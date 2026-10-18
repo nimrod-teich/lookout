@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { claudeTabLabel } from "../../src/vscode/agents/claudePanel";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cancelNewest, claudeTabLabel } from "../../src/vscode/agents/claudePanel";
 import { jumpToSession, renameSession, revealed } from "../../src/vscode/jump";
 import { notifyFinished, notifyWaiting } from "../../src/vscode/notifications";
 import { Terminals } from "../../src/vscode/terminals";
@@ -8,6 +8,7 @@ import { fakeLog, settle, view } from "./helpers";
 import { stub } from "./stub-vscode";
 
 const CLAUDE_OPEN = "claude-vscode.editor.open";
+const LAST_MESSAGE = "claude-vscode.focusLastMessage";
 
 function commandCalls(): string[] {
   return stub.ops.filter(([target]) => target === "commands").map(([, command]) => command);
@@ -23,7 +24,11 @@ async function terminals(): Promise<Terminals> {
   return t;
 }
 
-beforeEach(() => stub.reset());
+beforeEach(() => {
+  stub.reset();
+  // A jump of the test before must not scroll a tab this one brings to the front.
+  cancelNewest();
+});
 
 describe("claudeTabLabel", () => {
   it("cuts titles the way the Claude Code extension labels its tabs", () => {
@@ -43,6 +48,41 @@ describe("jumpToSession, panel sessions", () => {
       ["commands", CLAUDE_OPEN, [v.id, undefined, undefined, undefined, undefined, { programmatic: "pin-to-panel" }]],
     ]);
   });
+
+  it("then brings the session's newest message into view, once its tab is in front", async () => {
+    const group = stub.addClaudeGroup(["Other", "Wire the cache"]);
+    stub.commands.set(CLAUDE_OPEN, () => stub.activate(group.tabs[1]!));
+    stub.commands.set(LAST_MESSAGE, () => undefined);
+    expect(await jumpToSession(view(), await terminals(), fakeLog())).toBe("revealed");
+    await vi.waitFor(() => expect(commandCalls()).toEqual([CLAUDE_OPEN, LAST_MESSAGE]), { timeout: 2_000, interval: 20 });
+  });
+
+  it("scrolls no tab when the session's tab does not come to the front", async () => {
+    const group = stub.addClaudeGroup(["Other", "Wire the cache"]);
+    stub.commands.set(CLAUDE_OPEN, () => undefined);
+    stub.commands.set(LAST_MESSAGE, () => undefined);
+    expect(await jumpToSession(view(), await terminals(), fakeLog())).toBe("revealed");
+    stub.activate(group.tabs[0]!);
+    await new Promise((resolve) => setTimeout(resolve, 1_800));
+    expect(commandCalls()).toEqual([CLAUDE_OPEN]);
+  }, 10_000);
+
+  it("drops the scroll of a jump that a later jump or a rename overtakes", async () => {
+    const group = stub.addClaudeGroup(["Wire the cache", "Second"]);
+    stub.commands.set(LAST_MESSAGE, () => undefined);
+    stub.commands.set("claude-vscode.renameSessionTab", () => undefined);
+    stub.commands.set(CLAUDE_OPEN, () => undefined);
+    const t = await terminals();
+    await jumpToSession(view(), t, fakeLog());
+    // The rename brings the first tab forward; the jump's scroll would take the focus from its box.
+    stub.commands.set(CLAUDE_OPEN, () => stub.activate(group.tabs[0]!));
+    await renameSession(view(), t, fakeLog());
+    await jumpToSession(view({ title: "Second" }), t, fakeLog());
+    await jumpToSession(view(), t, fakeLog());
+    await vi.waitFor(() => expect(commandCalls().filter((c) => c === LAST_MESSAGE)).toHaveLength(1), { timeout: 2_000, interval: 20 });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(commandCalls()).toEqual([CLAUDE_OPEN, CLAUDE_OPEN, "claude-vscode.renameSessionTab", CLAUDE_OPEN, CLAUDE_OPEN, LAST_MESSAGE]);
+  }, 10_000);
 
   it("refuses an id that is not a session UUID", async () => {
     stub.commands.set(CLAUDE_OPEN, () => undefined);
