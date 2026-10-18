@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockTime, countStates, describeAlert, describeEvidence, describeLocation, describeReason, describeSpan, describeState, formatCountdown, formatElapsed, formatResetIn, formatTokens, formatUntil, formatUsd, noticeBody, quietFor, shortModel, windowName } from "../../src/core/format";
+import { clockTime, countStates, describeAlert, describeEvidence, describeLocation, describeReason, describeSpan, shortSpan, describeState, formatCountdown, formatElapsed, formatResetIn, formatTokens, formatUntil, formatUsd, noticeBody, quietFor, shortModel, windowName } from "../../src/core/format";
 import { view } from "../vscode/helpers";
 
 describe("format", () => {
@@ -86,6 +86,14 @@ describe("format", () => {
     expect(describeSpan(a, b)).toMatch(/^started .*4.*11:46.* · last active .*6.*09:12/);
     expect(describeSpan(a, a)).toMatch(/^started [^·]+$/);
     expect(describeSpan(undefined, undefined)).toBe("");
+  });
+
+  it("says the days a conversation spans and how long ago it moved", () => {
+    const now = new Date(2026, 9, 18, 13, 45).getTime();
+    expect(shortSpan(new Date(2026, 9, 16, 19, 22).getTime(), now - 3 * 3_600_000, now)).toMatch(/^Oct 16 → Oct 18 · active 3h ago$/);
+    expect(shortSpan(now - 600_000, now - 30_000, now)).toMatch(/^Oct 18 · active now$/);
+    expect(shortSpan(now - 9 * 86_400_000, now - 5 * 86_400_000, now)).toMatch(/ · active 5d ago$/);
+    expect(shortSpan(undefined, undefined, now)).toBe("");
   });
 
   it("says when a limit resets as Claude Code's panel says it", () => {

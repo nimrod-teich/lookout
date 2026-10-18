@@ -150,11 +150,10 @@ body {
 
 .session-head {
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 10px;
+  flex-direction: column;
+  gap: 5px;
   width: 100%;
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   padding: 0;
   border: 0;
   background: none;
@@ -164,21 +163,54 @@ body {
   cursor: pointer;
 }
 
+.head-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .session-head:hover .session-title {
   text-decoration: underline;
 }
 
 .session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: calc(var(--vscode-font-size) + 2px);
   font-weight: 600;
 }
 
-.session-head .where,
-.session-head .matches {
+.head-top .matches {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.head-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(var(--vscode-font-size) - 1px);
   color: var(--muted);
 }
 
+.head-meta .chip {
+  padding: 0 6px;
+  border-radius: 3px;
+  background: rgba(160, 200, 230, 0.08);
+  line-height: 18px;
+}
+
+.head-meta .when {
+  margin-left: 4px;
+}
+
 .tag {
+  flex: none;
   padding: 0 6px;
   border-radius: 3px;
   background: rgba(160, 200, 230, 0.1);

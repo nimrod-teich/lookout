@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { describeSpan } from "../core/format";
+import { describeSpan, shortSpan } from "../core/format";
 import type { SearchHit } from "../core/history";
 import type { FromSearch, SearchPageSession, ToSearch } from "./searchProtocol";
 
@@ -111,12 +111,20 @@ function sessionBlock(session: SearchPageSession): HTMLElement {
   const head = el("button", "session-head");
   head.type = "button";
   head.title = "Open this conversation at its newest match";
-  head.append(el("span", "session-title", session.title));
-  if (session.where) head.append(el("span", "where", session.where));
-  const span = describeSpan(session.started, session.lastActive);
-  if (span) head.append(el("span", "where", span));
-  head.append(el("span", "tag", session.live ? "running" : "earlier"));
-  if (session.count > 0) head.append(el("span", "matches", `${session.count} ${session.count === 1 ? "match" : "matches"}`));
+  // Line one: what it is, whether it runs, how much matched.
+  const top = el("span", "head-top");
+  top.append(el("span", "session-title", session.title), el("span", "tag", session.live ? "running" : "earlier"));
+  if (session.count > 0) top.append(el("span", "matches", `${session.count} ${session.count === 1 ? "match" : "matches"}`));
+  // Line two: where it worked, and when.
+  const meta = el("span", "head-meta");
+  for (const part of (session.where ?? "").split(" · ").filter(Boolean)) meta.append(el("span", "chip", part));
+  const when = shortSpan(session.started, session.lastActive, Date.now());
+  if (when) {
+    const time = el("span", "when", when);
+    time.title = describeSpan(session.started, session.lastActive);
+    meta.append(time);
+  }
+  head.append(top, meta);
   head.addEventListener("click", () => open(session.id));
   block.append(head);
   for (const hit of session.hits) {
