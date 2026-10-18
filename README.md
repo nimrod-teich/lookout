@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-17607F?style=flat-square&labelColor=0A2436" alt="MIT license"></a>
 </p>
 
-<p align="center"><b>Every AI coding agent session at a glance: what is working, what needs you, and where.</b></p>
+<p align="center"><b>Every AI coding agent session at a glance: what is working, what needs you, and where.</b><br>Works with Claude Code, Codex and Copilot CLI.</p>
 
 <p align="center">
   <a href="#what-it-does">What it does</a> &nbsp;|&nbsp;
@@ -20,7 +20,7 @@
   <a href="#how-it-works">How it works</a>
 </p>
 
-Running several AI coding agents at once means clicking through tabs to find out which one finished and which one is stuck on a question. Lookout keeps that answer in the status bar, takes you to the right tab with one keystroke, and finds any conversation, running or not, by a word you remember from it.
+Running several AI coding agents at once means clicking through tabs and terminals to find out which one finished and which one is stuck on a question. Lookout keeps that answer in the status bar, takes you to the right tab or terminal with one keystroke, and finds any conversation, running or not, by a word you remember from it. Claude Code in its VS Code panel or a terminal, Codex and Copilot CLI in terminals: one board, one jump key, one search, each agent with its own colour and boat once more than one is on the board. It reads only what the agents already write on disk.
 
 ## What it does
 
