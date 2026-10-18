@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { agentByKey, markerSetting, type MarkerSetting } from "../core/agents/catalog";
 import { resolveConfigDir } from "../core/agents/claude/paths";
+import { codexHome } from "../core/agents/codex/paths";
 import { envFlag, NONESSENTIAL_TRAFFIC, type RefreshMode } from "../core/usage";
 
 export interface Config {
@@ -28,6 +29,10 @@ export interface Config {
   agentMarkers: MarkerSetting;
   /** Whose usage the status bar's bar shows: `auto` or an agent's key. */
   usageAgent: string;
+  /** Watch Codex's sessions. */
+  codexEnabled: boolean;
+  /** Codex's home, where its sessions are: the setting, `CODEX_HOME`, or `~/.codex`. */
+  codexHome: string;
 }
 
 interface EnvVar {
@@ -79,5 +84,7 @@ export function readConfig(): Config {
     claudeConfigDir,
     agentMarkers: markerSetting(lookout.get<string>("agentMarkers")),
     usageAgent: usageAgent(lookout.get<string>("statusBar.usageAgent")),
+    codexEnabled: lookout.get<boolean>("agents.codex", true),
+    codexHome: codexHome(lookout.get<string>("codexHome")),
   };
 }

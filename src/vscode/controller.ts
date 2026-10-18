@@ -4,11 +4,12 @@ import * as vscode from "vscode";
 import type { AgentProvider, SearchOutcome } from "../core/agents/agent";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
+import { CodexProvider } from "../core/agents/codex/provider";
 import type { HistoryMessage, SnippetSize } from "../core/history";
 import { Attention } from "../core/attention";
 import { buildPastView, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
 import { Monitor } from "../core/monitor";
-import { createProcessTable, type ProcessTable } from "../core/proc";
+import { createProcessFinder, createProcessTable, type ProcessTable } from "../core/proc";
 import type { PastView, SessionView, State } from "../core/types";
 import { RefreshLedger } from "../core/refreshLedger";
 import { hasFilters, parseQuery } from "../core/terms";
@@ -283,6 +284,12 @@ export class Controller implements vscode.Disposable {
   start(config: Config): void {
     this.typedQuestions = config.typedQuestions;
     this.providers = [new ClaudeProvider(config.claudeConfigDir, this.proc)];
+    if (config.codexEnabled) {
+      // Codex keeps no per-process file: its sessions are its running processes, found by name.
+      const finder = createProcessFinder("codex");
+      finder.onDidUpdate = () => this.schedulePoll();
+      this.providers.push(new CodexProvider(config.codexHome, finder));
+    }
     this.monitor = new Monitor(this.providers, this.proc);
     const cacheFile = usageCacheFile(config.claudeConfigDir);
     this.usageCache = new UsageCache(cacheFile);
@@ -295,7 +302,7 @@ export class Controller implements vscode.Disposable {
     this.refreshDisabledByEnv = config.usageRefreshDisabled;
     this.archived = new ArchivedSessions(stateDbCandidates(this.host.globalStorageDir));
     if (!this.archived.available) this.log.info("The agent's archived-session list is out of reach; every past session is listed");
-    this.log.info(`Watching ${this.providers.map((p) => p.label).join(", ")} (${config.claudeConfigDir})`);
+    this.log.info(`Watching ${this.providers.map((p) => p.label).join(", ")} (${config.claudeConfigDir}${config.codexEnabled ? `, ${config.codexHome}` : ""})`);
     this.watch();
     this.poll();
   }

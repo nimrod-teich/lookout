@@ -269,3 +269,209 @@ export function createProcessTable(platform: NodeJS.Platform = process.platform)
   if (platform === "linux") return new LinuxProcessTable();
   return new SnapshotProcessTable(platform === "win32" ? WINDOWS_SOURCE : PS_SOURCE);
 }
+
+/** A process found by its program's name, with what is needed to tie it to a session. */
+export interface NamedProcess {
+  pid: number;
+  ppid?: number;
+  /** Its command line, the program first. Where the platform gives one string, split on whitespace outside quotes. */
+  args: string[];
+  /** Its current directory, where the platform tells it: Linux and macOS. */
+  cwd?: string;
+  /** Start time, epoch ms. */
+  startedMs?: number;
+}
+
+/** The running processes of one program, by name: `codex` finds `codex` and `codex.exe`. */
+export interface ProcessFinder {
+  /** The processes as last read; on platforms that list them in the background, possibly a few seconds old. */
+  find(): NamedProcess[];
+  /** Set by the owner to learn that a background read brought news. */
+  onDidUpdate?: () => void;
+}
+
+/** The program's own name: the last path segment, without `.exe`. */
+export function programName(path: string): string {
+  return (path.split(/[\\/]/).at(-1) ?? path).replace(/\.exe$/i, "");
+}
+
+/** Splits a Windows command line into arguments: whitespace separates them, double quotes group them. */
+export function splitCommandLine(line: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let quoted = false;
+  let started = false;
+  for (const char of line) {
+    if (char === '"') {
+      quoted = !quoted;
+      started = true;
+    } else if (!quoted && /\s/.test(char)) {
+      if (started) args.push(current);
+      current = "";
+      started = false;
+    } else {
+      current += char;
+      started = true;
+    }
+  }
+  if (started) args.push(current);
+  return args;
+}
+
+/** A process list on Linux is a look through `/proc`; it is read again at most this often. */
+const LINUX_SCAN_MS = 1_000;
+
+/** Linux: the processes whose `comm` is the name, read straight from `/proc`. */
+export class LinuxProcessFinder implements ProcessFinder {
+  private found: NamedProcess[] = [];
+  private scannedAt = -Infinity;
+  private boot: number | undefined | null = null;
+
+  constructor(
+    private readonly name: string,
+    private readonly root: string = "/proc",
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  find(): NamedProcess[] {
+    if (this.now() - this.scannedAt < LINUX_SCAN_MS) return this.found;
+    this.scannedAt = this.now();
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(this.root);
+    } catch {
+      return (this.found = []);
+    }
+    const found: NamedProcess[] = [];
+    for (const entry of entries) {
+      if (!/^\d+$/.test(entry)) continue;
+      const dir = `${this.root}/${entry}`;
+      try {
+        // `comm` is cut at 15 characters; the program name is checked again against the command line.
+        if (fs.readFileSync(`${dir}/comm`, "utf8").trim() !== this.name.slice(0, 15)) continue;
+        const args = fs.readFileSync(`${dir}/cmdline`, "utf8").split("\0").filter((arg, i, all) => arg !== "" || i < all.length - 1);
+        if (args.length === 0 || programName(args[0]!) !== this.name) continue;
+        const stat = parseProcStat(fs.readFileSync(`${dir}/stat`, "utf8"));
+        let cwd: string | undefined;
+        try {
+          cwd = fs.readlinkSync(`${dir}/cwd`);
+        } catch {
+          // Another user's process, or gone meanwhile.
+        }
+        const boot = this.bootMs();
+        const ticks = Number(stat?.startTicks);
+        found.push({ pid: Number(entry), ppid: stat?.ppid, args, cwd, startedMs: boot !== undefined && Number.isFinite(ticks) ? boot + ticks * 10 : undefined });
+      } catch {
+        // Gone meanwhile, or not ours to read.
+      }
+    }
+    return (this.found = found);
+  }
+
+  private bootMs(): number | undefined {
+    if (this.boot === null) {
+      try {
+        const btime = /^btime (\d+)$/m.exec(fs.readFileSync(`${this.root}/stat`, "utf8"))?.[1];
+        this.boot = btime === undefined ? undefined : Number(btime) * 1000;
+      } catch {
+        this.boot = undefined;
+      }
+    }
+    return this.boot;
+  }
+}
+
+/** Parses `pid|ppid|creation FILETIME|command line` rows, the output of the Windows finder's command. */
+export function parseWindowsNamedProcesses(text: string): NamedProcess[] {
+  const found: NamedProcess[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^(\d+)\|(\d+)\|(\d+)\|(.*)$/.exec(line.trim());
+    if (!match) continue;
+    const fileTime = Number(match[3]);
+    found.push({ pid: Number(match[1]), ppid: Number(match[2]), args: splitCommandLine(match[4]!), startedMs: fileTime > 0 ? Math.round(fileTime / 10_000 - FILETIME_EPOCH_OFFSET_MS) : undefined });
+  }
+  return found;
+}
+
+/** Parses `ps -axww -o pid=,ppid=,lstart=,args=` rows, printed with `LC_ALL=C TZ=UTC`, keeping the processes of program `name`. */
+export function parsePsNamedProcesses(text: string, name: string): NamedProcess[] {
+  const found: NamedProcess[] = [];
+  for (const line of text.split("\n")) {
+    // lstart is five words: "Sun Oct 18 12:03:38 2026".
+    const match = /^\s*(\d+)\s+(\d+)\s+(\w{3} \w{3}\s+\d+ [\d:]{8} \d{4})\s+(.*)$/.exec(line);
+    if (!match) continue;
+    const args = match[4]!.trim().split(/\s+/);
+    if (programName(args[0] ?? "") !== name) continue;
+    const startedMs = Date.parse(`${match[3]} UTC`);
+    found.push({ pid: Number(match[1]), ppid: Number(match[2]), args, startedMs: Number.isFinite(startedMs) ? startedMs : undefined });
+  }
+  return found;
+}
+
+/** Parses `lsof -a -p <pid> -d cwd -Fn`: the line after `n` is the directory. */
+export function parseLsofCwd(text: string): string | undefined {
+  return /^n(.+)$/m.exec(text)?.[1];
+}
+
+/**
+ * macOS and Windows: the program's processes from a process list read in the
+ * background, at most every 3 seconds; on macOS each new process's directory
+ * once, from `lsof`. Windows does not tell another process's directory.
+ */
+export class SnapshotProcessFinder implements ProcessFinder {
+  onDidUpdate?: () => void;
+  private found: NamedProcess[] = [];
+  private readAt = -Infinity;
+  private pending: Promise<void> | undefined;
+  /** Directories by pid and start time, read once. */
+  private readonly cwds = new Map<string, string | undefined>();
+
+  constructor(
+    private readonly list: () => Promise<NamedProcess[]>,
+    private readonly cwdOf?: (pid: number) => Promise<string | undefined>,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  find(): NamedProcess[] {
+    if (this.now() - this.readAt >= MIN_REFRESH_INTERVAL_MS) void this.refresh();
+    return this.found;
+  }
+
+  refresh(): Promise<void> {
+    if (this.pending) return this.pending;
+    this.readAt = this.now();
+    this.pending = this.list()
+      .then(async (found) => {
+        const before = JSON.stringify(this.found);
+        for (const process of found) {
+          const key = `${process.pid}:${process.startedMs}`;
+          if (this.cwdOf && !this.cwds.has(key)) this.cwds.set(key, await this.cwdOf(process.pid).catch(() => undefined));
+          process.cwd = this.cwds.get(key);
+        }
+        const live = new Set(found.map((process) => `${process.pid}:${process.startedMs}`));
+        for (const key of this.cwds.keys()) if (!live.has(key)) this.cwds.delete(key);
+        this.found = found;
+        if (JSON.stringify(found) !== before) this.onDidUpdate?.();
+      })
+      .catch(() => {
+        // No list: the program's sessions are not found until one can be read.
+      })
+      .finally(() => {
+        this.pending = undefined;
+      });
+    return this.pending;
+  }
+}
+
+/** The finder for one program on this platform. */
+export function createProcessFinder(name: string, platform: NodeJS.Platform = process.platform): ProcessFinder {
+  if (platform === "linux") return new LinuxProcessFinder(name);
+  if (platform === "win32") {
+    const command = `Get-CimInstance Win32_Process -Filter "Name='${name}.exe'" | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProcessId, $_.ParentProcessId, $(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 }), $_.CommandLine }`;
+    return new SnapshotProcessFinder(async () => parseWindowsNamedProcesses(await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command])));
+  }
+  return new SnapshotProcessFinder(
+    async () => parsePsNamedProcesses(await run("ps", ["-axww", "-o", "pid=,ppid=,lstart=,args="], { ...process.env, LC_ALL: "C", TZ: "UTC" }), name),
+    async (pid) => parseLsofCwd(await run("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"])),
+  );
+}

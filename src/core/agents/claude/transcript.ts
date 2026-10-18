@@ -1,3 +1,4 @@
+import { PULSE_BINS, PULSE_WINDOW_MS, pulseBin, pulseBins, pulseLength } from "../../pulse";
 import { clip, quoteAsk } from "../../asks";
 import { costOf, type TokenCounts } from "./pricing";
 
@@ -72,9 +73,7 @@ export interface TranscriptState {
   joinedLate: boolean;
 }
 
-/** How far back the pulse looks. */
-export const PULSE_WINDOW_MS = 15 * 60_000;
-const PULSE_BINS = 15;
+export { PULSE_WINDOW_MS };
 const MAX_TOOL_TIMES = 400;
 
 export const INTERRUPT = "[Request interrupted by user";
@@ -390,31 +389,9 @@ export function activityOf(state: TranscriptState): string | undefined {
   return tools.length > 1 ? `${label} +${tools.length - 1}` : label;
 }
 
-/**
- * Tool calls per minute over the last 15 minutes, oldest first. A session
- * younger than that gets only the minutes since `since`, so its bars start at
- * the left and fill rightwards as it ages.
- */
+/** Tool calls per minute over the last 15 minutes, oldest first; see `pulseBins`. */
 export function pulseOf(state: TranscriptState, now: number, since?: number): number[] {
-  const bins = new Array<number>(PULSE_BINS).fill(0);
-  for (const at of state.toolCallTimes) {
-    const bin = pulseBin(at, now);
-    if (bin !== undefined) bins[bin]!++;
-  }
-  return bins.slice(PULSE_BINS - pulseLength(now, since));
-}
-
-/** The minute of the pulse window a time falls in, 0 the oldest, or undefined outside it. */
-function pulseBin(at: number, now: number): number | undefined {
-  const start = now - PULSE_WINDOW_MS;
-  if (at < start || at > now) return undefined;
-  return Math.min(PULSE_BINS - 1, Math.floor((at - start) / (PULSE_WINDOW_MS / PULSE_BINS)));
-}
-
-/** How many of the newest minutes the pulse shows: all of them, or those since the session started. */
-function pulseLength(now: number, since?: number): number {
-  if (since === undefined || since <= now - PULSE_WINDOW_MS) return PULSE_BINS;
-  return Math.max(1, Math.min(PULSE_BINS, Math.floor((now - since) / (PULSE_WINDOW_MS / PULSE_BINS)) + 1));
+  return pulseBins(state.toolCallTimes, now, since);
 }
 
 /**

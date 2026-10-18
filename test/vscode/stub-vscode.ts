@@ -70,7 +70,8 @@ export const stub = {
   configChange: new EventEmitter<{ affectsConfiguration(section: string): boolean }>(),
   reset(): void {
     this.ops.length = 0;
-    this.config = {};
+    // Agents found by their running processes stay off unless a test turns them on: tests never read the real agent homes.
+    this.config = { "lookout.agents.codex": false };
     this.commands.clear();
     this.groups = [];
     this.activeGroup = undefined;

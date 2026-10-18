@@ -116,10 +116,9 @@
       "project": "api",
       "branch": "deps/pg-9",
       "cwd": "/work/api",
-      "model": "gpt-5.5",
-      "effort": "high",
+      "model": "gpt-6.1-sol",
       "contextTokens": 61000,
-      "contextWindow": 272000,
+      "contextWindow": 475000,
       "pulse": [
         0,
         0,
@@ -148,11 +147,12 @@
       "reason": {
         "kind": "permission",
         "ask": "npm test -- --runInBand",
-        "raw": "command approval"
+        "raw": "May I run the test suite outside the sandbox?"
       },
       "evidence": {
-        "source": "transcript",
-        "at": 1440000
+        "source": "rollout tail",
+        "at": 1440000,
+        "note": "a command that asked to leave the sandbox has no result yet"
       }
     },
     {
@@ -167,10 +167,9 @@
       "project": "web",
       "branch": "main",
       "cwd": "/work/web",
-      "model": "gpt-5.5",
-      "effort": "low",
+      "model": "gpt-6.1-sol",
       "contextTokens": 24000,
-      "contextWindow": 272000,
+      "contextWindow": 475000,
       "pulse": [
         0,
         0,
@@ -189,7 +188,7 @@
         0
       ],
       "evidence": {
-        "source": "transcript",
+        "source": "rollout tail",
         "at": 360000
       }
     },
@@ -256,10 +255,9 @@
       "project": "web",
       "branch": "feat/csv-stream",
       "cwd": "/work/web",
-      "model": "gpt-5.5",
-      "effort": "medium",
+      "model": "gpt-6.1-sol",
       "contextTokens": 118000,
-      "contextWindow": 272000,
+      "contextWindow": 475000,
       "pulse": [
         0,
         1,
@@ -286,10 +284,11 @@
         "partial": false
       },
       "evidence": {
-        "source": "transcript",
+        "source": "rollout tail",
         "at": 4000
       },
-      "lastWriteAt": 4000
+      "lastWriteAt": 4000,
+      "activity": "exec \u00b7 npm run build"
     },
     {
       "agent": "copilot",

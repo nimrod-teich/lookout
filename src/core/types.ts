@@ -31,7 +31,8 @@ export interface Reason {
 
 /** Where a session's state comes from, and how old that is. */
 export interface Evidence {
-  source: "session file" | "transcript" | "process";
+  /** "rollout tail": the last records of a log the agent appends to, read for want of a state file. */
+  source: "session file" | "transcript" | "process" | "rollout tail";
   /** Epoch ms the source was written, when known. */
   at?: number;
   /** What the source says, when the state needs explaining, e.g. "records no state". */
