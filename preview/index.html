@@ -33,8 +33,8 @@
     }));
     if (text === "") return picked.map((s) => ({ id: s.id, count: 0, hits: [] }));
     return picked.filter((s, i) => i % 2 === 0).map((s, i) => {
-      const you = `…search box within each ${text}? It should look through the ${s.project} sessions, and also the chips…`;
-      const agent = `…once; the ${text} is read into memory the first time, then only what was appended, so a second look costs nothing…`;
+      const you = `…can we retry the ${text} when Stripe answers 500, and keep the invoice ids? The ${s.project} handler drops them today…`;
+      const agent = `…the ${text} handler now retries three times with backoff and logs the event id; the ${s.project} tests cover the 500 and the timeout…`;
       const mark = (line) => { const at = line.toLowerCase().indexOf(text.toLowerCase()); return at < 0 ? [] : [[at, at + text.length]]; };
       return { id: s.id, count: 2 + i * 3, hits: [{ role: "you", snippet: you, ranges: mark(you) }, { role: "agent", snippet: agent, ranges: mark(agent) }] };
     });
