@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue
+    url: https://github.com/nimrod-teich/lookout/security/advisories/new
+    about: Report privately. Lookout reads agents' files and never credentials; a bug that breaks that promise belongs here, not in a public issue.

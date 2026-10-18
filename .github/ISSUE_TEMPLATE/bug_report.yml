@@ -1,0 +1,69 @@
+name: Bug report
+description: Something Lookout shows or does is wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What Lookout showed or did, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What was running (which agents, panel or terminal, how many sessions) and what you did.
+  - type: input
+    id: lookout
+    attributes:
+      label: Lookout version
+      description: From the Extensions view, or the Releases page if you installed a .vsix.
+    validations:
+      required: true
+  - type: input
+    id: editor
+    attributes:
+      label: Editor and version
+      description: VS Code, Cursor, Kiro or another fork, with its version (Help → About).
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Where the extension host runs
+      options:
+        - Linux desktop
+        - macOS
+        - Windows
+        - WSL
+        - SSH remote
+        - Dev container or Codespaces
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      options:
+        - Claude Code in its VS Code panel
+        - Claude Code in a terminal
+        - Codex in its extension's panel
+        - Codex in VS Code's Chat
+        - Codex CLI in a terminal
+        - Copilot in VS Code's Chat
+        - Copilot CLI in a terminal
+        - Several, or another
+    validations:
+      required: true
+  - type: input
+    id: agent-version
+    attributes:
+      label: Agent version
+      description: For example `claude --version`, `codex --version`, `copilot --version`, or the extension's version.
+  - type: textarea
+    id: log
+    attributes:
+      label: Lookout output
+      description: View → Output, then pick Lookout in the dropdown. Remove anything private.
+      render: text
