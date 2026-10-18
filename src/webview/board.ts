@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { AGENTS, agentInfo, canJump, canRename, canResume } from "../core/agents/catalog";
+import { AGENTS, agentInfo, canJump, canRename, canResume, unreachable } from "../core/agents/catalog";
 import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
@@ -207,7 +207,7 @@ function showHover(id: string | undefined): void {
     meta.push(`${formatTokens(tokens)} tokens${typeof view.spend.costUsd !== "number" ? "" : ` · ${view.spend.estimated ? "~" : ""}${formatUsd(view.spend.costUsd)}`}`);
   }
   hover.append(el("div", "hover-meta", meta.join(" · ")));
-  if (canJump(view)) hover.append(el("div", "hover-hint", "Click to jump"));
+  if (canJump(view)) hover.append(el("div", "hover-hint", unreachable(view) ? "Click to read its conversation" : "Click to jump"));
   const boat = harbour.boatFor(view.id);
   if (!boat) return;
   const { x, y, width } = harbour.position(boat);
@@ -854,7 +854,7 @@ function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, v
   const shown = (live ?? view)!;
   card.className = `${live ? `card fav state-${live.state}${canJump(live) ? "" : " nojump"}` : "card fav past"}${markers ? " marked" : ""}`;
   const title = live
-    ? `${stateTitle(live)}${canJump(live) ? " · click to jump to it" : ""}`
+    ? `${stateTitle(live)}${!canJump(live) ? "" : unreachable(live) ? " · click to read its conversation" : " · click to jump to it"}`
     : canResume(view!)
       ? `Not running · click to resume it ${resumeWhere(view!)}`
       : view!.resumable

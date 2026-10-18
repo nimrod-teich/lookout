@@ -48,15 +48,16 @@ describe("Monitor", () => {
     expect(monitor.poll({ hostPid: HOST, terminalPids: new Set([70, 71]), windows: new Map() })[0]).toMatchObject({ host: "terminal", terminalPid: 70 });
   });
 
-  it("places everything else elsewhere", () => {
+  it("places an agent's panel in a window without Lookout in an editor, and everything else elsewhere", () => {
     const { proc, monitor } = setup([
       session({ id: "other-window", pid: 11 }),
       session({ id: "terminal-agent-under-host", pid: 12, panel: false }),
       session({ id: "unknown-parents", pid: 13 }),
+      session({ id: "script", pid: 14, panel: false }),
     ]);
-    proc.procs.set(11, { ppid: 4242 }).set(12, { ppid: HOST }).set(13, {});
+    proc.procs.set(11, { ppid: 4242 }).set(12, { ppid: HOST }).set(13, {}).set(14, { ppid: 1 });
     const views = monitor.poll({ hostPid: HOST, terminalPids: new Set(), windows: new Map() });
-    expect(views.map((v) => v.host)).toEqual(["elsewhere", "elsewhere", "elsewhere"]);
+    expect(views.map((v) => v.host)).toEqual(["editor", "elsewhere", "editor", "elsewhere"]);
     expect(views[0]?.terminalPid).toBeUndefined();
   });
 

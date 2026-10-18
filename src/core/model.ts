@@ -55,6 +55,8 @@ function locate(session: AgentSession, ancestors: readonly number[], ctx: Window
       if (windowPid !== ctx.hostPid && other.terminals.includes(pid)) return { host: "window", windowLabel: other.label, windowPid };
     }
   }
+  // An agent's panel in no window Lookout knows: one where Lookout does not run.
+  if (session.panel) return { host: "editor" };
   return { host: "elsewhere" };
 }
 

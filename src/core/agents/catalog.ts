@@ -141,7 +141,8 @@ export function boardAgents(board: { sessions: readonly OnBoard[]; past: readonl
 /**
  * Lookout can bring the session forward: its agent's tab or its terminal,
  * as the agent allows. A session in another window goes through that window,
- * which knows which of the two it is; one outside VS Code gets told so.
+ * which knows which of the two it is; one Lookout cannot reach (outside VS
+ * Code, or in a window where no Lookout runs) opens its conversation instead.
  */
 export function canJump(view: { agent: string; host: Host }): boolean {
   const can = agentInfo(view.agent).capabilities;
@@ -152,9 +153,15 @@ export function canJump(view: { agent: string; host: Host }): boolean {
       return can.jumpTerminal;
     case "window":
       return can.jumpPanel || can.jumpTerminal;
+    case "editor":
     case "elsewhere":
       return true;
   }
+}
+
+/** A session Lookout cannot bring forward: a click opens its conversation. */
+export function unreachable(view: { host: Host }): boolean {
+  return view.host === "editor" || view.host === "elsewhere";
 }
 
 /** The agent renames its sessions for Lookout. */

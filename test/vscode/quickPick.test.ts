@@ -23,6 +23,7 @@ describe("toItem", () => {
     expect(toItem(view({ host: "window", windowLabel: "other" }), now).detail).toBe("Idle for 7m · window: other");
     expect(toItem(view({ host: "window" }), now).detail).toBe("Idle for 7m · another window");
     expect(toItem(view({ host: "elsewhere" }), now).detail).toBe("Idle for 7m · outside VS Code");
+    expect(toItem(view({ host: "editor" }), now).detail).toBe("Idle for 7m · window without Lookout");
   });
 });
 

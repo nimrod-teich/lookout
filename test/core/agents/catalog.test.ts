@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { AGENTS, agentByKey, agentInfo, boardAgents, canJump, canRename, canResume, markerSetting, markersShown, type Capabilities } from "../../../src/core/agents/catalog";
+import { AGENTS, agentByKey, agentInfo, boardAgents, canJump, canRename, canResume, markerSetting, markersShown, unreachable, type Capabilities } from "../../../src/core/agents/catalog";
 import { CLAUDE_CODE } from "../../../src/core/agents/claude/provider";
 
 const ROOT = path.join(__dirname, "..", "..", "..");
@@ -123,6 +123,8 @@ describe("capabilities", () => {
     expect(canJump({ agent: "copilot", host: "panel" })).toBe(false);
     expect(canJump({ agent: "codex", host: "window" })).toBe(true);
     expect(canJump({ agent: "copilot", host: "elsewhere" })).toBe(true);
+    expect(canJump({ agent: "copilot", host: "editor" })).toBe(true);
+    expect([unreachable({ host: "elsewhere" }), unreachable({ host: "editor" }), unreachable({ host: "window" }), unreachable({ host: "panel" })]).toEqual([true, true, false, false]);
   });
 
   it("offers a rename and a resume only to the agents that do them", () => {

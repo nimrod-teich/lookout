@@ -37,6 +37,8 @@ export function hostChip(view: SessionView): string | undefined {
       return "terminal";
     case "window":
       return view.windowLabel ? `window: ${view.windowLabel}` : "another window";
+    case "editor":
+      return "window without Lookout";
     case "elsewhere":
       return "outside VS Code";
     default:

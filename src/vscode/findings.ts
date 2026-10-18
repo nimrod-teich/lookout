@@ -18,6 +18,8 @@ export interface FindingsActions {
   history(id: string): HistoryMessage[] | undefined;
   /** Brings the session's own tab or terminal to the front, or resumes it when it is not running. */
   open(id: string): Promise<void>;
+  /** `open` can reach the session: false for one running outside VS Code or in a window without Lookout. */
+  openable?(id: string): boolean;
 }
 
 /**
@@ -60,7 +62,7 @@ export class Findings implements vscode.Disposable {
     if (!messages) return undefined;
     return {
       type: "conversation",
-      session: { id, title: this.actions.titleOf(id), where: this.actions.whereOf(id), agent: this.actions.agentOf?.(id) },
+      session: { id, title: this.actions.titleOf(id), where: this.actions.whereOf(id), agent: this.actions.agentOf?.(id), ...(this.actions.openable?.(id) === false ? { openable: false } : {}) },
       messages: messages.map((message, index) => ({ index, ...message })),
       query,
       target,
