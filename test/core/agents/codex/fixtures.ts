@@ -50,3 +50,23 @@ export function homeFile(home: string, id: string): string {
   const name = fs.readdirSync(path.join(home, DAY)).find((n) => n.includes(id))!;
   return path.join(home, DAY, name);
 }
+
+/** Threads of the VS Code extension (Codex 0.162 in openai.chatgpt), anonymised: one answered, one copied while its approval prompt was open. */
+export const PANEL_IDLE = "01a14f98-8a19-7a12-bb1b-f3a74309ea7f";
+export const PANEL_APPROVAL = "01a14f9b-ad80-7b82-adf4-949abb052b7a";
+const PANEL = path.join(FIXTURES, "extra", "panel");
+
+/** Adds the extension's threads to a home made by `tempCodexHome`, last written at `writtenAt`, with their names. */
+export function addPanelThreads(home: string, writtenAt: number = NOW - 60_000): void {
+  for (const name of fs.readdirSync(PANEL).filter((n) => n.startsWith("rollout-"))) {
+    const to = path.join(home, DAY, name);
+    fs.copyFileSync(path.join(PANEL, name), to);
+    fs.utimesSync(to, writtenAt / 1000, writtenAt / 1000);
+  }
+  fs.appendFileSync(path.join(home, "session_index.jsonl"), fs.readFileSync(path.join(PANEL, "session_index.jsonl")));
+}
+
+/** The lock Codex holds open while a process has the thread loaded. */
+export function lockOf(home: string, id: string): string {
+  return path.join(home, "thread-writer-locks", `${id}.lock`);
+}

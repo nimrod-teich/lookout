@@ -793,14 +793,14 @@ function pastElapsed(view: PastView): string {
 }
 
 /** Where a session that is not running resumes. */
-function resumeWhere(agent: string): string {
-  return agentInfo(agent).resumesIn === "terminal" ? "in a terminal" : "in the agent's panel";
+function resumeWhere(view: PastView): string {
+  return (view.resumesIn ?? agentInfo(view.agent).resumesIn) === "terminal" ? "in a terminal" : "in the agent's panel";
 }
 
 /** What a click on an earlier session does, and why. */
 function pastTitle(view: PastView, resumable: boolean): string {
   const written = `Not running · last written ${pastElapsed(view)}`;
-  if (resumable) return `${written} · click to resume it ${resumeWhere(view.agent)}`;
+  if (resumable) return `${written} · click to resume it ${resumeWhere(view)}`;
   if (view.resumable) return `${written} · click to read its conversation; Lookout cannot resume ${agentInfo(view.agent).label}'s sessions`;
   return `${written} · from ${view.cwd || "another project"}, not one of this window's folders: click to read its conversation; the agent resumes it from a window open on that folder`;
 }
@@ -856,7 +856,7 @@ function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, v
   const title = live
     ? `${stateTitle(live)}${canJump(live) ? " · click to jump to it" : ""}`
     : canResume(view!)
-      ? `Not running · click to resume it ${resumeWhere(view!.agent)}`
+      ? `Not running · click to resume it ${resumeWhere(view!)}`
       : view!.resumable
         ? `Not running · click to read its conversation; Lookout cannot resume ${agentInfo(view!.agent).label}'s sessions`
         : `Not running · from ${view!.cwd || "another project"}: click to read its conversation`;

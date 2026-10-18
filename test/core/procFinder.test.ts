@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LinuxProcessFinder, parseLsofCwd, parsePsNamedProcesses, parseWindowsNamedProcesses, programName, SnapshotProcessFinder, splitCommandLine } from "../../src/core/proc";
+import { LinuxProcessFinder, parseLsofCwd, parseLsofFiles, parsePsNamedProcesses, parseWindowsNamedProcesses, programName, SnapshotProcessFinder, splitCommandLine } from "../../src/core/proc";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -95,5 +95,34 @@ describe("finding a program's processes", () => {
     await finder.refresh();
     expect(cwdOf).toHaveBeenCalledTimes(1);
     expect(updated).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the files processes hold from lsof, by process", () => {
+    const text = "p40\nfcwd\nn/opt/vscode\nf27\nn/home/u/.codex/thread-writer-locks/01a1.lock\np41\nf3\nn/dev/null\n";
+    expect(parseLsofFiles(text)).toEqual(new Map([[40, ["/opt/vscode", "/home/u/.codex/thread-writer-locks/01a1.lock"]], [41, ["/dev/null"]]]));
+    expect(parseLsofFiles("")).toEqual(new Map());
+  });
+
+  it.skipIf(process.platform === "win32")("on Linux, reads the files a process holds from /proc/<pid>/fd", () => {
+    const root = fakeProc([{ pid: 40, comm: "codex", args: ["codex", "app-server"] }]);
+    fs.mkdirSync(path.join(root, "40", "fd"));
+    fs.symlinkSync("/home/u/.codex/thread-writer-locks/01a1.lock", path.join(root, "40", "fd", "27"));
+    fs.symlinkSync("/dev/null", path.join(root, "40", "fd", "0"));
+    const finder = new LinuxProcessFinder("codex", root, () => 1_000);
+    expect(finder.heldFiles(40)?.sort()).toEqual(["/dev/null", "/home/u/.codex/thread-writer-locks/01a1.lock"]);
+    expect(finder.heldFiles(41)).toBeUndefined();
+  });
+
+  it("elsewhere, reads the files the processes hold with each list when asked to, and none when not", async () => {
+    const list = vi.fn(async () => [{ pid: 40, args: ["codex", "app-server"], startedMs: 1 }]);
+    const filesOf = vi.fn(async (pids: number[]) => new Map(pids.map((pid) => [pid, [`/held/${pid}`]])));
+    const finder = new SnapshotProcessFinder(list, undefined, () => 0, filesOf);
+    await finder.refresh();
+    expect(finder.heldFiles(40)).toEqual(["/held/40"]);
+    expect(finder.heldFiles(41)).toEqual([]);
+    expect(filesOf).toHaveBeenCalledWith([40]);
+    const blind = new SnapshotProcessFinder(list, undefined, () => 0);
+    await blind.refresh();
+    expect(blind.heldFiles(40)).toBeUndefined();
   });
 });

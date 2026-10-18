@@ -334,7 +334,8 @@ export class Controller implements vscode.Disposable {
     this.providers = [new ClaudeProvider(config.claudeConfigDir, this.proc)];
     if (config.codexEnabled) {
       // Codex keeps no per-process file: its sessions are its running processes, found by name.
-      const finder = createProcessFinder("codex");
+      // Which threads the VS Code extension's app-server holds, from the files it holds open.
+      const finder = createProcessFinder("codex", process.platform, { files: true });
       finder.onDidUpdate = () => this.schedulePoll();
       this.providers.push(new CodexProvider(config.codexHome, finder));
     }

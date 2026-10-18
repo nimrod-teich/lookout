@@ -17,7 +17,9 @@
 // - `response_item` `function_call` `request_user_input_async`: a question
 //   with options; it is accepted at once and stays open until the next user
 //   message, after the turn has ended.
-// - `event_msg` `item_completed` with an `AgentMessage`: what Codex said.
+// - `event_msg` `item_completed` with an `AgentMessage`: what Codex said in a
+//   terminal; `event_msg` `agent_message` (`message`, `phase`): what it said in
+//   the VS Code extension's threads.
 // - `event_msg` `token_count`: the context window and the tokens in it, the
 //   thread's token totals, and the account's limits (`rate_limits`: a primary
 //   and a secondary window, each with `used_percent`, `window_minutes` and
@@ -229,6 +231,11 @@ function applyEvent(state: RolloutState, kind: string | undefined, payload: Reco
         const secondary = windowOf(limits.secondary, at);
         if (primary || secondary) state.rateLimits = { at, primary, secondary };
       }
+      return;
+    }
+    case "agent_message": {
+      const text = str(payload.message)?.trim();
+      if (text && at !== undefined) state.lastReply = { text, at, final: payload.phase === "final_answer" };
       return;
     }
     case "item_completed": {

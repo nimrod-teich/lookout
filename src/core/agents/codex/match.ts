@@ -48,7 +48,7 @@ function samePath(a: string, b: string): boolean {
 }
 
 /** A rollout the terminal program wrote, as opposed to an editor extension or a script. */
-function fromTerminal(rollout: RolloutInfo): boolean {
+export function fromTerminal(rollout: { originator?: string }): boolean {
   return rollout.originator === undefined || /tui|cli/i.test(rollout.originator);
 }
 

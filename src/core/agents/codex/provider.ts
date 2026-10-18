@@ -12,9 +12,9 @@ import type { UsageSnapshot } from "../../usage";
 import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, PastSession, ResumeCommand, SearchOutcome, SessionSpend } from "../agent";
 import { factsOf } from "./history";
 import { PastRollouts, type PastRollout } from "./past";
-import { matchRollouts, type LiveProcess, type RolloutInfo } from "./match";
-import { CODEX, sessionIndexFile, sessionsDir, ThreadNames } from "./paths";
-import { invocationOf } from "./process";
+import { fromTerminal, matchRollouts, type LiveProcess, type RolloutInfo } from "./match";
+import { CODEX, lockedThread, sessionIndexFile, sessionsDir, ThreadNames } from "./paths";
+import { invocationOf, serverOf, type CodexServer } from "./process";
 import { activityOf, applyRolloutLine, approvalCall, emptyRollout, turnRunning, waitReason, type RolloutState } from "./rollout";
 import { RolloutCatalog } from "./rollouts";
 import { metersOf } from "./usage";
@@ -31,6 +31,15 @@ const USAGE_DAYS = 7;
 const PRICE_BASIS = "Lookout's sum of each reply's tokens at OpenAI's API list prices; a ChatGPT plan is not billed per token";
 /** Codex names a thread after its first exchange; until then the first prompt, cut to this length, stands in. */
 const TITLE_MAX = 60;
+/** Where the held files cannot be read (Windows): an editor's thread written in this long counts as loaded in its app-server. */
+const BLIND_PANEL_MS = 10 * 60_000;
+
+/** A thread an app-server or an `exec` run holds, as its lock says. */
+interface Held {
+  process: NamedProcess;
+  server: CodexServer;
+  rollout: RolloutInfo;
+}
 
 interface Tracked {
   tail: JsonlTail;
@@ -47,8 +56,10 @@ interface Tracked {
 
 /**
  * Codex: the live sessions are the `codex` processes running interactively,
- * each tied to the rollout it writes (see `match.ts`); the state is read from
- * the rollout's last records, since Codex keeps no state file.
+ * each tied to the rollout it writes (see `match.ts`), and the threads an
+ * app-server (the VS Code extension's, one per window) or a `codex exec` run
+ * holds, as their thread locks say. The state is read from the rollout's last
+ * records, since Codex keeps no state file.
  */
 export class CodexProvider implements AgentProvider {
   readonly id = CODEX;
@@ -76,18 +87,18 @@ export class CodexProvider implements AgentProvider {
   }
 
   poll(now: number): AgentSession[] {
-    const processes = this.finder
-      .find()
-      .map((process) => ({ process, call: invocationOf(process.args) }))
-      .filter(({ call }) => call.session);
-    if (processes.length === 0) {
+    const found = this.finder.find();
+    const processes = found.map((process) => ({ process, call: invocationOf(process.args) })).filter(({ call }) => call.session);
+    const held = this.heldThreads(found, now);
+    if (processes.length === 0 && held.size === 0) {
       this.tracked.clear();
       this.liveFiles.clear();
       return [];
     }
     const live: LiveProcess[] = processes.map(({ process, call }) => ({ pid: process.pid, cwd: call.cd ?? process.cwd, startedMs: process.startedMs, resumeId: call.resumeId }));
-    const since = Math.min(...live.map((p) => p.startedMs ?? now - 86_400_000));
-    const rollouts = this.catalog.recent(since - 2_000, now);
+    const since = Math.min(now, ...live.map((p) => p.startedMs ?? now - 86_400_000));
+    // A thread a process holds is that process's: the terminal sessions are matched among the others.
+    const rollouts = this.catalog.recent(since - 2_000, now).filter((rollout) => !held.has(rollout.id));
     for (const p of live) {
       if (!p.resumeId || rollouts.some((r) => r.id === p.resumeId)) continue;
       const found = this.catalog.find(p.resumeId, now);
@@ -104,10 +115,16 @@ export class CodexProvider implements AgentProvider {
     const sessions = processes.map(({ process }) => {
       const rollout = matched.get(process.pid);
       if (!rollout) return this.empty(process);
-      const session = this.session(process, rollout, now);
+      const session = this.session(process, rollout, now, false);
       files.set(session.id, rollout.file);
       return session;
     });
+    for (const { process, server, rollout } of held.values()) {
+      // An app-server's threads are its editor's: placed in the panel of the window whose extension host runs it.
+      const session = this.session(process, rollout, now, server === "app-server");
+      files.set(session.id, rollout.file);
+      sessions.push(session);
+    }
     const used = new Set(files.values());
     for (const file of this.tracked.keys()) if (!used.has(file)) this.tracked.delete(file);
     this.liveFiles = files;
@@ -115,15 +132,51 @@ export class CodexProvider implements AgentProvider {
   }
 
   /**
+   * The threads the app-servers and the `exec` runs hold, by id: Codex holds a
+   * thread's `thread-writer-locks/<id>.lock` while it has the thread loaded.
+   * The daemon that serves the terminal sessions is left out: it keeps a
+   * thread loaded after its terminal has ended, so those are matched to their
+   * terminal instead. Where the held files cannot be read (Windows), an
+   * app-server's threads are the editor's threads written in the last 10 minutes.
+   */
+  private heldThreads(found: readonly NamedProcess[], now: number): Map<string, Held> {
+    const held = new Map<string, Held>();
+    const blind: NamedProcess[] = [];
+    for (const process of found) {
+      const server = serverOf(process.args);
+      if (server !== "app-server" && server !== "exec") continue;
+      const files = this.finder.heldFiles?.(process.pid);
+      if (files === undefined) {
+        if (server === "app-server") blind.push(process);
+        continue;
+      }
+      for (const file of files) {
+        const id = lockedThread(file);
+        const rollout = id === undefined ? undefined : this.catalog.find(id, now);
+        if (id !== undefined && rollout) held.set(id, { process, server, rollout });
+      }
+    }
+    const newest = blind.sort((a, b) => (b.startedMs ?? 0) - (a.startedMs ?? 0))[0];
+    if (newest) {
+      for (const rollout of this.catalog.recent(now - BLIND_PANEL_MS, now)) {
+        if (held.has(rollout.id) || fromTerminal(rollout) || now - rollout.mtimeMs > BLIND_PANEL_MS || !/vscode/i.test(rollout.originator ?? "")) continue;
+        held.set(rollout.id, { process: newest, server: "app-server", rollout });
+      }
+    }
+    return held;
+  }
+
+  /**
    * The threads that are not running, newest first: those of the window's
    * folders, or every one. A thread of the window's folders resumes in a
-   * terminal there. Compressed rollouts are not read, and the list says how many.
+   * terminal there, or, when the VS Code extension wrote it, in the
+   * extension's panel. Compressed rollouts are not read, and the list says how many.
    */
   past(scope: PastScope, exclude: ReadonlySet<string>): PastList {
     const { rollouts, capped, incomplete, also, compressed } = this.pastRollouts.list(scope, exclude);
     this.pastListed = new Map([...rollouts, ...also].map((r) => [r.id, r]));
     for (const id of [...this.pastIndexes.keys()]) if (!this.pastListed.has(id)) this.pastIndexes.delete(id);
-    const session = (r: PastRollout): PastSession => ({ agent: this.id, id: r.id, cwd: r.cwd, title: r.title, resumable: r.inFolders, modifiedAt: r.modifiedAt });
+    const session = (r: PastRollout): PastSession => ({ agent: this.id, id: r.id, cwd: r.cwd, title: r.title, resumable: r.inFolders, modifiedAt: r.modifiedAt, ...(editorThread(r.originator) ? { resumesIn: "panel" as const } : {}) });
     const notes = compressed > 0 ? [`${compressed} older Codex ${compressed === 1 ? "session is" : "sessions are"} compressed (.jsonl.zst) and not listed or searched.`] : undefined;
     return { sessions: rollouts.map(session), capped, incomplete, also: also.map(session), notes };
   }
@@ -151,10 +204,10 @@ export class CodexProvider implements AgentProvider {
     return index.messages;
   }
 
-  /** `codex resume <id>`, in the folder the thread worked in. */
+  /** `codex resume <id>`, in the folder the thread worked in; none for the VS Code extension's threads, which resume in its panel. */
   resumeCommand(id: string): ResumeCommand | undefined {
     const past = this.pastListed.get(id);
-    if (!past || !past.cwd) return undefined;
+    if (!past || !past.cwd || editorThread(past.originator)) return undefined;
     return { args: ["codex", "resume", id], cwd: past.cwd };
   }
 
@@ -191,7 +244,7 @@ export class CodexProvider implements AgentProvider {
     };
   }
 
-  private session(process: NamedProcess, rollout: RolloutInfo, now: number): AgentSession {
+  private session(process: NamedProcess, rollout: RolloutInfo, now: number, panel: boolean): AgentSession {
     const tracked = this.read(rollout.file);
     const state = tracked.state;
     const running = turnRunning(state);
@@ -229,7 +282,7 @@ export class CodexProvider implements AgentProvider {
       since: since ?? process.startedMs,
       title: this.names.get(id) ?? (state.firstPrompt ? quoteAsk(state.firstPrompt, TITLE_MAX) : undefined),
       cwd,
-      panel: false,
+      panel,
       activity: status === "working" ? activityOf(state) : undefined,
       branch: cwd ? branchAt(cwd) : undefined,
       model: state.model,
@@ -337,4 +390,9 @@ export class CodexProvider implements AgentProvider {
       return undefined;
     }
   }
+}
+
+/** A thread the VS Code extension wrote (`codex_vscode`): it opens in the extension's panel, not in a terminal. */
+function editorThread(originator: string | undefined): boolean {
+  return originator !== undefined && /vscode/i.test(originator);
 }

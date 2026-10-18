@@ -29,6 +29,15 @@ export function rolloutId(file: string): string | undefined {
 }
 
 /**
+ * The thread a file locks, when it is one of Codex's thread locks,
+ * `<home>/thread-writer-locks/<id>.lock`: a process that loads a thread holds
+ * its lock open until it lets the thread go.
+ */
+export function lockedThread(file: string): string | undefined {
+  return /[\\/]thread-writer-locks[\\/]([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.lock$/i.exec(file)?.[1]?.toLowerCase();
+}
+
+/**
  * Codex's thread names, read again when the index changes. It names a thread
  * after its first exchange ("Answer 2+2"); until then a session goes by its
  * first prompt.
