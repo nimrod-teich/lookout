@@ -9,12 +9,19 @@
     "type": "git",
     "url": "https://github.com/nimrod-teich/lookout.git"
   },
+  "bugs": {
+    "url": "https://github.com/nimrod-teich/lookout/issues"
+  },
+  "homepage": "https://github.com/nimrod-teich/lookout#readme",
   "engines": {
     "vscode": "^1.94.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Visualization"
   ],
+  "qna": "marketplace",
+  "pricing": "Free",
   "keywords": [
     "ai",
     "coding agent",

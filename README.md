@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.0-FFB000?style=flat-square&labelColor=0A2436" alt="Version 0.1.0">
+  <img src="https://img.shields.io/github/package-json/v/nimrod-teich/lookout?style=flat-square&labelColor=0A2436&color=FFB000&label=version" alt="Version">
   <img src="https://img.shields.io/badge/VS%20Code-1.94%2B-17607F?style=flat-square&labelColor=0A2436" alt="VS Code 1.94 or newer">
   <img src="https://img.shields.io/badge/works%20with-Claude%20Code%20%7C%20Codex%20%7C%20Copilot-17607F?style=flat-square&labelColor=0A2436" alt="Works with Claude Code, Codex and Copilot">
   <img src="https://img.shields.io/badge/runs%20on-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL%20%7C%20remotes-17607F?style=flat-square&labelColor=0A2436" alt="Runs on Linux, macOS, Windows, WSL and remote hosts">
@@ -48,11 +48,14 @@ Each agent has its own colour and boat once more than one is on the board. Where
 
 ## Install
 
-Download `lookout-<version>.vsix` from the [Releases page](https://github.com/nimrod-teich/lookout/releases) and install it:
+Install from the Visual Studio Marketplace, or from Open VSX, the registry that Cursor, Kiro, Antigravity, VSCodium and other VS Code forks read:
 
-```bash
-code --install-extension lookout-<version>.vsix
-```
+| Where | How |
+| --- | --- |
+| VS Code | The [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=nimrod-teich.lookout), or `ext install nimrod-teich.lookout` in the Quick Open box (`Ctrl+P`) |
+| Cursor | `cursor --install-extension nimrod-teich.lookout`, or search the Extensions view for Lookout |
+| Kiro, Antigravity, VSCodium and other forks | The [Open VSX listing](https://open-vsx.org/extension/nimrod-teich/lookout), or search the Extensions view for Lookout |
+| Any of them, by hand | Download `lookout-<version>.vsix` from the [Releases page](https://github.com/nimrod-teich/lookout/releases), then `code --install-extension lookout-<version>.vsix` |
 
 Or build it from source:
 
