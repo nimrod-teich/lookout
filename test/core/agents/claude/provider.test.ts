@@ -1,5 +1,7 @@
+import * as fs from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { ClaudeProvider } from "../../../../src/core/agents/claude/provider";
+import { parseQuery } from "../../../../src/core/terms";
 import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseOf, summarizeTool, titleOf, type TranscriptState } from "../../../../src/core/agents/claude/transcript";
 import { appendEntries, FakeProc, sessionId, tempConfigDir, transcriptPath, writeSession } from "../../helpers";
 
@@ -258,7 +260,7 @@ describe("ClaudeProvider", () => {
     ]);
     appendEntries(transcriptPath(configDir, "/work/app", second), [{ type: "user", message: { content: "Rename the changelog" } }]);
     provider.poll(0);
-    const { results } = provider.search("Billing webhook", 5, 1000);
+    const { results } = provider.search(parseQuery("Billing webhook"), 5, 1000);
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ id: first, count: 2 });
     expect(results[0]?.hits.map((hit) => [hit.role, hit.snippet])).toEqual([
@@ -270,16 +272,16 @@ describe("ClaudeProvider", () => {
       [12, 19],
     ]);
     expect(results[0]?.hits.map((hit) => hit.index)).toEqual([1, 0]);
-    expect(provider.search("   ", 5, 1000)).toEqual({ results: [], pending: 0 });
+    expect(provider.search(parseQuery("   "), 5, 1000)).toEqual({ results: [], pending: 0 });
     expect(provider.history(first)?.map((m) => m.role)).toEqual(["you", "agent"]);
     expect(provider.history(sessionId(9))).toBeUndefined();
 
     appendEntries(transcriptPath(configDir, "/work/app", second), [{ type: "assistant", message: { content: [{ type: "text", text: "Billing is not my job here" }] } }]);
-    expect(provider.search("billing", 1, 1000).results.map((r) => r.id).sort()).toEqual([first, second]);
+    expect(provider.search(parseQuery("billing"), 1, 1000).results.map((r) => r.id).sort()).toEqual([first, second]);
 
     proc.procs.delete(11);
     provider.poll(0);
-    expect(provider.search("billing", 1, 1000).results.map((r) => r.id)).toEqual([second]);
+    expect(provider.search(parseQuery("billing"), 1, 1000).results.map((r) => r.id)).toEqual([second]);
   });
 
   it("lists the past sessions of the given folders, searches them within a budget, and hands out their conversations", () => {
@@ -296,18 +298,72 @@ describe("ClaudeProvider", () => {
     ]);
     appendEntries(transcriptPath(configDir, "/work/app", archived), [{ type: "user", message: { content: "billing, archived" } }]);
     provider.poll(0);
-    const past = provider.past(["/work/app"], new Set([live, archived]));
-    expect(past.map((p) => [p.id, p.title, p.cwd, p.agent])).toEqual([[old, "Old billing work", "/work/app", "claude-code"]]);
+    const past = provider.past({ folders: ["/work/app"], all: false, limit: 500 }, new Set([live, archived]));
+    expect(past.capped).toBe(false);
+    expect(past.sessions.map((p) => [p.id, p.title, p.cwd, p.agent])).toEqual([[old, "Old billing work", "/work/app", "claude-code"]]);
     // No time to read: both conversations, the live and the past, are reported pending and come back on the next search.
-    expect(provider.search("billing", 3, 0)).toEqual({ results: [], pending: 2 });
-    const { results, pending } = provider.search("billing", 3, 1000);
+    expect(provider.search(parseQuery("billing"), 3, 0)).toEqual({ results: [], pending: 2 });
+    const { results, pending } = provider.search(parseQuery("billing"), 3, 1000);
     expect(pending).toBe(0);
     expect(results.map((r) => [r.id, r.count])).toEqual([[old, 2]]);
     expect(provider.history(old)?.map((m) => m.role)).toEqual(["you", "agent"]);
     expect(provider.history(archived)).toBeUndefined();
     // Gone from the list, gone from memory.
-    expect(provider.past(["/work/app"], new Set([live, archived, old]))).toEqual([]);
+    expect(provider.past({ folders: ["/work/app"], all: false, limit: 500 }, new Set([live, archived, old]))).toEqual({ sessions: [], capped: false, incomplete: false });
     expect(provider.history(old)).toBeUndefined();
+  });
+
+  it("narrows a search by time, project, branch and the files the tool calls worked on", () => {
+    const { configDir, proc, provider } = setup();
+    const day = 86_400_000;
+    const now = Date.parse("2026-10-16T12:00:00Z");
+    const at = (ms: number) => new Date(ms).toISOString();
+    const live = sessionId(1);
+    writeSession(configDir, proc, { pid: 11, sessionId: live, cwd: "/work/api" });
+    appendEntries(transcriptPath(configDir, "/work/api", live), [
+      { type: "user", cwd: "/work/api", gitBranch: "fix-login", timestamp: at(now - 2 * day), message: { content: "deploy the login fix" } },
+      { type: "assistant", cwd: "/work/api", gitBranch: "fix-login", timestamp: at(now - 2 * day), message: { content: [{ type: "tool_use", id: "t1", name: "Edit", input: { file_path: "/work/api/src/Login.ts" } }] } },
+      { type: "user", cwd: "/work/api", timestamp: at(now - 2 * day), message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "edited src/billing.ts too" }] } },
+      { type: "assistant", cwd: "/work/api", gitBranch: "fix-login", timestamp: at(now - day / 2), message: { content: [{ type: "text", text: "deploy is green" }] } },
+    ]);
+    const old = sessionId(2);
+    appendEntries(transcriptPath(configDir, "/work/web", old), [
+      { type: "ai-title", aiTitle: "Web deploy" },
+      { type: "user", cwd: "/work/web", gitBranch: "main", timestamp: at(now - 10 * day), message: { content: "deploy the web app" } },
+      { type: "assistant", cwd: "/work/web", gitBranch: "main", timestamp: at(now - 10 * day), message: { content: [{ type: "tool_use", id: "t2", name: "Grep", input: { pattern: "deployTarget", path: "/work/web/infra" } }] } },
+    ]);
+    provider.poll(now);
+    provider.past({ folders: [], all: true, limit: 500 }, new Set([live]));
+    const ids = (query: string) => provider.search(parseQuery(query, now), 3, 1_000).results.map((r) => [r.id, r.count]);
+    expect(ids("deploy")).toEqual([[live, 2], [old, 1]]);
+    expect(ids("deploy since:3d")).toEqual([[live, 2]]);
+    expect(ids("deploy since:yesterday")).toEqual([[live, 1]]);
+    expect(ids("deploy before:3d")).toEqual([[old, 1]]);
+    expect(ids("deploy project:web")).toEqual([[old, 1]]);
+    expect(ids("deploy branch:fix")).toEqual([[live, 2]]);
+    expect(ids("deploy file:src/login")).toEqual([[live, 2]]);
+    expect(ids("deploy file:deploytarget")).toEqual([[old, 1]]);
+    // A tool's output is not searched for paths.
+    expect(ids("deploy file:billing")).toEqual([]);
+    // Operators alone list the sessions they pick, without matches.
+    expect(ids("project:api")).toEqual([[live, 0]]);
+    expect(ids("branch:main since:1w")).toEqual([]);
+    expect(ids("branch:main since:2w")).toEqual([[old, 0]]);
+  });
+
+  it("does not read an earlier transcript last written before a search's since:", () => {
+    const { configDir, provider } = setup();
+    const now = Date.parse("2026-10-16T12:00:00Z");
+    const stale = sessionId(1);
+    const file = transcriptPath(configDir, "/work/app", stale);
+    appendEntries(file, [{ type: "user", cwd: "/work/app", timestamp: "2026-09-01T10:00:00Z", message: { content: "deploy the old thing" } }]);
+    const month = new Date(now - 30 * 86_400_000);
+    fs.utimesSync(file, month, month);
+    provider.past({ folders: ["/work/app"], all: false, limit: 500 }, new Set());
+    // With no time to read anything, nothing is left pending either: the file's age rules it out.
+    expect(provider.search(parseQuery("deploy since:1w", now), 3, 0)).toEqual({ results: [], pending: 0 });
+    expect(provider.search(parseQuery("deploy", now), 3, 0)).toEqual({ results: [], pending: 1 });
+    expect(provider.search(parseQuery("deploy since:2026-08-01", now), 3, 1_000).results.map((r) => r.id)).toEqual([stale]);
   });
 
   it("drops a session when its process exits", () => {

@@ -112,13 +112,22 @@ export function activate(context: vscode.ExtensionContext): void {
     if (view.host === "window") return jumpToOtherWindow(view);
     if (revealed(await jumpToSession(view, terminals, log))) controller.markSeen(view.id);
   };
-  /** Opens a session that is not running: the agent resumes it in its panel. */
+  /** Opens a session that is not running: the agent resumes it in its panel, when it belongs to this window's folders. */
   const resume = async (id: string) => {
-    const view = controller.past.find((p) => p.id === id);
-    if (!view || !(await panelAdapter(view.agent)?.resume(id, log))) void vscode.window.showWarningMessage(`Lookout could not resume "${view?.title ?? id}".`);
+    const view = controller.pastView(id);
+    if (!view) {
+      void vscode.window.showWarningMessage("Lookout could not resume that session: it is no longer listed under Earlier.");
+      return;
+    }
+    if (!view.resumable) {
+      void vscode.window.showInformationMessage(`"${view.title}" is from ${view.cwd || "another project"}, not one of this window's folders: the agent resumes it from a window open on that folder.`);
+      return;
+    }
+    if (!(await panelAdapter(view.agent)?.resume(id, log))) void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}".`);
   };
   const findings = new Findings(context.extensionUri, {
     titleOf: (id) => controller.titleOf(id) ?? id,
+    whereOf: (id) => controller.whereOf(id),
     history: (id) => controller.history(id),
     open: async (id) => {
       const live = controller.sessions.find((view) => view.id === id);
@@ -129,6 +138,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const board = new Board(context.extensionUri, {
     sessions: () => controller.sessions,
     past: () => controller.past,
+    earlier: () => controller.earlier,
+    setEarlierScope: (scope) => controller.setEarlierScope(scope),
     resume: (id) => void resume(id),
     usage: () => {
       const usage = controller.usage;
@@ -143,7 +154,7 @@ export function activate(context: vscode.ExtensionContext): void {
     dismiss: (id) => controller.dismiss(id),
     // The command, so the board's link says what the command says when it cannot fetch.
     refreshUsage: () => void vscode.commands.executeCommand(REFRESH_USAGE),
-    search: (query) => controller.search(query),
+    search: (query, zone) => controller.search(query, zone),
     openHit: (query, id, index) => {
       if (!findings.show(id, query, index)) void vscode.window.showInformationMessage(`Lookout has not found the transcript of "${controller.sessions.find((v) => v.id === id)?.title ?? id}" yet.`);
     },

@@ -15,6 +15,7 @@ function setup() {
   };
   const actions = {
     titleOf: (id: string) => (id === ID ? "Webhooks" : id),
+    whereOf: (id: string) => (id === ID ? "api · ⎇ fix-login" : undefined),
     history: vi.fn((id: string) => history[id]),
     open: vi.fn(() => Promise.resolve()),
   };
@@ -36,7 +37,7 @@ describe("Findings", () => {
     expect(panel.webview.html).toContain("default-src 'none'");
     expect(panel.posted.at(-1)).toEqual({
       type: "conversation",
-      session: { id: ID, title: "Webhooks" },
+      session: { id: ID, title: "Webhooks", where: "api · ⎇ fix-login" },
       messages: [
         { index: 0, role: "you", at: 1, text: "Fix the billing webhook" },
         { index: 1, role: "agent", at: 2, text: "Looking" },

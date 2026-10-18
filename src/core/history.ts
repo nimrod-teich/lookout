@@ -1,7 +1,13 @@
 import * as fs from "node:fs";
-import { matchesAll, matchRanges, termsOf } from "./terms";
+import { inRange, matchesAll, matchRanges, termsOf, type TimeRange } from "./terms";
 
-export { termsOf };
+export { termsOf, type TimeRange };
+
+/** What one line of a conversation file holds for the search: a message, the paths a tool call worked on, or both. */
+export interface LineFacts {
+  message?: HistoryMessage;
+  paths?: string[];
+}
 
 const NEWLINE = 0x0a;
 
@@ -90,13 +96,15 @@ function readLines(file: string, from: number, onLine: (line: string) => void): 
  */
 export class HistoryIndex {
   readonly messages: HistoryMessage[] = [];
+  /** The paths the conversation's tool calls worked on, lowercased, with forward slashes. */
+  readonly paths = new Set<string>();
   private offset = 0;
   private identity = "";
 
   constructor(
     private readonly file: string,
-    /** Turns one line into a message, or nothing for lines that hold none. */
-    private readonly parse: (line: string) => HistoryMessage | undefined,
+    /** What one line holds, or nothing. */
+    private readonly read: (line: string) => LineFacts | undefined,
   ) {}
 
   /** The file was read at least once; before that a refresh reads it whole. */
@@ -115,31 +123,44 @@ export class HistoryIndex {
     const identity = `${st.ino}:${st.birthtimeMs}`;
     if (identity !== this.identity || st.size < this.offset) {
       this.messages.length = 0;
+      this.paths.clear();
       this.offset = 0;
       this.identity = identity;
     }
     if (st.size === this.offset) return;
     try {
       this.offset = readLines(this.file, this.offset, (line) => {
-        const message = this.parse(line);
-        if (message) this.messages.push(message);
+        const facts = this.read(line);
+        if (facts?.message) this.messages.push(facts.message);
+        for (const p of facts?.paths ?? []) this.paths.add(p.toLowerCase().replace(/\\/g, "/"));
       });
     } catch {
       // Read again next time.
     }
   }
 
-  /** The messages containing every term, newest first; `limit` of them cut into snippets. */
-  search(terms: string[], limit: number): { count: number; hits: SearchHit[] } {
+  /** The messages containing every term, written within `range`, newest first; `limit` of them cut into snippets. */
+  search(terms: string[], limit: number, range?: TimeRange): { count: number; hits: SearchHit[] } {
     if (terms.length === 0) return { count: 0, hits: [] };
     let count = 0;
     const hits: SearchHit[] = [];
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const message = this.messages[i]!;
-      if (!matchesAll(message.text, terms)) continue;
+      if (!inRange(message.at, range) || !matchesAll(message.text, terms)) continue;
       count++;
       if (hits.length < limit) hits.push({ index: i, role: message.role, at: message.at, ...snippetOf(message.text, terms) });
     }
     return { count, hits };
+  }
+
+  /** A message was written within the range. */
+  hasMessageIn(range: TimeRange): boolean {
+    return this.messages.some((message) => inRange(message.at, range));
+  }
+
+  /** A tool call worked on a path that contains any of the parts (lowercased, forward slashes). */
+  touched(parts: readonly string[]): boolean {
+    for (const p of this.paths) if (parts.some((part) => p.includes(part))) return true;
+    return false;
   }
 }

@@ -1,14 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { HistoryIndex, snippetOf, termsOf, type HistoryMessage } from "../../src/core/history";
+import { HistoryIndex, snippetOf, type HistoryMessage, type LineFacts } from "../../src/core/history";
 import { tempConfigDir } from "./helpers";
 
-/** The test file format: one `{ role, text }` per line. */
-function parse(line: string): HistoryMessage | undefined {
+/** The test file format: one `{ role, text, at?, paths? }` per line. */
+function parse(line: string): LineFacts | undefined {
   try {
-    const e = JSON.parse(line) as Partial<HistoryMessage>;
-    return typeof e.text === "string" && (e.role === "you" || e.role === "agent") ? { role: e.role, at: e.at, text: e.text } : undefined;
+    const e = JSON.parse(line) as Partial<HistoryMessage> & { paths?: string[] };
+    const message = typeof e.text === "string" && (e.role === "you" || e.role === "agent") ? { role: e.role, at: e.at, text: e.text } : undefined;
+    return message || e.paths ? { message, paths: e.paths } : undefined;
   } catch {
     return undefined;
   }
@@ -20,12 +21,6 @@ function file(messages: unknown[]): string {
   return f;
 }
 
-describe("termsOf", () => {
-  it("lowercases the words and drops the blanks", () => {
-    expect(termsOf("  Billing  Webhook ")).toEqual(["billing", "webhook"]);
-    expect(termsOf("   ")).toEqual([]);
-  });
-});
 
 describe("snippetOf", () => {
   it("cuts around the first match, collapses whitespace, and marks every term without overlap", () => {
@@ -75,6 +70,44 @@ describe("HistoryIndex", () => {
     fs.writeFileSync(f, `${JSON.stringify({ role: "you", text: "fresh" })}\n`);
     index.refresh();
     expect(index.messages.map((m) => m.text)).toEqual(["fresh"]);
+  });
+
+  it("finds matches written within a time, and keeps the paths the tool calls worked on", () => {
+    const index = new HistoryIndex(
+      file([
+        { role: "you", at: 1_000, text: "deploy the api" },
+        { paths: ["/work/app/src/Deploy.ts", "C:\\Work\\App\\infra.tf"] },
+        { role: "agent", at: 5_000, text: "deploy done" },
+        { role: "agent", text: "deploy, no time" },
+      ]),
+      parse,
+    );
+    index.refresh();
+    expect(index.search(["deploy"], 5).count).toBe(3);
+    expect(index.search(["deploy"], 5, { since: 2_000 }).hits.map((h) => h.at)).toEqual([5_000]);
+    expect(index.search(["deploy"], 5, { before: 5_000 }).hits.map((h) => h.at)).toEqual([1_000]);
+    expect(index.hasMessageIn({ since: 6_000 })).toBe(false);
+    expect(index.hasMessageIn({ since: 4_000, before: 6_000 })).toBe(true);
+    expect([...index.paths]).toEqual(["/work/app/src/deploy.ts", "c:/work/app/infra.tf"]);
+    expect(index.touched(["src/deploy"])).toBe(true);
+    expect(index.touched(["app/infra"])).toBe(true);
+    expect(index.touched(["readme"])).toBe(false);
+  });
+
+  it("forgets the paths of a file that was cut short or replaced", () => {
+    const f = file([{ paths: ["/work/app/old.ts"] }, { paths: ["/work/app/older.ts"] }]);
+    const index = new HistoryIndex(f, parse);
+    index.refresh();
+    expect(index.touched(["old.ts"])).toBe(true);
+    fs.writeFileSync(f, `${JSON.stringify({ paths: ["/work/app/new.ts"] })}\n`);
+    index.refresh();
+    expect([...index.paths]).toEqual(["/work/app/new.ts"]);
+    // Another file moved into its place, the same size.
+    const other = `${f}.next`;
+    fs.writeFileSync(other, `${JSON.stringify({ paths: ["/work/app/out.ts"] })}\n`);
+    fs.renameSync(other, f);
+    index.refresh();
+    expect([...index.paths]).toEqual(["/work/app/out.ts"]);
   });
 
   it("handles a file that is missing or larger than one read chunk", () => {

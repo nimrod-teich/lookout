@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpMailbox } from "../../src/core/jumpMailbox";
 import { scopeOf } from "../../src/core/usageAlerts";
 import { activate } from "../../src/extension";
-import { createWebviewView, stub } from "./stub-vscode";
+import { createWebviewView, stub, workspace } from "./stub-vscode";
 
 // The whole extension against a real process: a child of this test process
 // plays a Claude Code panel session, so the real process table places it in
@@ -420,6 +420,93 @@ describe("the extension", () => {
       shell.kill();
     }
   }, 60_000);
+
+  describe("earlier sessions", () => {
+    const HERE = "00000000-0000-4000-8000-0000000000b1";
+    const ELSEWHERE = "00000000-0000-4000-8000-0000000000b2";
+
+    function writePast(cwd: string, id: string, branch: string, text: string): void {
+      const dir = path.join(configDir, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${id}.jsonl`), JSON.stringify({ type: "user", cwd, gitBranch: branch, timestamp: new Date().toISOString(), message: { content: text } }) + "\n");
+    }
+
+    function openBoard() {
+      const board = stub.webviewProviders.get("lookout.board") as { resolveWebviewView(view: unknown): void };
+      const boardView = createWebviewView();
+      board.resolveWebviewView(boardView);
+      const listed = () => boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { past: { id: string; branch?: string; resumable?: boolean }[]; earlier?: { scope: string } } | undefined;
+      return { boardView, listed };
+    }
+
+    beforeEach(() => {
+      workspace.workspaceFolders = [{ uri: { fsPath: "/work/app" } }];
+      writePast("/work/app", HERE, "main", "tune the deploy script");
+      writePast("/work/other", ELSEWHERE, "fix-x", "deploy the other service");
+    });
+
+    afterEach(() => {
+      workspace.workspaceFolders = undefined;
+    });
+
+    it("lists this window's folders, then every project once asked, keeps the choice, and searches what it lists", async () => {
+      activate(context());
+      const { boardView, listed } = openBoard();
+      await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+      expect(listed()?.earlier).toEqual({ scope: "folders", limit: 500, capped: false });
+      boardView.receive({ type: "search", query: "deploy" });
+      expect(boardView.posted.at(-1)).toMatchObject({ type: "search", query: "deploy", results: [{ id: HERE, count: 1 }] });
+
+      boardView.receive({ type: "earlierScope", scope: "all" });
+      expect(saved["lookout.earlierScope"]).toBe("all");
+      await vi.waitFor(() => expect(listed()?.earlier?.scope).toBe("all"), WAIT);
+      expect(listed()?.past.map((p) => [p.id, p.branch, p.resumable]).sort()).toEqual([
+        [HERE, "main", true],
+        [ELSEWHERE, "fix-x", false],
+      ]);
+      boardView.receive({ type: "search", query: "deploy branch:fix" });
+      expect(boardView.posted.at(-1)).toMatchObject({ type: "search", results: [{ id: ELSEWHERE, count: 1 }] });
+
+      // The agent resumes only the sessions of this window's folders; another project's is not opened as an empty tab.
+      stub.commands.set(CLAUDE_OPEN, () => undefined);
+      const opened = (id: string) => stub.ops.some(([target, command, args]) => target === "commands" && command === CLAUDE_OPEN && (args as unknown[])[0] === id);
+      boardView.receive({ type: "resume", id: ELSEWHERE });
+      await vi.waitFor(() => expect(infoMessages()).toContain(`"deploy the other service" is from /work/other, not one of this window's folders: the agent resumes it from a window open on that folder.`), WAIT);
+      boardView.receive({ type: "resume", id: HERE });
+      await vi.waitFor(() => expect(opened(HERE)).toBe(true), WAIT);
+      expect(opened(ELSEWHERE)).toBe(false);
+
+      // Its conversation's Open session says the same, also once the scope no longer lists it.
+      const refusal = `"deploy the other service" is from /work/other, not one of this window's folders: the agent resumes it from a window open on that folder.`;
+      const refusals = () => infoMessages().filter((text) => text === refusal).length;
+      boardView.receive({ type: "openHit", query: "", id: ELSEWHERE });
+      const panel = stub.panels.at(-1)!;
+      panel.receive({ type: "jump", id: ELSEWHERE });
+      await vi.waitFor(() => expect(refusals()).toBe(2), WAIT);
+      boardView.receive({ type: "earlierScope", scope: "folders" });
+      await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+      panel.receive({ type: "jump", id: ELSEWHERE });
+      await vi.waitFor(() => expect(refusals()).toBe(3), WAIT);
+      expect(opened(ELSEWHERE)).toBe(false);
+    }, 60_000);
+
+    it("lists a long history in quick slices, not one slice per poll", async () => {
+      for (let i = 0; i < 130; i++) writePast("/work/app", `00000000-0000-4000-8000-${String(1000 + i).padStart(12, "0")}`, "main", `task ${i}`);
+      activate(context());
+      const { listed } = openBoard();
+      await vi.waitFor(() => expect(listed()?.past.length).toBeGreaterThanOrEqual(120), WAIT);
+      // The window's folder is watched, so the next poll would be five seconds away.
+      await vi.waitFor(() => expect(listed()?.past.length).toBe(131), { timeout: 3_000, interval: 50 });
+    }, 60_000);
+
+    it("starts with every project after a reload when that was the choice", async () => {
+      saved["lookout.earlierScope"] = "all";
+      activate(context());
+      const { listed } = openBoard();
+      await vi.waitFor(() => expect(listed()?.past.map((p) => p.id).sort()).toEqual([HERE, ELSEWHERE]), WAIT);
+      expect(listed()?.earlier?.scope).toBe("all");
+    }, 60_000);
+  });
 
   it("restores finished marks from the workspace state", async () => {
     saved["lookout.done"] = [SESSION];

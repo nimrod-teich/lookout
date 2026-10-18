@@ -17,9 +17,19 @@ export interface BoardUsage {
   note?: string;
 }
 
+/** Which earlier sessions are listed and searched: this window's folders, or every project. */
+export type EarlierScope = "folders" | "all";
+
+/** The earlier sessions' scope, the most listed, and whether older ones were left out. */
+export interface EarlierInfo {
+  scope: EarlierScope;
+  limit: number;
+  capped: boolean;
+}
+
 /** Extension → webview. */
 export type ToBoard =
-  | { type: "sessions"; sessions: SessionView[]; past: PastView[]; now: number; usage?: BoardUsage }
+  | { type: "sessions"; sessions: SessionView[]; past: PastView[]; now: number; usage?: BoardUsage; earlier?: EarlierInfo }
   /** `pending` sessions were not read yet; the board asks again. */
   | { type: "search"; query: string; results: SearchResult[]; pending: number };
 
@@ -33,8 +43,11 @@ export type FromBoard =
   | { type: "dismiss"; id: string }
   | { type: "seenAll" }
   | { type: "refreshUsage" }
-  | { type: "search"; query: string }
+  /** `zone`: the board's time zone, as `Date.getTimezoneOffset` gives it: in a remote window the extension's clock can be in another. */
+  | { type: "search"; query: string; zone?: number }
   /** Open the session's conversation in the findings tab, at one message or at the newest match. */
   | { type: "openHit"; query: string; id: string; index?: number }
   /** Resume a session that is not running, in the agent's panel. */
-  | { type: "resume"; id: string };
+  | { type: "resume"; id: string }
+  /** List and search the earlier sessions of this window's folders, or of every project. */
+  | { type: "earlierScope"; scope: EarlierScope };

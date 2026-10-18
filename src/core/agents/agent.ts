@@ -1,4 +1,5 @@
 import type { HistoryMessage, SearchResult } from "../history";
+import type { Query } from "../terms";
 import type { Evidence, PromptCache, Reason, TypedQuestion } from "../types";
 
 export type AgentStatus = "working" | "waiting" | "idle" | "unknown";
@@ -31,6 +32,8 @@ export interface AgentSession {
   agents?: number;
   /** First line of the assistant's latest message. */
   lastReply?: string;
+  /** The git branch it works on. */
+  branch?: string;
   model?: string;
   /** Tokens in the context window at the last model call. */
   contextTokens?: number;
@@ -70,8 +73,29 @@ export interface PastSession {
   id: string;
   cwd: string;
   title: string;
+  /** The git branch it last worked on. */
+  branch?: string;
+  /** The agent can resume it in this window: it belongs to one of the window's folders. */
+  resumable: boolean;
   /** Epoch ms the transcript was last written. */
   modifiedAt: number;
+}
+
+/** Which past sessions to list: those of this window's folders, or of every project; at most `limit`, the newest. */
+export interface PastScope {
+  /** This window's folders. */
+  folders: readonly string[];
+  /** Every project's sessions, not only the folders'. */
+  all: boolean;
+  limit: number;
+}
+
+/** Past sessions; `capped` when the scope holds older ones beyond the limit, left out. */
+export interface PastList {
+  sessions: PastSession[];
+  capped: boolean;
+  /** Some transcripts were left for the next list, to keep this one quick: list again soon. */
+  incomplete: boolean;
 }
 
 /** A search's outcome: the sessions with matches, and how many were not read within the time given. */
@@ -99,13 +123,15 @@ export interface AgentProvider {
   watch?(listener: () => void): { dispose(): void } | undefined;
   /**
    * Searches the conversations of the live and the past sessions: what the
-   * user wrote and what the agent replied. Returns only sessions with matches,
-   * each with its newest `limit` matches. A conversation not read yet is read
-   * only while `budgetMs` allows; the rest are counted as pending.
+   * user wrote and what the agent replied, narrowed by the query's operators.
+   * Returns only sessions with matches, each with its newest `limit` matches,
+   * or, for a query of operators alone, the sessions they pick. A
+   * conversation not read yet is read only while `budgetMs` allows; the rest
+   * are counted as pending.
    */
-  search?(query: string, limit: number, budgetMs: number): SearchOutcome;
-  /** The sessions of these working directories that are not running, newest first, without the ids in `exclude`. */
-  past?(cwds: readonly string[], exclude: ReadonlySet<string>): PastSession[];
+  search?(query: Query, limit: number, budgetMs: number): SearchOutcome;
+  /** The sessions of the scope that are not running, newest first, without the ids in `exclude`. */
+  past?(scope: PastScope, exclude: ReadonlySet<string>): PastList;
   /** The conversation of one live session, oldest first; undefined when the agent keeps no transcript for it. */
   history?(id: string): HistoryMessage[] | undefined;
 }

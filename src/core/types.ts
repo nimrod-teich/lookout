@@ -80,6 +80,8 @@ export interface SessionView {
   agents: number;
   /** First line of the assistant's latest message. */
   lastReply?: string;
+  /** The git branch it works on. */
+  branch?: string;
   model?: string;
   /** Tokens in the context window at the last model call. */
   contextTokens?: number;
@@ -118,7 +120,11 @@ export interface PastView {
   title: string;
   project: string;
   worktree?: string;
+  /** The git branch it last worked on. */
+  branch?: string;
   cwd: string;
+  /** The agent can resume it in this window; else it runs again from a window open on its folder. */
+  resumable: boolean;
   /** Epoch ms the transcript was last written. */
   modifiedAt: number;
 }

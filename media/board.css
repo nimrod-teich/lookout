@@ -1182,6 +1182,8 @@ body.vscode-reduce-motion .hover-card {
 /* Earlier: the sessions that are not running ------------------------------ */
 
 .group-past .heading {
+  flex-wrap: wrap;
+  row-gap: 4px;
   cursor: pointer;
   user-select: none;
 }
@@ -1205,6 +1207,51 @@ body.vscode-reduce-motion .hover-card {
 }
 
 .group-past .cards.hidden {
+  display: none;
+}
+
+/* Which earlier sessions: this window's folders, or every project. */
+.group-past .scopes {
+  margin-left: auto;
+  display: inline-flex;
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.group-past .scope {
+  padding: 0 6px;
+  white-space: nowrap;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  font-weight: 400;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.group-past .scope + .scope {
+  border-left: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.group-past .scope:hover {
+  color: var(--ink);
+}
+
+.group-past .scope[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--ink);
+}
+
+.group-past .note {
+  margin: 0 12px 6px;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  color: var(--muted);
+}
+
+.group-past .note.hidden {
   display: none;
 }
 
