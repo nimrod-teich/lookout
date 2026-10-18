@@ -8,8 +8,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CLAUDE_OPEN = "claude-vscode.editor.open";
 /** The Claude Code extension's rename: an input box for the active session tab, saved as the session's custom title. */
 const CLAUDE_RENAME = "claude-vscode.renameSessionTab";
+/** The Claude Code extension's "Focus last message": brings the newest message of the chat it last saw focused into view. */
+const CLAUDE_LAST_MESSAGE = "claude-vscode.focusLastMessage";
 /** How long to wait for the tab to come to the front before asking for the rename. */
 const ACTIVATE_WAIT_MS = 1500;
+/** Time for a tab that came to the front to tell the Claude Code extension it has the focus. */
+const FOCUS_SETTLE_MS = 150;
 const CLAUDE_PANEL_VIEW_TYPE = "claudeVSCodePanel";
 const FOCUS_GROUP = [
   "workbench.action.focusFirstEditorGroup",
@@ -85,8 +89,48 @@ function isActive(view: SessionView): boolean {
   return tab !== undefined && isClaudeTab(tab, claudeTabLabel(view.title));
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Bumped by every jump and rename: a later one cancels the scroll an earlier jump still waits to make. */
+let latestJump = 0;
+
+/** Drops the scroll a jump still waits to make. */
+export function cancelNewest(): void {
+  latestJump++;
+}
+
+/**
+ * Brings the session's newest message into view, or the prompt it waits on.
+ * Claude Code's command acts on the chat it last saw focused, so it runs only
+ * once the session's tab is in front and has had a moment to report its
+ * focus; a tab that does not come to the front is left as it is.
+ */
+async function showNewest(view: SessionView, log: Log): Promise<void> {
+  const jump = ++latestJump;
+  for (let waited = 0; !isActive(view); waited += 50) {
+    if (waited >= ACTIVATE_WAIT_MS || jump !== latestJump) return;
+    await sleep(50);
+  }
+  await sleep(FOCUS_SETTLE_MS);
+  if (jump !== latestJump || !isActive(view)) return;
+  try {
+    await vscode.commands.executeCommand(CLAUDE_LAST_MESSAGE);
+  } catch (err) {
+    log.errorOnce(`${CLAUDE_LAST_MESSAGE} failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** Brings the session's tab forward, at its newest message. */
+async function jump(view: SessionView, log: Log): Promise<PanelReveal> {
+  const result = await reveal(view, log);
+  if (result === "revealed" || result === "revealed-by-tab") void showNewest(view, log);
+  return result;
+}
+
 /** Reveals the session, waits for its tab to be in front, then opens Claude Code's rename box. */
 async function rename(view: SessionView, log: Log): Promise<boolean> {
+  // The rename box would lose its focus to the scroll.
+  cancelNewest();
   const revealed = await reveal(view, log);
   if (revealed === "refused-invalid" || revealed === "failed") return false;
   for (let waited = 0; !isActive(view) && waited < ACTIVATE_WAIT_MS; waited += 50) await new Promise((r) => setTimeout(r, 50));
@@ -111,4 +155,4 @@ async function resume(id: string, log: Log): Promise<boolean> {
   }
 }
 
-export const claudePanel: PanelAdapter = { reveal, isActive, rename, resume };
+export const claudePanel: PanelAdapter = { reveal: jump, isActive, rename, resume };

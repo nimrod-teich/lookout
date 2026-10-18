@@ -5,7 +5,7 @@ export type PanelReveal = "revealed" | "revealed-by-tab" | "refused-invalid" | "
 
 /** How Lookout reaches the sessions an agent hosts in its own editor panel. */
 export interface PanelAdapter {
-  /** Brings the session's tab to the front. Called only for sessions this window hosts. */
+  /** Brings the session's tab to the front, at its newest message. Called only for sessions this window hosts. */
   reveal(view: SessionView, log: Log): Promise<PanelReveal>;
   /** The session's tab is the one in front. */
   isActive(view: SessionView): boolean;
