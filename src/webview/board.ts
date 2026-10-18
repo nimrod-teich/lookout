@@ -306,8 +306,24 @@ function receiveSearch(message: { query: string; results: SearchResult[]; pendin
   }
 }
 
+/** The agent's chip in the legend is on: its sessions and usage show. Without markers there are no chips, and every agent shows. */
+function agentShown(agent: string | undefined): boolean {
+  return !markers || !hiddenAgents.has(agent ?? AGENTS[0]!.id);
+}
+
 function applyFilters(): void {
-  sessions = allSessions.filter((view) => !hidden.has(groupSessions([view])[0]!.key) && !(markers && hiddenAgents.has(view.agent)) && (query === "" || hits.has(view.id)));
+  sessions = allSessions.filter((view) => !hidden.has(groupSessions([view])[0]!.key) && agentShown(view.agent) && (query === "" || hits.has(view.id)));
+}
+
+/** The usage groups of the agents shown. */
+function shownUsage(): BoardUsage[] {
+  return usageGroups.filter((group) => agentShown(group.agent));
+}
+
+/** The earlier sessions of the agents shown, and of those the ones a search matched. */
+function shownPast(): { listed: PastView[]; shown: PastView[] } {
+  const listed = past.filter((view) => agentShown(view.agent));
+  return { listed, shown: query === "" ? listed : listed.filter((view) => hits.has(view.id)) };
 }
 
 function toggleAgent(agent: string): void {
@@ -318,9 +334,14 @@ function toggleAgent(agent: string): void {
   render();
 }
 
-/** The agents with sessions on the board, in catalog order, each with how many. */
-function liveAgents(): [string, number][] {
+/**
+ * The agents on the board, in catalog order, each with how many sessions it
+ * runs: those with running sessions, earlier ones or usage, so an agent hidden
+ * keeps its chip after its last session ends.
+ */
+function boardAgents(): [string, number][] {
   const counts = new Map<string, number>();
+  for (const item of [...past, ...usageGroups.filter((group) => group.meters.length > 0)]) counts.set(item.agent ?? AGENTS[0]!.id, 0);
   for (const view of allSessions) counts.set(view.agent, (counts.get(view.agent) ?? 0) + 1);
   return [...counts].sort((a, b) => order(a[0]) - order(b[0]));
 }
@@ -360,13 +381,13 @@ function renderBeam(): void {
     legend.append(item);
   }
   if (!markers) return;
-  // One chip per agent with sessions, next to the states: a click hides that agent's sessions.
-  for (const [agent, count] of liveAgents()) {
+  // One chip per agent on the board, next to the states: a click hides that agent's sessions and usage.
+  for (const [agent, count] of boardAgents()) {
     const info = agentInfo(agent);
     const off = hiddenAgents.has(agent);
     const item = el("button", `legend-item agent${off ? " off" : ""}`);
     item.type = "button";
-    item.title = off ? `Show ${info.label}'s sessions` : `Hide ${info.label}'s sessions`;
+    item.title = off ? `Show ${info.label}'s sessions and usage` : `Hide ${info.label}'s sessions and usage`;
     item.setAttribute("aria-pressed", String(!off));
     item.append(agentGlyph(agent, 10), el("b", "", String(count)), el("span", "", ` ${info.label}`));
     item.addEventListener("click", () => toggleAgent(agent));
@@ -374,9 +395,9 @@ function renderBeam(): void {
   }
 }
 
-/** The tide rises with the window the status bar shows: Claude's 5 hours while it is the one agent with usage. */
+/** The tide rises with the window the status bar shows, among the agents shown: Claude's 5 hours while it is the one agent with usage. */
 function tidePercent(): number | undefined {
-  const groups = usageGroups.map((group) => ({ ...group, agent: group.agent ?? AGENTS[0]!.id }));
+  const groups = shownUsage().map((group) => ({ ...group, agent: group.agent ?? AGENTS[0]!.id }));
   const pinned = groups.find((group) => group.agent === usageBar);
   if (pinned) return barMeter(pinned.meters)?.percent;
   return pickBar(groups)?.meter.percent;
@@ -408,11 +429,12 @@ function meterLevel(percent: number): "low" | "mid" | "high" {
  * heading, as before agents had groups.
  */
 function renderMeters(): void {
-  meters.classList.toggle("hidden", usageGroups.length === 0);
+  const groups = shownUsage();
+  meters.classList.toggle("hidden", groups.length === 0);
   const headed = markers || usageGroups.length > 1;
   const seenGroups = new Set<string>();
   let previousGroup: HTMLElement | undefined;
-  for (const usage of usageGroups) {
+  for (const usage of groups) {
     const agent = usage.agent ?? AGENTS[0]!.id;
     seenGroups.add(agent);
     let group = meterGroups.get(agent);
@@ -791,7 +813,7 @@ function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, v
 function renderFavourites(after: HTMLElement): HTMLElement {
   const shown = favourites.ids
     .map((id) => ({ id, ...favouriteOf(id) }))
-    .filter((f) => (f.live || f.past) && (query === "" || hits.has(f.id)));
+    .filter((f) => (f.live || f.past) && agentShown((f.live ?? f.past)?.agent) && (query === "" || hits.has(f.id)));
   if (shown.length === 0) {
     favouritesEl?.remove();
     favouritesEl = undefined;
@@ -839,7 +861,7 @@ const SCOPES: { scope: EarlierScope; label: string; title: string }[] = [
  * holds none, so the scope can be switched.
  */
 function renderEarlier(after: HTMLElement): void {
-  const shown = query === "" ? past : past.filter((view) => hits.has(view.id));
+  const { listed, shown } = shownPast();
   const open = (earlierOpen || query !== "") && shown.length > 0;
   if (!earlierEl) {
     earlierEl = el("section", "group group-past");
@@ -874,7 +896,7 @@ function renderEarlier(after: HTMLElement): void {
   }
   earlierEl.classList.toggle("open", open);
   for (const button of earlierEl.querySelectorAll<HTMLElement>(".scope")) button.setAttribute("aria-pressed", String(button.dataset.scope === earlier.scope));
-  earlierEl.querySelector(".count")!.textContent = query === "" ? String(shown.length) : `${shown.length} of ${past.length}`;
+  earlierEl.querySelector(".count")!.textContent = query === "" ? String(shown.length) : `${shown.length} of ${listed.length}`;
   // More earlier sessions than are listed: the newest only, and searches cover those.
   const note = earlierEl.querySelector(".note")!;
   note.classList.toggle("hidden", !earlier.capped || !open);
@@ -911,7 +933,7 @@ function render(): void {
   renderBeam();
   renderMeters();
   const groups = groupSessions(sessions);
-  const pastShown = query === "" ? past.length : past.filter((view) => hits.has(view.id)).length;
+  const pastShown = shownPast().shown.length;
   const nothing = sessions.length === 0 && pastShown === 0;
   root.classList.toggle("empty", nothing);
   root.querySelector(".nothing")?.remove();

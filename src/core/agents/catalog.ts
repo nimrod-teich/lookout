@@ -100,7 +100,7 @@ export function agentByKey(key: string): AgentInfo | undefined {
   return AGENTS.find((agent) => agent.key === key);
 }
 
-/** Whether to tell agents apart in the UI: `auto` does once two or more agents have sessions running. */
+/** Whether to tell agents apart in the UI: `auto` does once the board shows two or more agents. */
 export type MarkerSetting = "auto" | "always" | "never";
 
 export function markerSetting(value: unknown): MarkerSetting {
@@ -109,13 +109,28 @@ export function markerSetting(value: unknown): MarkerSetting {
 
 /**
  * Markers (each agent's hue and silhouette, its name in hovers and lists)
- * show when the user asks for them, or, by default, once sessions of two or
- * more agents are running: a single-agent user sees no marker at all.
+ * show when the user asks for them, or, by default, once the board shows two
+ * or more agents (`agents`: the agent of every running session, earlier
+ * session and usage group): a single-agent user sees no marker at all.
  */
-export function markersShown(setting: MarkerSetting, liveAgents: Iterable<string>): boolean {
+export function markersShown(setting: MarkerSetting, agents: Iterable<string>): boolean {
   if (setting === "always") return true;
   if (setting === "never") return false;
-  return new Set(liveAgents).size >= 2;
+  return new Set(agents).size >= 2;
+}
+
+/** What the board shows of one agent: a session, or a usage group with its limits. */
+interface OnBoard {
+  agent: string;
+}
+
+/**
+ * The agents the board shows: those of its running sessions, of its earlier
+ * sessions and of the usage groups with limits to show (Claude's group is
+ * there even when it has none).
+ */
+export function boardAgents(board: { sessions: readonly OnBoard[]; past: readonly OnBoard[]; usage: readonly (OnBoard & { meters: readonly unknown[] })[] }): string[] {
+  return [...board.sessions, ...board.past, ...board.usage.filter((group) => group.meters.length > 0)].map((item) => item.agent);
 }
 
 /**

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { AGENTS, agentByKey, agentInfo, canJump, canRename, canResume, markerSetting, markersShown, type Capabilities } from "../../../src/core/agents/catalog";
+import { AGENTS, agentByKey, agentInfo, boardAgents, canJump, canRename, canResume, markerSetting, markersShown, type Capabilities } from "../../../src/core/agents/catalog";
 import { CLAUDE_CODE } from "../../../src/core/agents/claude/provider";
 
 const ROOT = path.join(__dirname, "..", "..", "..");
@@ -88,13 +88,25 @@ describe("the agent catalog", () => {
 });
 
 describe("markersShown", () => {
-  it("shows the agents apart once two or more have sessions running, unless told always or never", () => {
+  it("shows the agents apart once the board shows two or more, unless told always or never", () => {
     expect(markersShown("auto", [])).toBe(false);
     expect(markersShown("auto", ["claude-code", "claude-code", "claude-code"])).toBe(false);
     expect(markersShown("auto", ["claude-code", "codex"])).toBe(true);
     expect(markersShown("always", ["claude-code"])).toBe(true);
     expect(markersShown("always", [])).toBe(true);
     expect(markersShown("never", ["claude-code", "codex", "copilot"])).toBe(false);
+  });
+
+  it("counts an agent with only earlier sessions or usage limits on the board, and not an empty usage group", () => {
+    const claudeUsage = { agent: "claude-code", meters: [{ key: "session", percent: 14 }] };
+    const emptyClaude = { agent: "claude-code", meters: [] };
+    const codexUsage = { agent: "codex", meters: [{ key: "session", percent: 2 }] };
+    // Codex's last session ended: its earlier session and its limits keep it on the board, and the markers on.
+    expect(markersShown("auto", boardAgents({ sessions: [{ agent: "claude-code" }], past: [{ agent: "codex" }], usage: [claudeUsage] }))).toBe(true);
+    expect(markersShown("auto", boardAgents({ sessions: [{ agent: "claude-code" }], past: [], usage: [claudeUsage, codexUsage] }))).toBe(true);
+    // A Codex-only user: Claude's group is there without limits, so one agent shows and no marker.
+    expect(boardAgents({ sessions: [{ agent: "codex" }], past: [{ agent: "codex" }], usage: [emptyClaude, codexUsage] })).toEqual(["codex", "codex", "codex"]);
+    expect(markersShown("auto", boardAgents({ sessions: [{ agent: "codex" }], past: [], usage: [emptyClaude, codexUsage] }))).toBe(false);
   });
 
   it("reads the setting, auto for anything it does not know", () => {

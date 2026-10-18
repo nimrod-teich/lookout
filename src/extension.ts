@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { canJump, canRename, canResume, markersShown } from "./core/agents/catalog";
+import { boardAgents, canJump, canRename, canResume, markersShown } from "./core/agents/catalog";
 import { describeAlert, noticeBody } from "./core/format";
 import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
@@ -77,8 +77,8 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   /** The session the last "next" jump went to, so repeated presses cycle through them. */
   let lastJump: string | undefined;
-  /** Tell the agents apart, as `lookout.agentMarkers` says: by default once two or more have sessions running. */
-  const markers = () => markersShown(config.agentMarkers, controller.sessions.map((view) => view.agent));
+  /** Tell the agents apart, as `lookout.agentMarkers` says: by default once the board shows two or more, running, earlier or in the usage. */
+  const markers = () => markersShown(config.agentMarkers, boardAgents({ sessions: controller.sessions, past: controller.past, usage: controller.usageGroups }));
   /** The agent of a live or a past session. */
   const agentOf = (id: string) => (controller.sessions.find((view) => view.id === id) ?? controller.pastView(id))?.agent;
 

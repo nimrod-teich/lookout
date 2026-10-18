@@ -178,7 +178,7 @@
           ],
           "default": "auto",
           "enumDescriptions": [
-            "Once sessions of two or more agents are running.",
+            "Once the board shows two or more agents: running, earlier or in the usage.",
             "Always, even with one agent.",
             "Never: every session looks alike."
           ],
