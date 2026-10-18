@@ -50,6 +50,8 @@ export type ToBoard =
       favourites?: Favourites;
       /** The sessions archived in Lookout that are not running, newest archive first. */
       archive?: PastView[];
+      /** How many agents Lookout watches: none when every agent is turned off in the settings. */
+      watching?: number;
     }
   /** `pending` sessions were not read yet; the board asks again. */
   | { type: "search"; query: string; results: SearchResult[]; pending: number };
@@ -65,6 +67,8 @@ export type FromBoard =
   | { type: "seenAll" }
   /** Fetch an agent's usage again; Claude's when none is named. */
   | { type: "refreshUsage"; agent?: string }
+  /** Open Lookout's settings at the agents' switches. */
+  | { type: "openAgentSettings" }
   /** `zone`: the board's time zone, as `Date.getTimezoneOffset` gives it: in a remote window the extension's clock can be in another. */
   | { type: "search"; query: string; zone?: number }
   /** Open the session's conversation in the findings tab, at one message or at the newest match. */

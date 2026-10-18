@@ -3,7 +3,7 @@ import { AGENTS, agentInfo, canJump, canRename, canResume, unreachable } from ".
 import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
-import { barMeter, groupHeading, pickBar, sortGroups } from "../core/usageGroups";
+import { barMeter, chosenGroup, groupHeading, peakMeter, pickBar, sortGroups } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
 import { Harbour } from "./harbour";
 import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isGroupKey, pageOf, pulseBars, secondLine, type Chip, type GroupKey } from "./model";
@@ -16,6 +16,8 @@ interface BoardState {
   archive?: boolean;
   /** Agents the user hid through the legend. */
   agents?: string[];
+  /** The agent whose usage tab the user picked. */
+  usageTab?: string;
 }
 
 declare function acquireVsCodeApi(): {
@@ -41,6 +43,8 @@ let usageGroups: BoardUsage[] = [];
 let usageBar: string | undefined;
 /** Tell the agents apart: their hue and silhouette, their name in hovers. */
 let markers = false;
+/** How many agents Lookout watches; unknown from an extension that does not say. */
+let watching: number | undefined;
 /** The search the user typed, trimmed; empty when the box is empty. */
 let query = "";
 /** The results for `query`, by session id; sessions absent here are hidden while a query is active. */
@@ -85,12 +89,14 @@ let earlierPage = 0;
 let archivePast: PastView[] = [];
 /** The user opened the Archived group; kept across reloads. */
 let archiveOpen = vscode.getState()?.archive === true;
+/** The agent whose usage tab the user picked last. */
+let usageTab: string | undefined = vscode.getState()?.usageTab;
 let archivePage = 0;
 let archiveEl: HTMLElement | undefined;
 const archiveCards = new Map<string, HTMLElement>();
 
 function saveState(): void {
-  vscode.setState({ hidden: [...hidden], earlier: earlierOpen, archive: archiveOpen, agents: [...hiddenAgents] });
+  vscode.setState({ hidden: [...hidden], earlier: earlierOpen, archive: archiveOpen, agents: [...hiddenAgents], usageTab });
 }
 const pastCards = new Map<string, HTMLElement>();
 let earlierEl: HTMLElement | undefined;
@@ -436,18 +442,30 @@ function tidePercent(): number | undefined {
   return pickBar(groups)?.meter.percent;
 }
 
-// Usage meters: one bar per limit, under the beam.
+// Usage, under the beam: a tab per agent naming the limit it is closest to
+// running out of, and the chosen agent's limits below it, one line each.
 
 const meters = el("div", "meters");
-/** Each agent's group of bars, by agent id. */
-const meterGroups = new Map<string, HTMLElement>();
-/** The bars, by agent id and limit. */
+const usageTabs = el("div", "usage-tabs");
+usageTabs.setAttribute("role", "tablist");
+usageTabs.setAttribute("aria-label", "Usage by agent");
+const usageRefresh = el("button", "link", "refresh");
+usageRefresh.type = "button";
+usageRefresh.title = "Fetch the usage again now";
+usageRefresh.addEventListener("click", () => vscode.postMessage({ type: "refreshUsage", agent: usageRefresh.dataset.agent }));
+usageTabs.append(usageRefresh);
+const usageRows = el("div", "usage-rows");
+usageRows.setAttribute("role", "tabpanel");
+meters.append(usageTabs, usageRows);
+/** Each agent's tab, by agent id. */
+const usageTabEls = new Map<string, HTMLButtonElement>();
+/** The chosen agent's limits, by limit. */
 const meterRows = new Map<string, HTMLElement>();
 
-/** "Resets in 3h", as Claude Code's panel says it. */
-function resetText(resetsAt: number | undefined): string {
+/** "3h", until the window resets; empty once it has. */
+function resetShort(resetsAt: number | undefined): string {
   if (resetsAt === undefined || resetsAt <= now()) return "";
-  return `Resets ${formatResetIn(resetsAt - now())}`;
+  return formatResetIn(resetsAt - now()).replace(/^in /, "");
 }
 
 /** Fill colour by consumption: calm below half, amber from half, red from 80%. */
@@ -455,77 +473,81 @@ function meterLevel(percent: number): "low" | "mid" | "high" {
   return percent >= 80 ? "high" : percent >= 50 ? "mid" : "low";
 }
 
-/**
- * One group per agent, in catalog order, each its bars and a foot with what
- * is missing and its refresh link. A group is a box only to the DOM: its rows
- * sit in the meters' own column. With one agent and no markers there is no
- * heading, as before agents had groups.
- */
+/** One tab per agent shown, in catalog order; the chosen agent's limits under them. */
 function renderMeters(): void {
-  const groups = shownUsage();
+  const groups = shownUsage().map((group) => ({ ...group, agent: group.agent ?? AGENTS[0]!.id }));
   meters.classList.toggle("hidden", groups.length === 0);
-  const headed = markers || usageGroups.length > 1;
-  const seenGroups = new Set<string>();
-  let previousGroup: HTMLElement | undefined;
-  for (const usage of groups) {
-    const agent = usage.agent ?? AGENTS[0]!.id;
-    seenGroups.add(agent);
-    let group = meterGroups.get(agent);
-    if (!group) {
-      group = el("div", "usage-group");
-      group.dataset.agent = agent;
-      const head = el("div", "usage-head");
-      head.append(agentGlyph(agent, 11), el("span", "", groupHeading(agent)));
-      const foot = el("div", "foot");
-      const refresh = el("button", "link", "refresh");
-      refresh.type = "button";
-      refresh.title = "Fetch the usage again now";
-      refresh.addEventListener("click", () => vscode.postMessage({ type: "refreshUsage", agent }));
-      foot.append(el("span", "age"), refresh);
-      group.append(head, foot);
-      meterGroups.set(agent, group);
+  const chosen = chosenGroup(groups, usageTab, usageBar);
+  if (!chosen) return;
+  let previous: HTMLElement | undefined;
+  for (const group of groups) {
+    let tab = usageTabEls.get(group.agent);
+    if (!tab) {
+      const agent = group.agent;
+      tab = el("button", "usage-tab");
+      tab.type = "button";
+      tab.setAttribute("role", "tab");
+      const glyph = agentGlyph(agent, 11);
+      // The tab's name says the agent already.
+      glyph.setAttribute("aria-hidden", "true");
+      tab.append(glyph, el("span", "name", agentInfo(agent).label), el("span", "peak"));
+      tab.addEventListener("click", () => {
+        usageTab = agent;
+        saveState();
+        renderMeters();
+      });
+      usageTabEls.set(agent, tab);
     }
-    group.classList.toggle("stale", usage.stale);
-    group.querySelector(".usage-head")!.classList.toggle("hidden", !headed);
-    if (group.previousElementSibling !== (previousGroup ?? null) || group.parentElement !== meters) meters.insertBefore(group, previousGroup ? previousGroup.nextSibling : meters.firstChild);
-    previousGroup = group;
-    const foot = group.querySelector<HTMLElement>(".foot")!;
-    const seen = new Set<string>();
-    let previous: HTMLElement = group.querySelector<HTMLElement>(".usage-head")!;
-    for (const meter of usage.meters) {
-      const id = `${agent}:${meter.key}`;
-      seen.add(id);
-      let row = meterRows.get(id);
-      if (!row) {
-        row = el("div", "meter");
-        const bar = el("span", "bar");
-        bar.append(el("span", "fill"));
-        row.append(el("span", "label"), el("span", "percent"), bar, el("span", "reset"));
-        meterRows.set(id, row);
-      }
-      row.className = `meter ${meterLevel(meter.percent)}`;
-      row.querySelector(".label")!.textContent = meter.label;
-      (row.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
-      row.querySelector(".percent")!.textContent = `${Math.floor(meter.percent)}%`;
-      row.querySelector(".reset")!.textContent = resetText(meter.resetsAt);
-      if (row.previousElementSibling !== previous || row.parentElement !== group) group.insertBefore(row, previous.nextSibling);
-      previous = row;
-    }
-    for (const [id, row] of meterRows) {
-      if (!id.startsWith(`${agent}:`) || seen.has(id)) continue;
-      row.remove();
-      meterRows.delete(id);
-    }
-    group.append(foot);
-    foot.querySelector(".age")!.textContent = usage.fetchedAt === undefined ? "No usage reported" : "";
-    foot.querySelector(".link")!.classList.toggle("hidden", !usage.canRefresh);
+    const peak = peakMeter(group.meters);
+    const label = agentInfo(group.agent).label;
+    const peakEl = tab.querySelector<HTMLElement>(".peak")!;
+    peakEl.textContent = peak ? `${Math.floor(peak.percent)}%` : "—";
+    peakEl.className = `peak ${peak ? meterLevel(peak.percent) : ""}`;
+    tab.title = peak ? `${groupHeading(group.agent)}: ${peak.label} is the closest to its limit, at ${Math.floor(peak.percent)}%` : `${label}: no usage reported`;
+    tab.classList.toggle("stale", group.stale);
+    tab.setAttribute("aria-selected", String(group.agent === chosen.agent));
+    const at = previous ? previous.nextSibling : usageTabs.firstChild;
+    if (tab !== at) usageTabs.insertBefore(tab, at);
+    previous = tab;
   }
-  for (const [agent, group] of meterGroups) {
-    if (seenGroups.has(agent)) continue;
-    group.remove();
-    meterGroups.delete(agent);
-    for (const id of [...meterRows.keys()]) if (id.startsWith(`${agent}:`)) meterRows.delete(id);
+  for (const [agent, tab] of usageTabEls) {
+    if (groups.some((group) => group.agent === agent)) continue;
+    tab.remove();
+    usageTabEls.delete(agent);
   }
+  usageRefresh.dataset.agent = chosen.agent;
+  usageRefresh.classList.toggle("hidden", !chosen.canRefresh);
+  meters.classList.toggle("stale", chosen.stale);
+  const seen = new Set<string>();
+  let row: Element | null = usageRows.firstElementChild;
+  for (const meter of chosen.meters) {
+    const id = `${chosen.agent}:${meter.key}`;
+    seen.add(id);
+    let line = meterRows.get(id);
+    if (!line) {
+      line = el("div", "meter");
+      const bar = el("span", "bar");
+      bar.append(el("span", "fill"));
+      line.append(el("span", "label"), bar, el("span", "value"));
+      meterRows.set(id, line);
+    }
+    const percent = Math.floor(meter.percent);
+    const reset = resetShort(meter.resetsAt);
+    line.className = `meter ${meterLevel(meter.percent)}`;
+    line.querySelector(".label")!.textContent = meter.label;
+    (line.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
+    line.querySelector(".value")!.textContent = reset ? `${percent}% · ${reset}` : `${percent}%`;
+    line.title = reset ? `${meter.label}: ${percent}% used, resets in ${reset}` : `${meter.label}: ${percent}% used`;
+    if (line !== row) usageRows.insertBefore(line, row);
+    row = line.nextElementSibling;
+  }
+  for (const [id, line] of meterRows) {
+    if (seen.has(id)) continue;
+    line.remove();
+    meterRows.delete(id);
+  }
+  usageRows.querySelector(".none")?.remove();
+  if (chosen.fetchedAt === undefined || chosen.meters.length === 0) usageRows.append(el("div", "none", "No usage reported"));
 }
 
 /**
@@ -1107,12 +1129,26 @@ function render(): void {
     cards.clear();
     const empty = el("div", "nothing");
     if (query !== "") empty.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message; since:, before:, project:, branch: and file: narrow the search. Esc clears it."));
-    else if (allSessions.length > 0) empty.append(el("p", "big", "Everything is hidden"), el("p", "small", markers && hiddenAgents.size > 0 ? "Click a state or an agent in the legend to show it again." : "Click a state in the legend to show it again."));
+    else if (watching === 0) {
+      const open = el("button", "link", "Turn one on in the settings");
+      open.addEventListener("click", () => vscode.postMessage({ type: "openAgentSettings" }));
+      empty.append(el("p", "big", "Every agent is turned off"), el("p", "small", "Lookout watches no agent, so no session can show here."), open);
+    } else if (allSessions.length > 0) empty.append(el("p", "big", "Everything is hidden"), el("p", "small", markers && hiddenAgents.size > 0 ? "Click a state or an agent in the legend to show it again." : "Click a state in the legend to show it again."));
     else empty.append(el("p", "big", "Nothing on the horizon"), el("p", "small", "Sessions appear here as soon as an agent starts."));
     root.append(empty);
     renderFavourites(beam);
-    renderEarlier(empty);
-    if (earlierEl) renderArchive(earlierEl);
+    // With no agent watched there is nothing earlier to list either.
+    if (watching === 0) {
+      earlierEl?.remove();
+      earlierEl = undefined;
+      pastCards.clear();
+      archiveEl?.remove();
+      archiveEl = undefined;
+      archiveCards.clear();
+    } else {
+      renderEarlier(empty);
+      if (earlierEl) renderArchive(earlierEl);
+    }
     return;
   }
   const seenIds = new Set<string>();
@@ -1212,6 +1248,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);
   usageBar = message.usageBar;
   markers = message.markers === true;
+  watching = message.watching;
   clockOffset = message.now - Date.now();
   applyFilters();
   render();

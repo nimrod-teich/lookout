@@ -586,11 +586,11 @@ body.vscode-reduce-motion .hover-card {
   color: var(--ink);
 }
 
-/* As Claude Code's panel shows them: the label and the share used, the bar, when it resets. */
+/* A tab per agent, and the chosen agent's limits one line each: the label, the bar, the share used and when it resets. */
 .meters {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   margin: 0 12px 8px;
   padding-top: 8px;
   border-top: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
@@ -599,26 +599,96 @@ body.vscode-reduce-motion .hover-card {
 }
 
 .meters.hidden,
-.foot .link.hidden {
+.usage-tabs .link.hidden {
   display: none;
 }
 
-.meter {
+.usage-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.usage-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.usage-tab:hover {
+  color: var(--ink);
+}
+
+.usage-tab[aria-selected="true"] {
+  border-color: color-mix(in srgb, var(--ink) 28%, transparent);
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink);
+}
+
+.usage-tab .name {
+  font-weight: 600;
+}
+
+.usage-tab .peak {
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-tab .peak.mid {
+  color: var(--waiting);
+}
+
+.usage-tab .peak.high {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.usage-tab.stale .peak {
+  color: var(--idle);
+}
+
+.usage-tabs .link {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.usage-tabs .link:hover {
+  text-decoration: underline;
+}
+
+.usage-rows {
   display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: baseline;
-  row-gap: 3px;
+  grid-template-columns: minmax(0, max-content) minmax(40px, 1fr) max-content;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 5px;
+}
+
+.meter {
+  display: contents;
 }
 
 .meter .label {
+  overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .meter .bar {
-  grid-column: 1 / 3;
   position: relative;
-  height: 6px;
-  border-radius: 3px;
+  height: 4px;
+  border-radius: 2px;
   background: color-mix(in srgb, var(--ink) 12%, transparent);
   overflow: hidden;
 }
@@ -628,7 +698,7 @@ body.vscode-reduce-motion .hover-card {
   left: 0;
   top: 0;
   bottom: 0;
-  border-radius: 3px;
+  border-radius: 2px;
   background: var(--done);
   transition: width 400ms ease, background 400ms ease;
 }
@@ -641,52 +711,21 @@ body.vscode-reduce-motion .hover-card {
   background: var(--vscode-errorForeground, #f14c4c);
 }
 
-.meter .percent {
+.meter .value {
   text-align: right;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
 
-.meter .reset {
-  grid-column: 1 / 3;
-  font-size: calc(var(--vscode-font-size) - 3px);
-}
-
-.meter .reset:empty {
-  display: none;
+.usage-rows .none {
+  grid-column: 1 / -1;
 }
 
 /* Numbers too old to go by: grey bars. */
-.usage-group.stale .fill {
+.meters.stale .fill {
   background: var(--idle);
   opacity: 0.45;
-}
-
-.foot {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: calc(var(--vscode-font-size) - 3px);
-}
-
-.foot .age {
-  min-width: 0;
-  font-size: calc(var(--vscode-font-size) - 2px);
-}
-
-.foot .link {
-  flex: none;
-  margin-left: auto;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--vscode-textLink-foreground);
-  font: inherit;
-  cursor: pointer;
-}
-
-.foot .link:hover {
-  text-decoration: underline;
 }
 
 /* Groups ------------------------------------------------------------------ */
@@ -1325,6 +1364,20 @@ body.vscode-reduce-motion .hover-card {
   margin: 0;
 }
 
+.nothing .link {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.nothing .link:hover {
+  text-decoration: underline;
+}
+
 /* Motion ------------------------------------------------------------------ */
 
 @keyframes sweep {
@@ -1573,19 +1626,3 @@ body.vscode-high-contrast-light .card {
   vertical-align: -1px;
 }
 
-/* An agent's group of bars: a box only to the DOM, its rows sit in the meters' column. */
-.usage-group {
-  display: contents;
-}
-
-.usage-head {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.usage-head.hidden {
-  display: none;
-}

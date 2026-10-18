@@ -32,6 +32,10 @@ export interface BoardActions {
   /** Tell the agents apart. */
   markers?(): boolean;
   refreshUsage(): void;
+  /** How many agents Lookout watches. */
+  watching?(): number;
+  /** Opens Lookout's settings at the agents' switches. */
+  openAgentSettings?(): void;
   jump(view: SessionView): Promise<void>;
   rename(view: SessionView): Promise<void>;
   markSeen(id: string): void;
@@ -92,6 +96,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
           earlier: this.actions.earlier(),
           favourites: this.actions.favourites(),
           archive: this.actions.archive?.().past,
+          watching: this.actions.watching?.(),
         };
         void this.view.webview.postMessage(message);
       }
@@ -122,6 +127,9 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         return;
       case "refreshUsage":
         this.actions.refreshUsage();
+        return;
+      case "openAgentSettings":
+        this.actions.openAgentSettings?.();
         return;
       case "openHit":
         if (typeof message.query === "string" && typeof message.id === "string" && (message.index === undefined || typeof message.index === "number")) {

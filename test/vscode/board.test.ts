@@ -96,6 +96,14 @@ describe("Board", () => {
     expect(actions.refreshUsage).toHaveBeenCalledTimes(1);
   });
 
+  it("says how many agents it watches, and relays a request to open their switches", () => {
+    const openAgentSettings = vi.fn();
+    const { webviewView } = setup([], undefined, { watching: () => 0, openAgentSettings });
+    expect(webviewView.posted[0]).toMatchObject({ type: "sessions", watching: 0 });
+    webviewView.receive({ type: "openAgentSettings" });
+    expect(openAgentSettings).toHaveBeenCalledTimes(1);
+  });
+
   it("answers a search with the results for that query, and ignores a query that is not a string", () => {
     const { actions, webviewView } = setup([view()]);
     webviewView.receive({ type: "search", query: "cache" });

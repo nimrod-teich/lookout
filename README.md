@@ -59,7 +59,7 @@ Running several AI coding agents at once means clicking through tabs and termina
   </tr>
   <tr>
     <td><b>Usage</b></td>
-    <td>Every limit of the account on the board and in the status bar's hover, as Claude Code's own panel shows them: <b>Session (5hr)</b>, <b>Weekly (7 day)</b> and the per-model weekly limits such as <b>Weekly Fable</b>, each with its share used and when it resets ("Resets in 3h"). The session limit also shows as a coloured bar in the status bar item, with the time to its reset: <code>32% · 1h12m</code>. The bars turn amber from half and red from 80%; a card's context ring turns amber from 75% and red from 90%. Lookout says once per window when the 5-hour window reaches 70% and 90% and the week 90%, in the VS Code window in front when there is one. Numbers more than 30 minutes old, or from before a reset, turn grey. Claude Code fetches the numbers again when they are older than 10 minutes or a window has reset, with its own credentials: at most once every 3 minutes on the machine, and less often while fetches fail. <code>Lookout: Refresh Usage</code> fetches at once, unless a fetch started in the last 3 minutes. When more than one agent reports usage, each has its own group, its limits named as that agent names them, and the status bar's bar shows the window under the most pressure, after that agent's boat (<code>lookout.statusBar.usageAgent</code> pins one agent). Codex's group shows its <b>5h limit</b> and <b>Weekly limit</b> as Codex's own <code>/status</code> names them, from what Codex records with each reply, so its numbers are as fresh as its last reply and turn grey after 30 minutes like Claude's; Lookout cannot fetch them anew. The same alerts go out for Codex's windows, named for Codex.</td>
+    <td>Every limit of the account on the board and in the status bar's hover, as Claude Code's own panel shows them: <b>Session (5hr)</b>, <b>Weekly (7 day)</b> and the per-model weekly limits such as <b>Weekly Fable</b>, each on one line with a thin bar, its share used and when it resets (<code>61% · 2d</code>). The session limit also shows as a coloured bar in the status bar item, with the time to its reset: <code>32% · 1h12m</code>. The bars turn amber from half and red from 80%; a card's context ring turns amber from 75% and red from 90%. Lookout says once per window when the 5-hour window reaches 70% and 90% and the week 90%, in the VS Code window in front when there is one. Numbers more than 30 minutes old, or from before a reset, turn grey. Claude Code fetches the numbers again when they are older than 10 minutes or a window has reset, with its own credentials: at most once every 3 minutes on the machine, and less often while fetches fail. <code>Lookout: Refresh Usage</code> fetches at once, unless a fetch started in the last 3 minutes. When more than one agent reports usage, each has its own tab above the lines, naming the limit it is closest to running out of (<b>Claude 82%</b>, coloured as the bars are), so every agent's pressure shows at a glance; a click on a tab lists that agent's limits, named as that agent names them, and the board keeps that choice (until then it lists the agent the status bar shows). The status bar's bar shows the window under the most pressure, after that agent's boat (<code>lookout.statusBar.usageAgent</code> pins one agent). Codex's group shows its <b>5h limit</b> and <b>Weekly limit</b> as Codex's own <code>/status</code> names them, from what Codex records with each reply, so its numbers are as fresh as its last reply and turn grey after 30 minutes like Claude's; Lookout cannot fetch them anew. The same alerts go out for Codex's windows, named for Codex.</td>
   </tr>
   <tr>
     <td><b>Status bar</b></td>
@@ -199,6 +199,8 @@ Windows and macOS support is new. The process handling is tested on both in CI; 
 | `Lookout: Refresh Usage` | | Has Claude Code fetch the account's usage again. |
 | `Lookout: Search All Sessions` | | Opens the search page: every conversation's matches in an editor tab. |
 
+The settings come in two sections, **Agents** (a switch per agent, and where each keeps its files) and **General**.
+
 | Setting | Default | Description |
 | --- | --- | --- |
 | `lookout.statusBar.enabled` | `true` | Show Lookout's item in the status bar: the usage, and a click to open the board. |
@@ -214,11 +216,12 @@ Windows and macOS support is new. The process handling is tested on both in CI; 
 | `lookout.state.typedQuestions` | `true` | Count an idle session as needing you when its last reply asks you something. Off: such sessions are Finished or Idle like any other. |
 | `lookout.statusBar.usageAgent` | `auto` | Whose usage the status bar's bar shows when more than one agent reports usage: `auto`, the window under the most pressure (the highest share used, fresh numbers first), or `claude`, `codex`, `copilot`. A pinned agent that reports none leaves the bar to `auto`. |
 | `lookout.agentMarkers` | `auto` | When to tell agents apart by colour and boat: `auto` once the board shows two or more agents (running, earlier or in the usage), `always`, or `never`. |
-| `lookout.agents.codex` | `true` | Watch Codex sessions: the `codex` program in a terminal. |
-| `lookout.codexHome` | `""` | Codex's home folder, where its `sessions` are. Empty uses `CODEX_HOME`, then `~/.codex`. |
-| `lookout.agents.copilot` | `true` | Watch Copilot CLI sessions: the `copilot` program in a terminal. |
-| `lookout.copilotHome` | `""` | Copilot CLI's home folder, where its `session-state` is. Empty uses `COPILOT_HOME`, then `~/.copilot`. |
+| `lookout.agents.claude` | `true` | Watch Claude Code: its panel and `claude` in terminals, with its usage. Off: none of its sessions, earlier sessions, search matches or usage, none of its files read, and Claude Code never run to refresh the usage. |
+| `lookout.agents.codex` | `true` | Watch Codex: the Codex extension's panel, VS Code's Chat, `codex` in terminals and `codex exec` runs. |
+| `lookout.agents.copilot` | `true` | Watch Copilot: VS Code's Chat (its Copilot, Copilot CLI and Local sessions) and `copilot` in terminals. |
 | `lookout.claudeConfigDir` | `""` | Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`. |
+| `lookout.codexHome` | `""` | Codex's home folder, where its `sessions` are. Empty uses `CODEX_HOME`, then `~/.codex`. |
+| `lookout.copilotHome` | `""` | Copilot CLI's home folder, where its `session-state` is. Empty uses `COPILOT_HOME`, then `~/.copilot`. |
 
 ## How it works
 
