@@ -17,16 +17,16 @@ const LIMITS = {
 describe("metersOf", () => {
   it("reads the limits array with its windows and reset times", () => {
     expect(metersOf(LIMITS)).toEqual([
-      { key: "session", label: "5h", percent: 18, resetsAt: Date.parse("2026-10-15T12:10:00.068962+00:00"), windowMs: 5 * 3_600_000 },
-      { key: "weekly_all", label: "Week", percent: 18, resetsAt: Date.parse("2026-10-20T23:00:00.068981+00:00"), windowMs: 7 * 24 * 3_600_000 },
-      { key: "weekly_scoped:Fable", label: "Week · Fable", percent: 31, resetsAt: Date.parse("2026-10-20T23:00:00.069190+00:00"), windowMs: 7 * 24 * 3_600_000 },
+      { key: "session", label: "Session (5hr)", percent: 18, resetsAt: Date.parse("2026-10-15T12:10:00.068962+00:00"), windowMs: 5 * 3_600_000 },
+      { key: "weekly_all", label: "Weekly (7 day)", percent: 18, resetsAt: Date.parse("2026-10-20T23:00:00.068981+00:00"), windowMs: 7 * 24 * 3_600_000 },
+      { key: "weekly_scoped:Fable", label: "Weekly Fable", percent: 31, resetsAt: Date.parse("2026-10-20T23:00:00.069190+00:00"), windowMs: 7 * 24 * 3_600_000 },
     ]);
   });
 
   it("falls back to the five-hour and seven-day fields, and copes with garbage", () => {
     expect(metersOf({ five_hour: { utilization: 5 }, seven_day: { utilization: 9, resets_at: "soon" } })).toEqual([
-      { key: "session", label: "5h", percent: 5, resetsAt: undefined, windowMs: 5 * 3_600_000 },
-      { key: "weekly_all", label: "Week", percent: 9, resetsAt: undefined, windowMs: 7 * 24 * 3_600_000 },
+      { key: "session", label: "Session (5hr)", percent: 5, resetsAt: undefined, windowMs: 5 * 3_600_000 },
+      { key: "weekly_all", label: "Weekly (7 day)", percent: 9, resetsAt: undefined, windowMs: 7 * 24 * 3_600_000 },
     ]);
     expect(metersOf({ limits: [{ kind: "other", percent: 50 }, { kind: "broken" }, 7] })).toEqual([{ key: "other", label: "other", percent: 50, resetsAt: undefined, windowMs: undefined }]);
     expect(metersOf(null)).toEqual([]);
@@ -35,9 +35,9 @@ describe("metersOf", () => {
 
   it("reads the per-model weekly limits the cache carries next to the five-hour and seven-day ones", () => {
     expect(metersOf({ five_hour: { utilization: 5 }, seven_day: { utilization: 9 }, seven_day_opus: { utilization: 40, resets_at: "2026-10-20T23:00:00Z" }, seven_day_sonnet: null, seven_day_oauth_apps: { utilization: 3 } })).toEqual([
-      { key: "session", label: "5h", percent: 5, resetsAt: undefined, windowMs: 5 * 3_600_000 },
-      { key: "weekly_all", label: "Week", percent: 9, resetsAt: undefined, windowMs: 7 * 24 * 3_600_000 },
-      { key: "weekly_scoped:Opus", label: "Week · Opus", percent: 40, resetsAt: Date.parse("2026-10-20T23:00:00Z"), windowMs: 7 * 24 * 3_600_000 },
+      { key: "session", label: "Session (5hr)", percent: 5, resetsAt: undefined, windowMs: 5 * 3_600_000 },
+      { key: "weekly_all", label: "Weekly (7 day)", percent: 9, resetsAt: undefined, windowMs: 7 * 24 * 3_600_000 },
+      { key: "weekly_scoped:Opus", label: "Weekly Opus", percent: 40, resetsAt: Date.parse("2026-10-20T23:00:00Z"), windowMs: 7 * 24 * 3_600_000 },
     ]);
   });
 });

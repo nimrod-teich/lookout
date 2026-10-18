@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { clockTime, describeAlert, noticeBody } from "./core/format";
+import { describeAlert, noticeBody } from "./core/format";
 import { nextAttention } from "./core/model";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
@@ -143,7 +143,7 @@ export function activate(context: vscode.ExtensionContext): void {
     resume: (id) => void resume(id),
     usage: () => {
       const usage = controller.usage;
-      return { fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: usage?.meters ?? [], pace: usage?.pace ?? {}, canRefresh: controller.canRefreshUsage, note: controller.usageNote };
+      return { fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: usage?.meters ?? [], canRefresh: controller.canRefreshUsage };
     },
     jump,
     rename: async (view) => {
@@ -163,7 +163,6 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar.render({
       views: controller.sessions,
       usage: controller.usage,
-      usageNote: controller.usageNote,
       enabled: config.statusBarEnabled,
       showUsage: config.statusBarUsage,
       showReset: config.statusBarUsageReset,
@@ -238,8 +237,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       const outcome = await controller.refreshUsage(true);
-      if (outcome === "too soon") void vscode.window.showInformationMessage(`Lookout fetches usage at most every 3 minutes on this machine; next at ${clockTime(controller.nextRefreshAt(true))}.`);
-      else if (outcome === "failed") void vscode.window.showWarningMessage("Lookout: Claude Code gave no new usage numbers. Check the Lookout output log.");
+      if (outcome === "failed") void vscode.window.showWarningMessage("Lookout: Claude Code gave no new usage numbers. Check the Lookout output log.");
     }),
   );
 

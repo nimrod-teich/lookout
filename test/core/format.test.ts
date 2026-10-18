@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockTime, countStates, describeAlert, describeEvidence, describeLocation, describePace, describeReason, describeState, formatCountdown, formatElapsed, formatTokens, formatUntil, formatUsd, noticeBody, quietFor, shortModel, windowName } from "../../src/core/format";
+import { clockTime, countStates, describeAlert, describeEvidence, describeLocation, describeReason, describeState, formatCountdown, formatElapsed, formatResetIn, formatTokens, formatUntil, formatUsd, noticeBody, quietFor, shortModel, windowName } from "../../src/core/format";
 import { view } from "../vscode/helpers";
 
 describe("format", () => {
@@ -80,13 +80,12 @@ describe("format", () => {
     expect(windowName({ key: "other", label: "other", percent: 1 })).toBe("other limit");
   });
 
-  it("says where the pace leads", () => {
-    const now = new Date(2026, 9, 16, 12, 0).getTime();
-    const meter = { key: "session", label: "5h", percent: 40, resetsAt: new Date(2026, 9, 16, 17, 5).getTime() };
-    expect(describePace({ perHour: 20, fullAt: new Date(2026, 9, 16, 15, 40).getTime(), runsOut: true }, meter, now)).toBe("at this pace 100% at 15:40, resets 17:05");
-    expect(describePace({ perHour: 5, fullAt: new Date(2026, 9, 17, 0, 0).getTime(), runsOut: false, atReset: 64 }, meter, now)).toBe("at this pace 64% at the reset");
-    expect(describePace({ perHour: 0, runsOut: false, atReset: 40 }, meter, now)).toBe("at this pace 40% at the reset");
-    expect(describePace(undefined, meter, now)).toBeUndefined();
+  it("says when a limit resets as Claude Code's panel says it", () => {
+    expect(formatResetIn(30_000)).toBe("in 0m");
+    expect(formatResetIn(42 * 60_000)).toBe("in 42m");
+    expect(formatResetIn((3 * 60 + 28) * 60_000)).toBe("in 3h");
+    expect(formatResetIn(23.9 * 3_600_000)).toBe("in 23h");
+    expect(formatResetIn(2.5 * 86_400_000)).toBe("in 2d");
   });
 
   it("says which usage limit reached a threshold, and when it resets", () => {

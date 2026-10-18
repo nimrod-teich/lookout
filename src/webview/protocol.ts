@@ -1,6 +1,5 @@
 import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
-import type { Pace } from "../core/pace";
 import type { UsageMeter } from "../core/usage";
 
 export interface BoardUsage {
@@ -9,12 +8,8 @@ export interface BoardUsage {
   /** Old, and nothing will bring them up to date. */
   stale: boolean;
   meters: UsageMeter[];
-  /** Pace per meter key, where the readings allow one. */
-  pace: Record<string, Pace>;
   /** The extension can fetch fresh numbers. */
   canRefresh: boolean;
-  /** Why the numbers are not kept fresh, when that needs saying. */
-  note?: string;
 }
 
 /** Which earlier sessions are listed and searched: this window's folders, or every project. */

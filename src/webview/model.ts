@@ -1,5 +1,5 @@
 // Pure helpers for the board; no DOM here so they can be tested under Node.
-import { clockTime, formatElapsed, formatTokens, formatUntil, quietFor, reasonLabel } from "../core/format";
+import { formatElapsed, quietFor, reasonLabel } from "../core/format";
 import type { SessionView, State } from "../core/types";
 
 export type GroupKey = "waiting" | "done" | "working" | "idle";
@@ -68,7 +68,7 @@ export function cardLine(view: SessionView, now: number): CardLine {
     }
     case "done":
     case "idle":
-      return { text: view.lastReply };
+      return {};
     case "unknown":
       return { text: view.evidence?.note };
   }
@@ -99,55 +99,12 @@ export function contextLevel(percent: number): "ok" | "high" | "full" {
   return percent >= 90 ? "full" : percent >= 75 ? "high" : "ok";
 }
 
-/** The conversation was compacted after the agent's last call, whose context size the card shows. */
-export function compactedSinceLastCall(view: SessionView): boolean {
-  return view.compactedAt !== undefined && view.cache !== undefined && view.compactedAt > view.cache.lastCallAt;
-}
-
 /** A chip on a card, with what its hover explains. */
 export interface Chip {
   text: string;
   title?: string;
   /** Extra class, for its look. */
   kind?: string;
-}
-
-/** "compacted ×2", when the agent compacted the conversation. */
-export function compactionChip(view: SessionView, now: number): Chip | undefined {
-  if (!view.compactions) return undefined;
-  const times = view.compactions === 1 ? "once" : `${view.compactions} times`;
-  const last = view.compactedAt === undefined ? "" : `, the last time at ${clockTime(view.compactedAt, now)}`;
-  return {
-    text: `compacted ×${view.compactions}`,
-    title: `The agent compacted this conversation ${times}${last}: it replaced the older part with a summary to free its context window. What came before is known to it only from that summary.`,
-    kind: "compacted",
-  };
-}
-
-/**
- * Whether the next message finds the conversation in the model's prompt
- * cache: "cache warm, full price in 3m" or "cache cold". Not while the
- * session works, when every call keeps the cache warm.
- */
-export function cacheChip(view: SessionView, now: number): Chip | undefined {
-  const cache = view.cache;
-  if (!cache || view.state === "working") return undefined;
-  const until = cache.lastCallAt + cache.ttlMs;
-  const life = cache.ttlMs >= 3_600_000 ? "an hour" : "5 minutes";
-  // A compaction since that call left a shorter conversation than its count.
-  const what = view.contextTokens && !compactedSinceLastCall(view) ? `its ${formatTokens(view.contextTokens)} tokens` : "it";
-  if (now < until) {
-    return {
-      text: `cache warm, full price in ${formatUntil(until - now)}`,
-      title: `The model's prompt cache keeps this conversation for ${life} after each call; the last went out at ${clockTime(cache.lastCallAt, now)}. A message sent before ${clockTime(until, now)} reads ${what} from the cache, for a fraction of the input price. After that, the conversation is written to the cache again, which costs more than the input price.`,
-      kind: "cache warm",
-    };
-  }
-  return {
-    text: "cache cold",
-    title: `The model's prompt cache let this conversation go at ${clockTime(until, now)}, ${life} after the agent's last call went out. The next message writes ${what} to the cache again, which costs more than the input price.`,
-    kind: "cache cold",
-  };
 }
 
 /** Geometry of the harbour scene, in SVG units. The lighthouse stands on the left shore. */

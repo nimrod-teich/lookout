@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpMailbox } from "../../src/core/jumpMailbox";
-import { scopeOf } from "../../src/core/usageAlerts";
 import { activate } from "../../src/extension";
 import { createWebviewView, stub, workspace } from "./stub-vscode";
 
@@ -260,36 +259,6 @@ describe("the extension", () => {
     await vi.waitFor(() => expect(color()).toBe("disabledForeground"), WAIT);
   }, 60_000);
 
-  it("forecasts from the readings it kept, and not from numbers too old to go by", async () => {
-    stub.config["lookout.usage.refresh"] = "off";
-    const resetsAt = Date.now() + 3 * 3_600_000;
-    const write = (ageMinutes: number) =>
-      fs.writeFileSync(
-        path.join(configDir, ".claude.json"),
-        JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now() - ageMinutes * 60_000, utilization: { five_hour: { utilization: 30, resets_at: new Date(resetsAt).toISOString() } } } }),
-      );
-    const tooltip = () => (stub.ops.filter(([target, action]) => target === "statusBar:lookout.status" && action === "set:tooltip").at(-1)?.[2] as { value: string } | undefined)?.value ?? "";
-    // 10% fifty minutes ago, 30% now: 40 points an hour runs out before the reset in three hours.
-    // Readings are kept per source of numbers: this config directory's cache.
-    const readings = () => ({ [scopeOf(path.join(configDir, ".claude.json"))]: { session: { resetsAt, samples: [{ at: Date.now() - 50 * 60_000, percent: 10 }] } } });
-    savedGlobal["lookout.usageReadings"] = readings();
-    write(20);
-    activate(context());
-    await vi.waitFor(() => expect(tooltip()).toMatch(/5h: 30% · resets in 3h 00m · at this pace 100% at (\w{3} )?\d\d:\d\d, resets (\w{3} )?\d\d:\d\d/), WAIT);
-    expect(Object.values(savedGlobal["lookout.usageReadings"] as Record<string, Record<string, { samples: unknown[] }>>)[0]!.session!.samples).toHaveLength(2);
-    for (const subscription of subscriptions.splice(0)) subscription.dispose();
-
-    // The same readings, but the numbers are 31 minutes old and nothing refreshes them.
-    stub.reset();
-    stub.config["lookout.claudeConfigDir"] = configDir;
-    stub.config["lookout.usage.refresh"] = "off";
-    savedGlobal["lookout.usageReadings"] = readings();
-    write(31);
-    activate(context());
-    await vi.waitFor(() => expect(tooltip()).toContain("stale"), WAIT);
-    expect(tooltip()).not.toContain("at this pace");
-  }, 60_000);
-
   describe.skipIf(process.platform === "win32")("with a Claude Code binary to refresh usage", () => {
     /**
      * A stand-in for the binary the Claude Code extension ships: it answers
@@ -336,11 +305,14 @@ describe("the extension", () => {
       const utilization = { five_hour: { utilization: 30 } };
       fs.writeFileSync(path.join(configDir, ".claude.json"), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now() - 11 * 60_000, utilization } }));
       activate(context());
-      await vi.waitFor(() => expect(tooltip()).toMatch(/Usage the last refresh failed; trying again at \d\d:\d\d/), WAIT);
+      await vi.waitFor(() => expect(runs()).toBe(1), WAIT);
       expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▰▱▱▱▱▱▱▱ 30%");
+      // Asked again within three minutes: nothing runs, and nothing is said.
+      const said = infoMessages().length;
       await stub.commands.get("lookout.refreshUsage")!();
-      expect(infoMessages().at(-1)).toMatch(/^Lookout fetches usage at most every 3 minutes on this machine; next at \d\d:\d\d\.$/);
+      expect(infoMessages()).toHaveLength(said);
       expect(runs()).toBe(1);
+      expect(tooltip()).not.toContain("failed");
     }, 60_000);
 
     it("starts no refresh while Claude Code's settings switch nonessential traffic off, and notices when they no longer do", async () => {
@@ -350,8 +322,9 @@ describe("the extension", () => {
       const utilization = { five_hour: { utilization: 30 } };
       fs.writeFileSync(path.join(configDir, ".claude.json"), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now() - 11 * 60_000, utilization } }));
       activate(context());
-      await vi.waitFor(() => expect(tooltip()).toContain("Usage refresh disabled by CLAUDE\\_CODE\\_DISABLE\\_NONESSENTIAL\\_TRAFFIC"), WAIT);
-      expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▰▱▱▱▱▱▱▱ 30%");
+      await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▰▱▱▱▱▱▱▱ 30%"), WAIT);
+      await stub.commands.get("lookout.refreshUsage")!();
+      expect(infoMessages().at(-1)).toBe("Lookout can't fetch usage: refresh disabled by CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC.");
       expect(runs()).toBe(0);
       fs.writeFileSync(settings, JSON.stringify({ env: {} }));
       await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▰▰▱▱▱▱▱▱ 44%"), WAIT);

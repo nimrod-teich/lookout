@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { countStates, describeLocation, describePace, describeState, formatCountdown, formatElapsed, formatUntil, quietFor, type Counts } from "../core/format";
+import { countStates, describeLocation, describeState, formatCountdown, formatResetIn, quietFor, type Counts } from "../core/format";
 import type { SessionView } from "../core/types";
 import type { UsageMeter } from "../core/usage";
 import type { Usage } from "./controller";
@@ -23,8 +23,6 @@ const STALE_COLOR = "disabledForeground";
 export interface StatusBarInput {
   views: readonly SessionView[];
   usage: Usage | undefined;
-  /** Why the usage numbers are not kept fresh, when that needs saying. */
-  usageNote?: string;
   enabled: boolean;
   showUsage: boolean;
   /** The time until the 5-hour window resets, after the bar. */
@@ -68,12 +66,11 @@ function usageText(usage: Usage | undefined, showReset: boolean, now: number): s
   return `${usageBar(meter.percent)} ${meter.percent}%${reset}`;
 }
 
-/** Grey when stale, red when the pace runs out before the reset, else by consumption. */
+/** Grey when stale, else by consumption. */
 function usageColor(usage: Usage | undefined): string {
   const meter = sessionMeter(usage);
   if (!usage || !meter) return "";
   if (usage.stale) return STALE_COLOR;
-  if (usage.pace[meter.key]?.runsOut) return BAR_COLORS.high;
   return BAR_COLORS[usageLevel(meter.percent)];
 }
 
@@ -83,9 +80,10 @@ function spokenText(counts: Counts, quiet: number, usage: Usage | undefined): st
   return meter ? `${sessions}. Usage ${meter.label} ${meter.percent}%` : sessions;
 }
 
+/** " · resets in 3h", as Claude Code's panel says it. */
 function resetText(resetsAt: number | undefined, now: number): string {
   if (resetsAt === undefined || resetsAt <= now) return "";
-  return ` · resets in ${formatUntil(resetsAt - now)}`;
+  return ` · resets ${formatResetIn(resetsAt - now)}`;
 }
 
 function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
@@ -102,17 +100,11 @@ function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
     md.appendMarkdown("---\n\n**Claude usage**  \n");
     if (input.usage) {
       for (const meter of input.usage.meters) {
-        const pace = describePace(input.usage.pace[meter.key], meter, now);
-        md.appendText(`${meter.label}: ${meter.percent}%${resetText(meter.resetsAt, now)}${pace ? ` · ${pace}` : ""}`);
+        md.appendText(`${meter.label}: ${Math.floor(meter.percent)}%${resetText(meter.resetsAt, now)}`);
         md.appendMarkdown("  \n");
       }
-      md.appendText(`As of ${formatElapsed(now - input.usage.fetchedAt)} ago${input.usage.stale ? " (stale)" : ""}`);
     } else {
-      md.appendText(`No usage reported${input.canRefreshUsage && !input.usageNote ? "; run Lookout: Refresh Usage" : ""}`);
-    }
-    if (input.usageNote) {
-      md.appendMarkdown("  \n");
-      md.appendText(`Usage ${input.usageNote}`);
+      md.appendText(`No usage reported${input.canRefreshUsage ? "; run Lookout: Refresh Usage" : ""}`);
     }
     md.appendMarkdown("\n\n");
   }

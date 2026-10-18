@@ -1,9 +1,9 @@
 /// <reference lib="dom" />
-import { clockTime, describeEvidence, describePace, describeReason, formatElapsed, formatTokens, formatUntil, formatUsd, quietFor, shortModel } from "../core/format";
+import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
 import { Harbour } from "./harbour";
-import { cacheChip, cardLine, compactedSinceLastCall, compactionChip, contextLevel, contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type Chip, type GroupKey } from "./model";
+import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type Chip, type GroupKey } from "./model";
 import type { BoardUsage, EarlierInfo, EarlierScope, FromBoard, ToBoard } from "./protocol";
 
 declare function acquireVsCodeApi(): {
@@ -83,8 +83,6 @@ function chips(view: SessionView): Chip[] {
   // The ring shows the context when the window is known; the chip covers the rest.
   if (view.contextTokens && !view.contextWindow) out.push({ text: `${formatTokens(view.contextTokens)} tokens` });
   if (view.agents > 0) out.push({ text: view.agents === 1 ? "1 agent" : `${view.agents} agents` });
-  const compacted = compactionChip(view, now());
-  if (compacted) out.push(compacted);
   return out;
 }
 
@@ -99,15 +97,6 @@ function setChip(chip: HTMLElement, value: Chip): void {
   const className = value.kind ? `chip ${value.kind}` : "chip";
   if (chip.className !== className) chip.className = className;
   if (chip.title !== (value.title ?? "")) chip.title = value.title ?? "";
-}
-
-/** The card's prompt cache chip; its countdown moves with the clock. */
-function renderCache(card: HTMLElement, view: SessionView): void {
-  const chip = card.querySelector(".costs .cache-slot") as HTMLElement;
-  const value = cacheChip(view, now());
-  chip.classList.toggle("hidden", value === undefined);
-  if (value) setChip(chip, { ...value, kind: `cache-slot ${value.kind}` });
-  card.querySelector(".costs")!.classList.toggle("hidden", value === undefined && view.spend === undefined);
 }
 
 // The harbour: the lighthouse, its beam, and the sessions as boats.
@@ -151,8 +140,6 @@ function showHover(id: string | undefined): void {
     const tokens = view.spend.input + view.spend.output + view.spend.cacheRead + view.spend.cacheWrite;
     meta.push(`${formatTokens(tokens)} tokens${typeof view.spend.costUsd !== "number" ? "" : ` · ${view.spend.estimated ? "~" : ""}${formatUsd(view.spend.costUsd)}`}`);
   }
-  const cache = cacheChip(view, now());
-  if (cache) meta.push(cache.text);
   hover.append(el("div", "hover-meta", meta.join(" · ")));
   hover.append(el("div", "hover-hint", "Click to jump"));
   const boat = harbour.boatFor(view.id);
@@ -300,9 +287,10 @@ function renderBeam(): void {
 const meters = el("div", "meters");
 const meterRows = new Map<string, HTMLElement>();
 
+/** "Resets in 3h", as Claude Code's panel says it. */
 function resetText(resetsAt: number | undefined): string {
   if (resetsAt === undefined || resetsAt <= now()) return "";
-  return `resets in ${formatUntil(resetsAt - now())}`;
+  return `Resets ${formatResetIn(resetsAt - now())}`;
 }
 
 /** Fill colour by consumption: calm below half, amber from half, red from 80%. */
@@ -323,22 +311,14 @@ function renderMeters(): void {
       row = el("div", "meter");
       const bar = el("span", "bar");
       bar.append(el("span", "fill"));
-      const reset = el("span", "reset");
-      reset.append(el("span", "when"), el("span", "pace"));
-      row.append(el("span", "label"), bar, el("span", "percent"), reset);
+      row.append(el("span", "label"), el("span", "percent"), bar, el("span", "reset"));
       meterRows.set(meter.key, row);
     }
-    const pace = usage.pace[meter.key];
-    const paceText = describePace(pace, meter, now());
-    // The pace runs out before the window resets: red, whatever the share used so far.
-    row.className = `meter ${pace?.runsOut ? "high runs-out" : meterLevel(meter.percent)}`;
+    row.className = `meter ${meterLevel(meter.percent)}`;
     row.querySelector(".label")!.textContent = meter.label;
     (row.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
-    row.querySelector(".percent")!.textContent = `${meter.percent}%`;
-    row.querySelector(".when")!.textContent = resetText(meter.resetsAt);
-    row.querySelector(".pace")!.textContent = paceText ? `${resetText(meter.resetsAt) ? " · " : ""}${paceText}` : "";
-    row.querySelector(".reset")!.classList.toggle("hidden", !resetText(meter.resetsAt) && !paceText);
-    row.title = [`${meter.label}: ${meter.percent}% used${meter.resetsAt !== undefined && meter.resetsAt > now() ? `, ${resetText(meter.resetsAt)}` : ""}.`, pace ? `Rising ${pace.perHour} points an hour over the readings of this window.` : "", paceText ? `${paceText[0]!.toUpperCase()}${paceText.slice(1)}.` : ""].filter(Boolean).join(" ");
+    row.querySelector(".percent")!.textContent = `${Math.floor(meter.percent)}%`;
+    row.querySelector(".reset")!.textContent = resetText(meter.resetsAt);
     if (row.previousElementSibling !== (previous ?? null) || row.parentElement !== meters) meters.insertBefore(row, previous ? previous.nextSibling : meters.firstChild);
     previous = row;
   }
@@ -358,10 +338,7 @@ function renderMeters(): void {
     meters.append(foot);
   }
   meters.append(foot);
-  // How old the numbers are, and why they may not be current; or that there are none.
-  const age = usage.fetchedAt === undefined ? "No usage reported" : `as of ${formatElapsed(now() - usage.fetchedAt)} ago${usage.stale ? " · stale" : ""}`;
-  foot.querySelector(".age")!.textContent = usage.note ? `${age} · ${usage.note}` : age;
-  foot.classList.toggle("none", usage.fetchedAt === undefined);
+  foot.querySelector(".age")!.textContent = usage.fetchedAt === undefined ? "No usage reported" : "";
   foot.querySelector(".link")!.classList.toggle("hidden", !usage.canRefresh);
 }
 
@@ -379,7 +356,7 @@ function createCard(view: SessionView): HTMLElement {
   const pulse = el("span", "pulse");
   const chipsEl = el("span", "chips");
   const costs = el("span", "costs");
-  costs.append(el("span", "chip spend"), el("span", "chip cache-slot hidden"));
+  costs.append(el("span", "chip spend"));
   const hitsEl = el("span", "hits hidden");
   main.append(row, line, options, pulse, chipsEl, costs, hitsEl);
   card.append(main);
@@ -469,15 +446,13 @@ function updateCard(card: HTMLElement, view: SessionView): void {
     ring.classList.toggle("warn", level === "high");
     ring.classList.toggle("full", level === "full");
     ring.querySelector(".ring-value")!.textContent = `${percent}%`;
-    const since = compactedSinceLastCall(view) && view.compactedAt !== undefined ? ` It was compacted at ${clockTime(view.compactedAt, now())}, after this reading: the next call starts with less.` : "";
-    ring.title = `Context window ${percent}% full (${formatTokens(view.contextTokens ?? 0)} of ${formatTokens(view.contextWindow ?? 0)}) at the agent's last call; amber from 75%, red from 90%. When it fills, the agent compacts the conversation.${since}`;
+    ring.title = `Context window ${percent}% full (${formatTokens(view.contextTokens ?? 0)} of ${formatTokens(view.contextWindow ?? 0)}) at the agent's last call; amber from 75%, red from 90%. When it fills, the agent compacts the conversation.`;
   }
-  renderCache(card, view);
   const spendEl = card.querySelector(".spend") as HTMLElement;
   const spend = view.spend;
   spendEl.classList.toggle("hidden", spend === undefined);
   // A row with no chips takes no room.
-  card.querySelector(".costs")!.classList.toggle("hidden", spend === undefined && cacheChip(view, now()) === undefined);
+  card.querySelector(".costs")!.classList.toggle("hidden", spend === undefined);
   if (spend) {
     const tokens = spend.input + spend.output + spend.cacheRead + spend.cacheWrite;
     const cost = typeof spend.costUsd !== "number" ? "" : ` · ${spend.estimated ? "~" : ""}${formatUsd(spend.costUsd)}`;
@@ -735,7 +710,6 @@ function tick(): void {
       card.classList.toggle("quiet", quietFor(view, now()) !== undefined);
       card.querySelector(".line .kind")!.textContent = cardLine(view, now()).label ?? "";
     }
-    renderCache(card, view);
     card.title = cardTitle(view);
   }
   for (const view of past) {

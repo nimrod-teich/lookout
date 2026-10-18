@@ -206,7 +206,6 @@ describe("long transcripts and subagents", () => {
     );
     const session = new ClaudeProvider(configDir, proc).poll(Date.now())[0];
     expect(session?.question).toEqual({ text: "Built. Want me to tag the release?", at: Date.parse("2026-10-16T10:00:00.000Z") });
-    expect(session?.lastReply).toBe("Built. Want me to tag the release?");
     expect(session?.spend).toMatchObject({ costUsd: 1, partial: false });
   });
 
