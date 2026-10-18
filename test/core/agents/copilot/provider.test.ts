@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
+import { localChatAddress, LocalChats } from "../../../../src/core/agents/copilot/localChats";
 import { CopilotProvider } from "../../../../src/core/agents/copilot/provider";
 import type { NamedProcess, ProcessFinder } from "../../../../src/core/proc";
 import { parseQuery } from "../../../../src/core/terms";
@@ -155,5 +157,46 @@ describe("CopilotProvider, VS Code's Copilot sessions", () => {
     expect(past.sessions.find((s) => s.id === VSCODE)).toMatchObject({ resumesIn: "panel", vscodeSession: `agent-host-copilotcli:/${VSCODE_ID}`, resumable: true });
     expect(provider.resumeCommand(VSCODE)).toBeUndefined();
     expect(provider.resumeCommand(ANSWERED)).toEqual({ args: ["copilot", "--resume", ANSWERED], cwd: "/work/a" });
+  });
+});
+
+describe("CopilotProvider, VS Code's Local chats", () => {
+  const WAITING = "3246e7f2-6a68-4998-8595-bb1bb5280cdd";
+  const DONE = "7f036dbc-fc4b-4fac-89fc-8625c0ea1c98";
+  const md = (value: string) => ({ value });
+  function chatLog(id: string, ask: string, modelState: { value: number }, at: number): string {
+    return [
+      { kind: 0, v: { sessionId: id, creationDate: at - 60_000, requests: [] } },
+      { kind: 2, k: ["requests"], v: [{ timestamp: at, message: { text: ask }, modelState, response: [md("On it."), { kind: "toolInvocationSerialized", toolId: "run_in_terminal", invocationMessage: md("Running `touch a.txt`"), toolSpecificData: { commandLine: { original: "touch a.txt" } } }] }] },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n");
+  }
+
+  it("shows a chat waiting on a tool call as a live session of VS Code's Chat, and the answered ones under Earlier, searched", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-chats-"));
+    try {
+      const workspace = path.join(root, "96b9fa1571773ce0d8a5b7199a4fdca8");
+      fs.mkdirSync(path.join(workspace, "chatSessions"), { recursive: true });
+      fs.writeFileSync(path.join(workspace, "workspace.json"), '{"folder":"vscode-remote://wsl%2Bubuntu-22.04/work/panel"}');
+      fs.writeFileSync(path.join(workspace, "chatSessions", `${WAITING}.jsonl`), chatLog(WAITING, "Run this command in the terminal: touch a.txt", { value: 4 }, NOW - 60_000));
+      fs.writeFileSync(path.join(workspace, "chatSessions", `${DONE}.jsonl`), chatLog(DONE, "What does the deploy script do?", { value: 1 }, NOW - 600_000));
+      const now = Date.now();
+      for (const name of fs.readdirSync(path.join(workspace, "chatSessions"))) fs.utimesSync(path.join(workspace, "chatSessions", name), now / 1000, now / 1000);
+      const chats = new LocalChats(() => [root]);
+      await chats.refresh();
+      const provider = new CopilotProvider(tempCopilotHome(), finder([]), new FakeProc(), () => NOW, undefined, undefined, chats);
+      expect(provider.poll(now).filter((s) => s.id === WAITING || s.id === DONE)).toEqual([
+        expect.objectContaining({ id: WAITING, pid: 0, status: "waiting", panel: true, cwd: "/work/panel", vscodeSession: localChatAddress(WAITING), reason: { kind: "permission", ask: "touch a.txt", raw: "Running touch a.txt" } }),
+      ]);
+      const past = provider.past({ folders: ["/work/panel"], all: false, limit: 50 }, new Set());
+      expect(past.sessions.find((s) => s.id === DONE)).toMatchObject({ title: "What does the deploy script do?", resumesIn: "panel", vscodeSession: localChatAddress(DONE), resumable: true });
+      expect(provider.resumeCommand(DONE)).toBeUndefined();
+      const found = provider.search(parseQuery("deploy script", now), 10, 5_000);
+      expect(found.results.map((r) => r.id)).toEqual([DONE]);
+      expect(provider.history(WAITING)?.map((m) => m.role)).toEqual(["you", "agent"]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
