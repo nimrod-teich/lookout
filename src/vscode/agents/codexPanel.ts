@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
-import type { SessionView } from "../../core/types";
+import type { PastView, SessionView } from "../../core/types";
 import type { Log } from "../log";
 import type { PanelAdapter, PanelReveal } from "./panel";
+import { openChatSession } from "./vscodeChat";
 
 /** The OpenAI extension that hosts Codex threads in VS Code. */
 const CODEX_EXTENSION = "openai.chatgpt";
@@ -47,7 +48,8 @@ async function show(id: string, log: Log): Promise<PanelReveal> {
 
 /** The Codex extension's threads: its side bar, or an editor tab per thread. */
 export const codexPanel: PanelAdapter = {
-  reveal: (view: SessionView, log: Log) => show(view.id, log),
+  // A thread of VS Code's own Chat opens there; the OpenAI extension's in its editor.
+  reveal: (view: SessionView, log: Log) => (view.vscodeSession ? openChatSession(view.vscodeSession, log, view.title) : show(view.id, log)),
 
   /** Its editor tab is the one in front; a thread in the side bar cannot be told. */
   isActive(view: SessionView): boolean {
@@ -59,5 +61,5 @@ export const codexPanel: PanelAdapter = {
   rename: () => Promise.resolve(false),
 
   /** The extension loads a thread it is asked to show, and resumes it there. */
-  resume: async (id: string, log: Log) => (await show(id, log)) === "revealed",
+  resume: async (id: string, log: Log, view?: PastView) => (await (view?.vscodeSession ? openChatSession(view.vscodeSession, log) : show(id, log))) === "revealed",
 };

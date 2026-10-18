@@ -50,6 +50,17 @@ describe("the Codex extension's threads", () => {
     expect(await codexPanel.rename(view({ id: THREAD, agent: "codex" }), log)).toBe(false);
   });
 
+  it("opens a thread VS Code's own Chat runs there, with its approval prompt, even without the extension", async () => {
+    stub.extension = undefined;
+    stub.commands.set("workbench.action.chat.openSessionInEditorGroup", () => undefined);
+    const address = "agent-host-codex:/ef8da9c5-e92c-412e-a5ec-8030c1d4cdd1";
+    expect(await codexPanel.reveal(view({ id: THREAD, agent: "codex", vscodeSession: address }), log)).toBe("revealed");
+    expect(await codexPanel.resume(OTHER, log, { ...view({ id: OTHER, agent: "codex" }), vscodeSession: address } as never)).toBe(true);
+    const calls = stub.ops.filter((op) => op[1] === "workbench.action.chat.openSessionInEditorGroup").map((op) => String((op[2] as [{ resource: unknown }])[0].resource));
+    expect(calls).toEqual([address, address]);
+    expect(stub.ops.some((op) => op[1] === "vscode.openWith")).toBe(false);
+  });
+
   it("knows a thread is in front only when its editor tab is", () => {
     const group = codexGroup(1, [OTHER, THREAD]);
     stub.activate(group.tabs[1] as never);

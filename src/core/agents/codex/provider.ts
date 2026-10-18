@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import type { AgentHostSessions } from "../../agentHost";
 import { questionIn, quoteAsk } from "../../asks";
 import { branchAt } from "../../git";
 import { HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
@@ -80,6 +81,8 @@ export class CodexProvider implements AgentProvider {
   constructor(
     private readonly home: string,
     private readonly finder: ProcessFinder,
+    /** VS Code's ids for the threads its own Chat runs. */
+    private readonly agentHost?: AgentHostSessions,
   ) {
     this.catalog = new RolloutCatalog(sessionsDir(home));
     this.names = new ThreadNames(sessionIndexFile(home));
@@ -122,6 +125,9 @@ export class CodexProvider implements AgentProvider {
     for (const { process, server, rollout } of held.values()) {
       // An app-server's threads are its editor's: placed in the panel of the window whose extension host runs it.
       const session = this.session(process, rollout, now, server === "app-server");
+      // VS Code's own Chat runs it (its Codex session type): placed by its folder, opened there.
+      const vscodeSession = this.vscodeSessionOf(rollout.id, rollout.originator, rollout.createdAt);
+      if (vscodeSession) session.vscodeSession = vscodeSession;
       files.set(session.id, rollout.file);
       sessions.push(session);
     }
@@ -176,7 +182,12 @@ export class CodexProvider implements AgentProvider {
     const { rollouts, capped, incomplete, also, compressed } = this.pastRollouts.list(scope, exclude);
     this.pastListed = new Map([...rollouts, ...also].map((r) => [r.id, r]));
     for (const id of [...this.pastIndexes.keys()]) if (!this.pastListed.has(id)) this.pastIndexes.delete(id);
-    const session = (r: PastRollout): PastSession => ({ agent: this.id, id: r.id, cwd: r.cwd, title: r.title, resumable: r.inFolders, modifiedAt: r.modifiedAt, ...(editorThread(r.originator) ? { resumesIn: "panel" as const } : {}) });
+    const session = (r: PastRollout): PastSession => {
+      const base: PastSession = { agent: this.id, id: r.id, cwd: r.cwd, title: r.title, resumable: r.inFolders, modifiedAt: r.modifiedAt };
+      if (!editorThread(r.originator)) return base;
+      const vscodeSession = r.inFolders ? this.vscodeSessionOf(r.id, r.originator) : undefined;
+      return { ...base, resumesIn: "panel", ...(vscodeSession ? { vscodeSession } : {}) };
+    };
     const notes = compressed > 0 ? [`${compressed} older Codex ${compressed === 1 ? "session is" : "sessions are"} compressed (.jsonl.zst) and not listed or searched.`] : undefined;
     return { sessions: rollouts.map(session), capped, incomplete, also: also.map(session), notes };
   }
@@ -202,6 +213,13 @@ export class CodexProvider implements AgentProvider {
     if (!index) return undefined;
     index.refresh();
     return index.messages;
+  }
+
+  /** VS Code's address for a thread its own Chat runs (`originator` `vscode_agent_host`): `agent-host-codex:/<VS Code id>`. */
+  private vscodeSessionOf(id: string, originator: string | undefined, createdAt?: number): string | undefined {
+    if (!originator || !/agent_host/i.test(originator)) return undefined;
+    const vscodeId = this.agentHost?.idOf(id, createdAt);
+    return vscodeId ? `agent-host-codex:/${vscodeId}` : undefined;
   }
 
   /** `codex resume <id>`, in the folder the thread worked in; none for the VS Code extension's threads, which resume in its panel. */
@@ -392,7 +410,7 @@ export class CodexProvider implements AgentProvider {
   }
 }
 
-/** A thread the VS Code extension wrote (`codex_vscode`): it opens in the extension's panel, not in a terminal. */
+/** A thread an editor wrote: the OpenAI extension's (`codex_vscode`) or VS Code's own Chat's (`vscode_agent_host`); it opens there, not in a terminal. */
 function editorThread(originator: string | undefined): boolean {
   return originator !== undefined && /vscode/i.test(originator);
 }
