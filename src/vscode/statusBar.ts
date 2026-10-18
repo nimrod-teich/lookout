@@ -17,6 +17,8 @@ const USAGE_ERROR_AT = 95;
 const BAR_CELLS = 10;
 /** The bar's colour by consumption, like the board's meters: calm below half, amber from half, red from 80%. */
 const BAR_COLORS = { low: "charts.green", mid: "charts.yellow", high: "charts.red" } as const;
+/** The same colours in the hover, where only an inline style can colour text: VS Code's default chart colours. */
+const HOVER_COLORS = { low: "#89d185", mid: "#cca700", high: "#f14c4c", stale: "#8b8b8b" } as const;
 /** Numbers too old to go by. */
 const STALE_COLOR = "disabledForeground";
 
@@ -88,6 +90,8 @@ function resetText(resetsAt: number | undefined, now: number): string {
 
 function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
   const md = new vscode.MarkdownString("", true);
+  // For the coloured usage bars; VS Code keeps only colour styles.
+  md.supportHtml = true;
   for (const view of input.views) {
     md.appendMarkdown(`${iconFor(view, now)} **`);
     md.appendText(view.title);
@@ -100,6 +104,8 @@ function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
     md.appendMarkdown("---\n\n**Claude usage**  \n");
     if (input.usage) {
       for (const meter of input.usage.meters) {
+        const color = HOVER_COLORS[input.usage.stale ? "stale" : usageLevel(meter.percent)];
+        md.appendMarkdown(`<span style="color:${color};">${usageBar(meter.percent)}</span> `);
         md.appendText(`${meter.label}: ${Math.floor(meter.percent)}%${resetText(meter.resetsAt, now)}`);
         md.appendMarkdown("  \n");
       }
