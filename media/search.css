@@ -1,0 +1,281 @@
+/* The search page wears the harbour's night, like the conversation tab. */
+:root {
+  --paper: #0a1521;
+  --paper-2: #0d1b2b;
+  --well: #060d16;
+  --ink: #e6f0f7;
+  --muted: #8ea5b8;
+  --line: rgba(160, 200, 230, 0.18);
+  --line-strong: rgba(160, 200, 230, 0.32);
+  --lamp: #ffb000;
+  --beam: #5fb4ff;
+  --mark: rgba(255, 176, 0, 0.32);
+  --mark-strong: rgba(255, 176, 0, 0.62);
+  --mono: var(--vscode-editor-font-family, ui-monospace, Menlo, Consolas, monospace);
+}
+
+body {
+  margin: 0;
+  padding: 0 0 64px;
+  color: var(--ink);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  background: var(--paper);
+}
+
+#root {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* The top: what this is, how much it found, and the box ------------------- */
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 -24px 18px;
+  padding: 12px 24px 12px;
+  background:
+    radial-gradient(1px 1px at 12% 28%, rgba(255, 255, 255, 0.55) 50%, transparent 51%),
+    radial-gradient(1px 1px at 31% 62%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    radial-gradient(1px 1px at 47% 20%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 63% 70%, rgba(255, 255, 255, 0.3) 50%, transparent 51%),
+    radial-gradient(1px 1px at 78% 34%, rgba(255, 255, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(1px 1px at 91% 58%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    linear-gradient(180deg, #0f2238 0%, #0b1726 70%, var(--paper) 100%);
+  border-bottom: 1px solid var(--line-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.heading {
+  flex-basis: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  font-size: calc(var(--vscode-font-size) + 5px);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.heading .mark {
+  flex: none;
+  align-self: center;
+  width: 18px;
+  height: 18px;
+  color: var(--lamp);
+  filter: drop-shadow(0 0 6px rgba(255, 176, 0, 0.6));
+}
+
+.heading .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heading .count,
+.heading .where {
+  flex: none;
+  font-size: var(--vscode-font-size);
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.heading .where:empty {
+  display: none;
+}
+
+.field {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(160, 200, 230, 0.07);
+  color: var(--ink);
+}
+
+.field:focus-within {
+  border-color: rgba(255, 176, 0, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 176, 0, 0.25);
+}
+
+.field svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  opacity: 0.7;
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+
+.field input::placeholder {
+  color: var(--muted);
+}
+
+.field input::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* Sessions ------------------------------------------------------------------ */
+
+.session {
+  margin: 14px 0 22px;
+  border-left: 3px solid var(--muted);
+  padding-left: 12px;
+}
+
+.session.live {
+  border-left-color: var(--lamp);
+}
+
+.session-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-head:hover .session-title {
+  text-decoration: underline;
+}
+
+.session-title {
+  font-size: calc(var(--vscode-font-size) + 2px);
+  font-weight: 600;
+}
+
+.session-head .where,
+.session-head .matches {
+  color: var(--muted);
+}
+
+.tag {
+  padding: 0 6px;
+  border-radius: 3px;
+  background: rgba(160, 200, 230, 0.1);
+  color: var(--muted);
+  font-size: calc(var(--vscode-font-size) - 2px);
+  line-height: 16px;
+}
+
+.session.live .tag {
+  background: rgba(255, 176, 0, 0.14);
+  color: var(--lamp);
+}
+
+/* One match: who wrote it, when, and the words around it. */
+.hit {
+  display: grid;
+  grid-template-columns: 9em 1fr;
+  gap: 12px;
+  width: 100%;
+  margin: 4px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hit:hover {
+  border-color: var(--line-strong);
+  background: #102236;
+}
+
+.hit .meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  color: var(--muted);
+}
+
+.hit .who {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hit.you .who {
+  color: var(--lamp);
+}
+
+.hit.agent .who {
+  color: var(--beam);
+}
+
+.hit .text {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--mark);
+  color: var(--ink);
+}
+
+.more {
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--beam);
+  font: inherit;
+  font-size: calc(var(--vscode-font-size) - 1px);
+  cursor: pointer;
+}
+
+.more:hover {
+  text-decoration: underline;
+}
+
+.empty {
+  margin: 48px auto;
+  text-align: center;
+  color: var(--muted);
+}
+
+.empty .big {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: calc(var(--vscode-font-size) + 2px);
+}
+
+.empty .small {
+  max-width: 560px;
+  margin: 0 auto;
+}

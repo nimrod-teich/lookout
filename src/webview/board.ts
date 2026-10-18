@@ -176,7 +176,13 @@ field.append(input);
 const clear = el("button", "clear", "×");
 clear.type = "button";
 clear.title = "Clear the search";
-const summary = el("span", "summary");
+// How much the search found; a click reads it all on the search page.
+const summary = el("button", "summary");
+summary.type = "button";
+summary.title = "Open every match on the search page";
+summary.addEventListener("click", () => {
+  if (query !== "") vscode.postMessage({ type: "openSearch", query });
+});
 search.append(field, clear, summary);
 beam.append(search);
 

@@ -463,6 +463,20 @@ describe("the extension", () => {
       expect(opened(ELSEWHERE)).toBe(false);
     }, 60_000);
 
+    it("searches every conversation on the search page, and opens a match in the conversation tab", async () => {
+      activate(context());
+      const { listed } = openBoard();
+      await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+      await stub.commands.get("lookout.search")!();
+      const page = stub.panels.find((panel) => panel.viewType === "lookout.search")!;
+      expect(page.posted.at(-1)).toEqual({ type: "query", query: "" });
+      page.receive({ type: "search", query: "deploy", zone: new Date().getTimezoneOffset() });
+      expect(page.posted.at(-1)).toMatchObject({ type: "results", query: "deploy", pending: 0, sessions: [{ id: HERE, title: "tune the deploy script", live: false, count: 1, hits: [{ index: 0, role: "you", snippet: "tune the deploy script" }] }] });
+      page.receive({ type: "open", query: "deploy", id: HERE, index: 0 });
+      const tab = stub.panels.find((panel) => panel.viewType === "lookout.findings")!;
+      expect(tab.posted.at(-1)).toMatchObject({ type: "conversation", session: { id: HERE }, query: "deploy", target: 0 });
+    }, 60_000);
+
     it("lists a long history in quick slices, not one slice per poll", async () => {
       for (let i = 0; i < 130; i++) writePast("/work/app", `00000000-0000-4000-8000-${String(1000 + i).padStart(12, "0")}`, "main", `task ${i}`);
       activate(context());

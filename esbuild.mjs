@@ -26,11 +26,12 @@ const board = {
   logLevel: "info",
 };
 
-// The findings tab is a second webview, bundled the same way.
+// The findings tab and the search page are webviews too, bundled the same way.
 const findings = { ...board, entryPoints: ["src/webview/findings.ts"], outfile: "dist/findings.js" };
+const search = { ...board, entryPoints: ["src/webview/search.ts"], outfile: "dist/search.js" };
 
 if (watch) {
-  for (const options of [extension, board, findings]) await (await esbuild.context(options)).watch();
+  for (const options of [extension, board, findings, search]) await (await esbuild.context(options)).watch();
 } else {
-  await Promise.all([esbuild.build(extension), esbuild.build(board), esbuild.build(findings)]);
+  await Promise.all([esbuild.build(extension), esbuild.build(board), esbuild.build(findings), esbuild.build(search)]);
 }

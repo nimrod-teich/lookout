@@ -55,8 +55,23 @@
         "command": "lookout.refreshUsage",
         "title": "Refresh Usage",
         "category": "Lookout"
+      },
+      {
+        "command": "lookout.search",
+        "title": "Search All Sessions",
+        "category": "Lookout",
+        "icon": "$(search)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "lookout.search",
+          "when": "view == lookout.board",
+          "group": "navigation"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "lookout.jump",

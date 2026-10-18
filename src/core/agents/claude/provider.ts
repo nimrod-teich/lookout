@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { HistoryIndex, type HistoryMessage, type SearchResult } from "../../history";
+import { HistoryIndex, type HistoryMessage, type SearchResult, type SnippetSize } from "../../history";
 import { projectOf } from "../../model";
 import { hasFilters, type Query } from "../../terms";
 import { findLastLine, JsonlTail, lineStartAtOrAfter, readLineAt } from "../../jsonlTail";
@@ -169,7 +169,7 @@ export class ClaudeProvider implements AgentProvider {
    * happens only while the budget allows, the live sessions first. A query
    * of operators alone lists the sessions they pick, without matches.
    */
-  search(parsed: Query, limit: number, budgetMs: number): SearchOutcome {
+  search(parsed: Query, limit: number, budgetMs: number, snippet?: SnippetSize): SearchOutcome {
     if (parsed.terms.length === 0 && !hasFilters(parsed)) return { results: [], pending: 0 };
     const range = { since: parsed.since, before: parsed.before };
     const timed = parsed.since !== undefined || parsed.before !== undefined;
@@ -190,7 +190,7 @@ export class ClaudeProvider implements AgentProvider {
       index.refresh();
       if (parsed.files.length > 0 && !index.touched(parsed.files)) continue;
       if (parsed.terms.length > 0) {
-        const { count, hits } = index.search(parsed.terms, limit, range);
+        const { count, hits } = index.search(parsed.terms, limit, range, snippet);
         if (count > 0) results.push({ id, count, hits });
       } else if (!timed || index.hasMessageIn(range)) results.push({ id, count: 0, hits: [] });
     }

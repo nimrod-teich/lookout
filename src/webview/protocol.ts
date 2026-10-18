@@ -42,6 +42,8 @@ export type FromBoard =
   | { type: "search"; query: string; zone?: number }
   /** Open the session's conversation in the findings tab, at one message or at the newest match. */
   | { type: "openHit"; query: string; id: string; index?: number }
+  /** Open the search page with this query. */
+  | { type: "openSearch"; query: string }
   /** Resume a session that is not running, in the agent's panel. */
   | { type: "resume"; id: string }
   /** List and search the earlier sessions of this window's folders, or of every project. */

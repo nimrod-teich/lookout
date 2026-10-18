@@ -470,9 +470,19 @@ body.vscode-reduce-motion .hover-card {
 }
 
 .search .summary {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: calc(var(--vscode-font-size) - 2px);
   color: var(--muted);
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.search .summary:hover {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: underline;
 }
 
 .search.searching .summary {
