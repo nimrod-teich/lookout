@@ -22,8 +22,7 @@
 </p>
 
 <p align="center">
-  <img src="media/readme/hero.gif" width="400" alt="The Lookout board: the harbour with one boat per session, the legend, each agent's usage limits and the cards, then a word typed in the search and the matching conversations">
-  <img src="media/readme/board-search.png" width="400" alt="The board after a search: every session with matches keeps its card, the matching lines quoted under it">
+  <img src="media/readme/window.png" width="100%" alt="VS Code with the Lookout board in the side bar: the harbour with one boat per session, the legend, each agent's usage limits, and the cards, one Claude session waiting on a permission, two finished; the terminal below shows the prompt it waits on">
 </p>
 
 Running several AI coding agents at once means clicking through tabs and terminals to find out which one finished and which one is stuck on a question. Lookout keeps that answer on one board in the side bar, takes you to the right tab or terminal with one keystroke, and finds any conversation, running or not, by a word you remember from it. Claude Code in its VS Code panel or a terminal, Codex in its extension's panel, VS Code's Chat or a terminal, Copilot in VS Code's Chat or a terminal: one board, one jump key, one search, each agent with its own colour and boat once more than one is on the board. It reads only what the agents already write on disk.
@@ -81,8 +80,6 @@ Updating an installed copy restarts the extension host, which ends the agent ses
 - A recent version of a [supported agent](#supported-agents).
 
 On SSH and container remotes Lookout runs on the remote machine, where none of your desktop is, so desktop notifications are off there; the notification inside the VS Code window still comes. Under WSL they reach the Windows desktop.
-
-Windows and macOS support is new. The process handling is tested on both in CI; neither has been run against a live agent session yet.
 
 ## Commands
 
