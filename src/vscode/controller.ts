@@ -330,6 +330,13 @@ export class Controller implements vscode.Disposable {
     return undefined;
   }
 
+  /** The sessions VS Code's own Chat runs, through its agent host: one reader for every agent, made on first use. */
+  private agentHostSessions: AgentHostSessions | undefined;
+  private agentHost(): AgentHostSessions {
+    this.agentHostSessions ??= new AgentHostSessions(path.resolve(this.host.globalStorageDir, "..", "..", "agentSessionData"));
+    return this.agentHostSessions;
+  }
+
   /** Starts, or restarts with other settings. */
   start(config: Config): void {
     this.typedQuestions = config.typedQuestions;
@@ -339,7 +346,7 @@ export class Controller implements vscode.Disposable {
       // Which threads the VS Code extension's app-server holds, from the files it holds open.
       const finder = createProcessFinder("codex", process.platform, { files: true });
       finder.onDidUpdate = () => this.schedulePoll();
-      this.providers.push(new CodexProvider(config.codexHome, finder));
+      this.providers.push(new CodexProvider(config.codexHome, finder, this.agentHost()));
     }
     if (config.copilotEnabled) {
       // Copilot's sessions name the process holding them; the finder tells which of those still run.
@@ -348,7 +355,7 @@ export class Controller implements vscode.Disposable {
       // VS Code's own Copilot sessions are held by the runtime its agent host runs.
       const runtimes = createProcessFinder("copilot-runtime");
       runtimes.onDidUpdate = () => this.schedulePoll();
-      const agentHost = new AgentHostSessions(path.resolve(this.host.globalStorageDir, "..", "..", "agentSessionData"));
+      const agentHost = this.agentHost();
       // VS Code's Local chats, kept with the workspaces' storage on the side of VS Code that shows the window.
       const roots = chatStorageRoots(this.host.globalStorageDir);
       const localChats = new LocalChats(() => roots);

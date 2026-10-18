@@ -11,8 +11,8 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** An `agentSessionData` folder with one session per entry: VS Code's id, the agent's id it names, when it was made. */
-function agentSessionData(sessions: { vscodeId: string; agentId?: string; at: number; noDb?: boolean }[]): string {
+/** An `agentSessionData` folder with one session per entry: VS Code's id, the agent's id it names (Copilot's way, or Codex's `threadId`), when it was made. */
+function agentSessionData(sessions: { vscodeId: string; agentId?: string; threadId?: string; at: number; noDb?: boolean }[]): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-agenthost-"));
   dirs.push(root);
   for (const session of sessions) {
@@ -23,6 +23,10 @@ function agentSessionData(sessions: { vscodeId: string; agentId?: string; at: nu
       db.prepare("CREATE TABLE session_metadata (key TEXT PRIMARY KEY, value TEXT)").all();
       db.prepare("INSERT INTO session_metadata VALUES ('isRead', 'true')").all();
       if (session.agentId) db.prepare("INSERT INTO session_metadata VALUES ('defaultChatProviderData', ?)").all(JSON.stringify({ sdkSessionId: session.agentId, model: { id: "auto" } }));
+      if (session.threadId) {
+        db.prepare("INSERT INTO session_metadata VALUES ('defaultChatProviderData', ?)").all(JSON.stringify({ model: { id: "gpt-6.1-sol" } }));
+        db.prepare("INSERT INTO session_metadata VALUES ('codex.threadId', ?)").all(session.threadId);
+      }
       db.close();
     }
     fs.utimesSync(dir, session.at / 1000, session.at / 1000);
@@ -53,6 +57,28 @@ describe.skipIf(!sqlite)("VS Code's agent host sessions", () => {
     fs.rmSync(path.join(root, VS1, "session.db"));
     expect(sessions.idOf(AGENT1, AT)).toBe(VS1);
     expect(sessions.idOf("01a14ee5-6f70-7b02-a9cb-7ad01294b026")).toBeUndefined();
+  });
+
+  it("finds VS Code's id for a Codex thread by the thread id its database names", () => {
+    const thread = "01a15028-b94b-78e2-850b-f79bd50efebb";
+    const root = agentSessionData([
+      { vscodeId: VS1, threadId: thread, at: AT },
+      { vscodeId: VS2, agentId: AGENT2, at: AT },
+    ]);
+    const sessions = new AgentHostSessions(root);
+    expect(sessions.idOf(thread, AT)).toBe(VS1);
+    expect(sessions.idOf(AGENT2, AT)).toBe(VS2);
+  });
+
+  it("reads a folder made in the last minute again until it names its agent's id", () => {
+    const thread = "01a15030-0682-7070-95cf-25324ca61d58";
+    const root = agentSessionData([{ vscodeId: VS1, at: Date.now() }]);
+    const sessions = new AgentHostSessions(root);
+    expect(sessions.idOf(thread)).toBeUndefined();
+    const db = new sqlite!.DatabaseSync(path.join(root, VS1, "session.db"), { readOnly: false });
+    db.prepare("INSERT INTO session_metadata VALUES ('codex.threadId', ?)").all(thread);
+    db.close();
+    expect(sessions.idOf(thread)).toBe(VS1);
   });
 
   it("looks only at the folders made since the session, when told when that was", () => {

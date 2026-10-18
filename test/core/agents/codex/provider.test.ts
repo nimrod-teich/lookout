@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CodexProvider } from "../../../../src/core/agents/codex/provider";
 import { quietFor } from "../../../../src/core/format";
 import { buildView } from "../../../../src/core/model";
+import type { AgentHostSessions } from "../../../../src/core/agentHost";
 import type { NamedProcess, ProcessFinder } from "../../../../src/core/proc";
 import { parseQuery } from "../../../../src/core/terms";
 import { addPanelThreads, APPROVAL, ASKED_IN_REPLY, EDITED, homeFile, IDLE, lockOf, NOW, PANEL_APPROVAL, PANEL_IDLE, QUESTION, STARTED, tempCodexHome, WORKING } from "./fixtures";
@@ -25,6 +26,9 @@ class FakeFinder implements ProcessFinder {
 function appServer(pid: number): NamedProcess {
   return { pid, ppid: 900, args: ["/ext/openai.chatgpt/bin/linux-x86_64/codex", "-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled"], cwd: "/opt/vscode", startedMs: STARTED };
 }
+
+/** VS Code's id for a session of its Chat. */
+const VSCODE_ID = "ef8da9c5-e92c-412e-a5ec-8030c1d4cdd1";
 
 function codex(pid: number, cwd: string, args: string[] = ["codex"], startedMs = STARTED): NamedProcess {
   return { pid, args, cwd, startedMs };
@@ -256,6 +260,33 @@ describe("CodexProvider, threads held by an app-server or an exec run", () => {
     const stale = tempCodexHome(NOW - 60_000);
     addPanelThreads(stale, NOW - 20 * 60_000);
     expect(new CodexProvider(stale, new FakeFinder([appServer(40)])).poll(NOW)).toEqual([]);
+  });
+
+  it("gives a thread VS Code's own Chat runs VS Code's address for it, live and earlier, and none to the extension's", () => {
+    const home = tempCodexHome();
+    addPanelThreads(home);
+    // VS Code's agent host runs Codex's app-server and says so in the thread's originator.
+    const file = homeFile(home, PANEL_APPROVAL);
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace('"originator":"codex_vscode"', '"originator":"vscode_agent_host"'));
+    fs.utimesSync(file, (NOW - 60_000) / 1000, (NOW - 60_000) / 1000);
+    const asked: string[] = [];
+    const agentHost = {
+      idOf: (id: string) => {
+        asked.push(id);
+        return id === PANEL_APPROVAL ? VSCODE_ID : undefined;
+      },
+    } as unknown as AgentHostSessions;
+    const finder = new FakeFinder([appServer(40)], new Map([[40, [lockOf(home, PANEL_APPROVAL), lockOf(home, PANEL_IDLE)]]]));
+    const provider = new CodexProvider(home, finder, agentHost);
+    const live = new Map(provider.poll(NOW).map((s) => [s.id, s]));
+    expect(live.get(PANEL_APPROVAL)).toMatchObject({ panel: true, status: "waiting", vscodeSession: `agent-host-codex:/${VSCODE_ID}` });
+    expect(live.get(PANEL_IDLE)?.vscodeSession).toBeUndefined();
+    // Only VS Code's own threads are looked up.
+    expect(asked).not.toContain(PANEL_IDLE);
+    const past = new Map(new CodexProvider(home, new FakeFinder(), agentHost).past({ folders: ["/work"], all: false, limit: 50 }, new Set()).sessions.map((s) => [s.id, s]));
+    expect(past.get(PANEL_APPROVAL)).toMatchObject({ resumesIn: "panel", vscodeSession: `agent-host-codex:/${VSCODE_ID}` });
+    expect(past.get(PANEL_IDLE)).toMatchObject({ resumesIn: "panel" });
+    expect(past.get(PANEL_IDLE)?.vscodeSession).toBeUndefined();
   });
 
   it("resumes an earlier thread of the extension in its panel, and a terminal's with codex resume", () => {

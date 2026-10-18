@@ -4,8 +4,9 @@
 // `~/.copilot/session-state/<id>`), under its own id; VS Code gives the
 // session another id, and keeps, for each, a folder
 // `<VS Code data>/agentSessionData/<VS Code id>/` whose `session.db` names the
-// agent's id: table `session_metadata`, key `defaultChatProviderData`, a JSON
-// value with `sdkSessionId`. VS Code addresses the session as
+// agent's id in table `session_metadata`: Copilot's under key
+// `defaultChatProviderData`, a JSON value with `sdkSessionId`; Codex's thread
+// under `codex.threadId`. VS Code addresses the session as
 // `agent-host-<provider>:/<VS Code id>`.
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -55,9 +56,11 @@ export class AgentHostSessions {
       .filter((folder) => createdAt === undefined || folder.mtimeMs >= createdAt - SLACK_MS)
       .sort((a, b) => b.mtimeMs - a.mtimeMs)
       .slice(0, READS_PER_LOOK);
-    for (const { name } of folders) {
+    const now = Date.now();
+    for (const { name, mtimeMs } of folders) {
       const id = this.agentIdIn(path.join(this.dir!, name, "session.db"));
-      this.read.set(name, id ?? null);
+      // A folder made in the last minute may not name its agent's id yet: it is read again.
+      if (id !== undefined || now - mtimeMs > SLACK_MS) this.read.set(name, id ?? null);
       if (id === agentId) return name;
     }
     return undefined;
@@ -68,8 +71,10 @@ export class AgentHostSessions {
     try {
       const db = new this.sqlite!.DatabaseSync(file, { readOnly: true });
       try {
-        const rows = db.prepare("SELECT value FROM session_metadata WHERE key = ?").all("defaultChatProviderData") as { value: unknown }[];
-        const value = rows[0]?.value;
+        const rows = db.prepare("SELECT key, value FROM session_metadata WHERE key IN (?, ?)").all("defaultChatProviderData", "codex.threadId") as { key: unknown; value: unknown }[];
+        const thread = rows.find((row) => row.key === "codex.threadId")?.value;
+        if (typeof thread === "string" && thread) return thread;
+        const value = rows.find((row) => row.key === "defaultChatProviderData")?.value;
         if (typeof value !== "string") return undefined;
         const id = (JSON.parse(value) as { sdkSessionId?: unknown }).sdkSessionId;
         return typeof id === "string" ? id : undefined;
