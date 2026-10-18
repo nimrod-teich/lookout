@@ -141,6 +141,7 @@ export class Controller implements vscode.Disposable {
   private readonly pendingAlerts = new Map<string, ReturnType<typeof setTimeout>>();
   private disposed = false;
   private readonly announcing = new Set<ReturnType<typeof setTimeout>>();
+  private readonly terminalsChanged: vscode.Disposable;
 
   constructor(
     private readonly host: ControllerHost,
@@ -149,7 +150,9 @@ export class Controller implements vscode.Disposable {
   ) {
     this.proc.onDidUpdate = () => this.poll();
     this.windows = new WindowRegistry(host.sharedDir, this.proc);
-    this.windows.register(host.pid, host.label);
+    this.windows.register(host.pid, host.label, terminals.pids);
+    // The other windows find this one's terminal sessions by their shells.
+    this.terminalsChanged = terminals.onDidChange(() => this.windows.register(host.pid, host.label, terminals.pids));
     const done = host.state.get<string[]>(DONE_KEY, []);
     this.attention.restore(done);
     this.savedDone = done.join("\n");
@@ -468,6 +471,12 @@ export class Controller implements vscode.Disposable {
     if (this.attention.dismiss(id)) this.poll();
   }
 
+  /** Another window's record changed: read the windows again, and place the sessions anew. */
+  windowsChanged(): void {
+    this.windows.invalidate();
+    this.schedulePoll();
+  }
+
   /** Clears "done" from the session whose tab or terminal the user just brought to the front. */
   noticeFocus(): void {
     for (const view of this.current) {
@@ -531,6 +540,7 @@ export class Controller implements vscode.Disposable {
     for (const watcher of this.watchers) watcher.dispose();
     this.watchers = [];
     this.proc.onDidUpdate = undefined;
+    this.terminalsChanged.dispose();
     this.windows.unregister(this.host.pid);
     this.changed.dispose();
     this.usageChanged.dispose();

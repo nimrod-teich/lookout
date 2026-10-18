@@ -353,6 +353,7 @@ export const commands = {
 
 export const env = {
   remoteName: undefined as string | undefined,
+  appName: "Visual Studio Code",
 };
 
 export const extensions = {

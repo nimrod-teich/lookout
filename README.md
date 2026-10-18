@@ -55,7 +55,7 @@ Running several AI coding agents at once means clicking through tabs to find out
   </tr>
   <tr>
     <td><b>Jump</b></td>
-    <td><code>Ctrl+Alt+J</code> lists the sessions, the ones that need attention first, with how long each has been in its state and what each waiting one asks. Pick one and its tab or terminal comes to the front. <code>Ctrl+Alt+Shift+J</code> goes straight to the session that has waited longest; press it again to cycle through the others that need you.</td>
+    <td><code>Ctrl+Alt+J</code> lists the sessions, the ones that need attention first, with how long each has been in its state and what each waiting one asks. Pick one and its tab or terminal comes to the front. A session in another VS Code window on the same machine works too: that window brings its tab or terminal forward and comes to the front itself; when the desktop does not let it, Lookout says which window to switch to. <code>Ctrl+Alt+Shift+J</code> goes straight to the session of this window that has waited longest; press it again to cycle through the others that need you.</td>
   </tr>
   <tr>
     <td><b>Notify</b></td>
@@ -82,9 +82,9 @@ Running several AI coding agents at once means clicking through tabs to find out
 
 | Agent | Watch | Jump |
 | --- | --- | --- |
-| [Claude Code](https://claude.com/claude-code) | Sessions in the VS Code panel and in terminals; past sessions of the window's folders | Sessions in the VS Code panel and in the integrated terminals of the same window; past sessions resume in the panel |
+| [Claude Code](https://claude.com/claude-code) | Sessions in the VS Code panel and in terminals; past sessions of the window's folders | Sessions in the VS Code panel and in the integrated terminals of any VS Code window on the same machine; past sessions resume in the panel |
 
-Sessions in another VS Code window are listed with that window's name; sessions in a terminal outside VS Code are listed as such. Neither can be jumped to from this window, but both can be searched and read.
+Sessions in another VS Code window are listed with that window's name, and a jump to one goes through that window. Windows see each other through a folder in the extension's global storage, so only windows whose extensions run on the same machine, in the same VS Code profile, see each other: a window connected over SSH or to a container sees the other windows connected to the same host, not your local ones. Sessions in a terminal outside VS Code are listed as such; they can be searched and read, not jumped to.
 
 ## Install
 
@@ -146,7 +146,8 @@ Windows and macOS support is new. The process handling is tested on both in CI; 
 | What | Where it comes from |
 | --- | --- |
 | Which processes are alive, and their parents | Linux: `/proc`. Windows: a process list from PowerShell, read in the background and cached. |
-| Where a session runs | A panel session descends from the window's extension host. A terminal session descends from the shell of one of the window's terminals. A session that descends from another window's extension host is named after that window: every window with Lookout records itself in a shared folder under the extension's global storage. |
+| Where a session runs | A panel session descends from the window's extension host. A terminal session descends from the shell of one of the window's terminals. Every window with Lookout records itself in a shared folder under the extension's global storage, with its name and its terminals' shell pids, so a session that descends from another window's extension host or from one of its terminals' shells is named after that window. |
+| Jumping to another window's session | A request in the same shared folder, `jump-<pid of that window's extension host>-<time>.json`, naming the session and the window that asks. Every window watches the folder, and looks every second besides; the one it names brings the session's tab or terminal forward, comes to the front, and answers with `jumped-<pid>-<time>.json`. To come to the front it runs VS Code's own `workbench.action.focusWindow`; when the desktop does not let it, it finds its own window by its title, whose folder part and application name must both match, with `xdotool` or `wmctrl` on X11 (and XWayland), `osascript` on macOS (addressing VS Code's own process), and Windows PowerShell on Windows and from WSL, within 3 seconds in all. It acts only on requests younger than 2 seconds. The window that asked waits 6 seconds; when the other window showed the session but could not come forward, it says "Opened … in window …; switch with Alt+Tab" (⌘\` on a Mac, Alt+\` on GNOME); with no answer, it takes its request back and says so. Mail older than 10 seconds is ignored and removed. |
 | When to look again | The agent's session folder is watched for changes, with a poll every 5 s as a backstop. |
 | Finished turns | Lookout sees a session go from working to idle while its tab or terminal is not the one in front. |
 | Usage pace | Up to 48 readings per limit, of its current window, for each config directory's numbers, kept in VS Code's global state so they survive a reload. The pace is the change in percentage points between the oldest and the newest reading, per hour, once they are ten minutes apart; token counts play no part. A new reset time, or a reading lower than the one before, starts the limit's readings over; a reading older than the newest is left out. Stale numbers, a window that has reset and a full meter get no forecast. |

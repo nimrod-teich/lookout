@@ -72,6 +72,8 @@ export interface SessionView {
   terminalPid?: number;
   /** Name of the other VS Code window the session runs in, when `host` is "window". */
   windowLabel?: string;
+  /** Extension host pid of that window: where a jump to the session is sent. */
+  windowPid?: number;
   /** What the session is doing right now, e.g. "Bash · npm test". */
   activity?: string;
   /** Subagents in flight. */
