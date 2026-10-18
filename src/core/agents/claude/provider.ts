@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { HistoryIndex, type HistoryMessage, type SearchResult, type SnippetSize } from "../../history";
+import { branchAt } from "../../git";
 import { projectOf } from "../../model";
 import { hasFilters, type Query } from "../../terms";
 import { findLastLine, JsonlTail, lineStartAtOrAfter, readLineAt } from "../../jsonlTail";
@@ -140,7 +141,9 @@ export class ClaudeProvider implements AgentProvider {
         panel: file.entrypoint === PANEL_ENTRYPOINT,
         activity: status === "working" ? activityOf(transcript) : undefined,
         agents: status === "working" ? agentsOf(transcript) : 0,
-        branch: transcript.gitBranch,
+        // Claude Code stamps the branch of the checkout it started in; a session working in a worktree is on that one's.
+        branch: (transcript.cwd ? branchAt(transcript.cwd) : undefined) ?? transcript.gitBranch,
+        effort: transcript.effort,
         model: transcript.model,
         contextTokens: transcript.contextTokens,
         contextWindow: contextWindowOf(transcript.model, transcript.contextTokens),

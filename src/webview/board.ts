@@ -103,7 +103,7 @@ function chips(view: SessionView): Chip[] {
   const where = hostChip(view);
   if (where) out.push({ text: where });
   if (view.branch) out.push(branchChip(view.branch));
-  if (view.model) out.push({ text: shortModel(view.model) });
+  if (view.model) out.push({ text: view.effort ? `${shortModel(view.model)} · ${view.effort}` : shortModel(view.model), title: view.effort ? `Model and reasoning effort of its last reply` : undefined });
   // The ring shows the context when the window is known; the chip covers the rest.
   if (view.contextTokens && !view.contextWindow) out.push({ text: `${formatTokens(view.contextTokens)} tokens` });
   if (view.agents > 0) out.push({ text: view.agents === 1 ? "1 agent" : `${view.agents} agents` });

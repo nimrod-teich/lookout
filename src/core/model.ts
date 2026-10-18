@@ -93,6 +93,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
     agents: session.agents ?? 0,
     branch: session.branch,
     model: session.model,
+    effort: session.effort,
     contextTokens: session.contextTokens,
     contextWindow: session.contextWindow,
     pulse: session.pulse,
