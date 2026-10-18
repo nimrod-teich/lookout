@@ -25,7 +25,7 @@
       if (m.type !== "search") return;
       const word = m.query.split(/\s+/).find((w) => !w.includes(":")) ?? "";
       const results = sessions.map((s) => ({
-        id: s.id, title: s.title, where: s.where, live: s.live, count: s.count,
+        id: s.id, title: s.title, where: s.where, live: s.live, count: s.count, started: ago(s.said.length ? Math.max(...s.said.map((x) => x[1])) + 40 : 0), lastActive: ago(Math.min(...s.said.map((x) => x[1]))),
         hits: s.said.map(([role, minutes, text], i) => {
           const at = text.toLowerCase().indexOf(word.toLowerCase());
           return { index: 10 - i, role, at: ago(minutes), snippet: text, ranges: at < 0 || !word ? [] : [[at, at + word.length]] };

@@ -102,6 +102,19 @@ function marked(hit: SearchHit): DocumentFragment {
   return fragment;
 }
 
+/** "Oct 16 → Oct 18 · active 3h ago": the days it spans, and how long ago it last moved. */
+function spanText(started: number | undefined, last: number | undefined): string {
+  const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const parts: string[] = [];
+  if (started !== undefined) parts.push(last !== undefined && day(last) !== day(started) ? `${day(started)} → ${day(last)}` : day(started));
+  if (last !== undefined) {
+    const ago = Date.now() - last;
+    const minutes = Math.round(ago / 60_000);
+    parts.push(minutes < 1 ? "active now" : minutes < 60 ? `active ${minutes}m ago` : minutes < 48 * 60 ? `active ${Math.round(minutes / 60)}h ago` : `active ${Math.round(minutes / 1440)}d ago`);
+  }
+  return parts.join(" · ");
+}
+
 function open(id: string, index?: number): void {
   vscode.postMessage({ type: "open", query, id, index });
 }
@@ -111,12 +124,20 @@ function sessionBlock(session: SearchPageSession): HTMLElement {
   const head = el("button", "session-head");
   head.type = "button";
   head.title = "Open this conversation at its newest match";
-  head.append(el("span", "session-title", session.title));
-  if (session.where) head.append(el("span", "where", session.where));
-  const span = describeSpan(session.started, session.lastActive);
-  if (span) head.append(el("span", "where", span));
-  head.append(el("span", "tag", session.live ? "running" : "earlier"));
-  if (session.count > 0) head.append(el("span", "matches", `${session.count} ${session.count === 1 ? "match" : "matches"}`));
+  // Line one: what it is, whether it runs, how much matched.
+  const top = el("span", "head-top");
+  top.append(el("span", "session-title", session.title), el("span", "tag", session.live ? "running" : "earlier"));
+  if (session.count > 0) top.append(el("span", "matches", `${session.count} ${session.count === 1 ? "match" : "matches"}`));
+  // Line two: where it worked, and when.
+  const meta = el("span", "head-meta");
+  for (const part of (session.where ?? "").split(" · ").filter(Boolean)) meta.append(el("span", "chip", part));
+  const when = spanText(session.started, session.lastActive);
+  if (when) {
+    const time = el("span", "when", when);
+    time.title = describeSpan(session.started, session.lastActive);
+    meta.append(time);
+  }
+  head.append(top, meta);
   head.addEventListener("click", () => open(session.id));
   block.append(head);
   for (const hit of session.hits) {
