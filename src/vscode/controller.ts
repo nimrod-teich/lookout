@@ -31,6 +31,8 @@ const DONE_KEY = "lookout.done";
 const DISMISSED_KEY = "lookout.dismissed";
 /** Which earlier sessions the board lists and searches: this window's folders, or every project. */
 const EARLIER_SCOPE_KEY = "lookout.earlierScope";
+/** The sessions the user starred, newest star first; kept for the machine, so every window shows them. */
+const FAVOURITES_KEY = "lookout.favourites";
 /** The earlier sessions listed at most, the newest. */
 const EARLIER_LIMIT = 500;
 /** While the earlier sessions are still being read, the next slice is listed this soon. */
@@ -119,6 +121,8 @@ export class Controller implements vscode.Disposable {
   private earlierScope: EarlierScope;
   /** The scope holds older sessions than the limit lets the board list. */
   private earlierCapped = false;
+  /** The starred sessions that are not running, wherever they ran. */
+  private favouritePast: PastView[] = [];
   private archived = new ArchivedSessions([]);
   private savedDone = "";
   private savedDismissed = "";
@@ -191,6 +195,23 @@ export class Controller implements vscode.Disposable {
     this.poll();
   }
 
+  /** The sessions the user starred, newest star first, and those of them that are not running. */
+  get favourites(): { ids: string[]; past: PastView[] } {
+    return { ids: this.favouriteIds(), past: this.favouritePast };
+  }
+
+  private favouriteIds(): string[] {
+    const ids = this.host.globalState.get<unknown>(FAVOURITES_KEY, []);
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  }
+
+  /** Stars a session, or takes its star away. */
+  toggleFavourite(id: string): void {
+    const ids = this.favouriteIds();
+    void this.host.globalState.update(FAVOURITES_KEY, ids.includes(id) ? ids.filter((other) => other !== id) : [id, ...ids]);
+    this.poll();
+  }
+
   /** Where a live or a past session works: its project, worktree and git branch. */
   whereOf(id: string): string | undefined {
     const view = this.current.find((v) => v.id === id) ?? this.pastView(id);
@@ -206,7 +227,7 @@ export class Controller implements vscode.Disposable {
 
   /** A session that is not running, as listed now or, when the scope has changed since, as last listed. */
   pastView(id: string): PastView | undefined {
-    return this.pastViews.find((view) => view.id === id) ?? this.pastSeen.get(id);
+    return this.pastViews.find((view) => view.id === id) ?? this.favouritePast.find((view) => view.id === id) ?? this.pastSeen.get(id);
   }
 
   /** The usage numbers, or nothing when there are none to show: none cached, unreadable, or another account's. */
@@ -285,21 +306,23 @@ export class Controller implements vscode.Disposable {
     }
     const update = this.attention.update(views, (view) => isWatched(view, this.terminals), { typedQuestions: this.typedQuestions });
     const exclude = new Set<string>([...update.views.map((view) => view.id), ...this.archived.read()]);
-    const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit: EARLIER_LIMIT };
+    const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit: EARLIER_LIMIT, also: this.favouriteIds() };
     let capped = false;
     let incomplete = false;
+    const favouritePast: PastView[] = [];
     const past = this.providers
       .flatMap((provider) => {
         const list = provider.past?.(scope, exclude);
         capped ||= list?.capped ?? false;
         incomplete ||= list?.incomplete ?? false;
+        favouritePast.push(...(list?.also ?? []).map(buildPastView));
         return list?.sessions ?? [];
       })
       .map(buildPastView);
     past.sort((a, b) => b.modifiedAt - a.modifiedAt);
     this.earlierCapped = capped || past.length > EARLIER_LIMIT;
-    this.publish(sortViews(update.views), past.slice(0, EARLIER_LIMIT));
-    for (const view of this.pastViews) this.pastSeen.set(view.id, view);
+    this.publish(sortViews(update.views), past.slice(0, EARLIER_LIMIT), favouritePast);
+    for (const view of [...this.pastViews, ...this.favouritePast]) this.pastSeen.set(view.id, view);
     if (incomplete) this.scheduleFill();
     this.saveDone();
     for (const view of update.finished) this.announceFinished(view);
@@ -536,12 +559,13 @@ export class Controller implements vscode.Disposable {
     }, DEBOUNCE_MS);
   }
 
-  private publish(views: SessionView[], past: PastView[]): void {
-    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped]);
+  private publish(views: SessionView[], past: PastView[], favouritePast: PastView[]): void {
+    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.favouriteIds(), favouritePast]);
     if (snapshot === this.snapshot) return;
     this.snapshot = snapshot;
     this.current = views;
     this.pastViews = past;
+    this.favouritePast = favouritePast;
     this.changed.fire(views);
   }
 

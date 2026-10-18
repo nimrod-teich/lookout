@@ -477,6 +477,26 @@ describe("the extension", () => {
       expect(tab.posted.at(-1)).toMatchObject({ type: "conversation", session: { id: HERE }, query: "deploy", target: 0 });
     }, 60_000);
 
+    it("stars a session from the board, keeps the star for every window, and lists a starred session from another project", async () => {
+      activate(context());
+      const { boardView, listed } = openBoard();
+      await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+      const favourites = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { favourites?: { ids: string[]; past: { id: string; resumable: boolean }[] } } | undefined)?.favourites;
+      expect(favourites()).toEqual({ ids: [], past: [] });
+      boardView.receive({ type: "favourite", id: HERE });
+      await vi.waitFor(() => expect(favourites()?.ids).toEqual([HERE]), WAIT);
+      expect(savedGlobal["lookout.favourites"]).toEqual([HERE]);
+      // Starred in another window: listed here though this window's folders do not hold it.
+      savedGlobal["lookout.favourites"] = [ELSEWHERE, HERE];
+      boardView.receive({ type: "favourite", id: HERE });
+      await vi.waitFor(() => expect(favourites()?.ids).toEqual([ELSEWHERE]), WAIT);
+      expect(favourites()?.past.map((p) => [p.id, p.resumable])).toEqual([[ELSEWHERE, false]]);
+      expect(listed()?.past.map((p) => p.id)).toEqual([HERE]);
+      // Its conversation can be read.
+      boardView.receive({ type: "openHit", query: "", id: ELSEWHERE });
+      expect(stub.panels.find((panel) => panel.viewType === "lookout.findings")?.posted.at(-1)).toMatchObject({ type: "conversation", session: { id: ELSEWHERE } });
+    }, 60_000);
+
     it("lists a long history in quick slices, not one slice per poll", async () => {
       for (let i = 0; i < 130; i++) writePast("/work/app", `00000000-0000-4000-8000-${String(1000 + i).padStart(12, "0")}`, "main", `task ${i}`);
       activate(context());

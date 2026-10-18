@@ -1327,3 +1327,41 @@ body.vscode-high-contrast .card,
 body.vscode-high-contrast-light .card {
   border-color: var(--vscode-contrastBorder);
 }
+
+/* Favourites: the sessions the user starred ---------------------------------- */
+
+/* The star on a card's title row: shown on hover, lit once starred. */
+.star {
+  flex: none;
+  margin-left: 2px;
+  padding: 0 3px;
+  border-radius: 3px;
+  color: var(--muted);
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.card:hover .star,
+.card:focus-within .star,
+.star.on {
+  opacity: 1;
+}
+
+.star.on {
+  color: var(--waiting);
+}
+
+.star:hover {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--waiting);
+}
+
+.group-favourites .star-mark {
+  font-style: normal;
+  color: var(--waiting);
+}
+
+.card.fav.past {
+  opacity: 0.85;
+}

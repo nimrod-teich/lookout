@@ -8,7 +8,7 @@ import { factsOf } from "./history";
 import { PastTranscripts } from "./past";
 import type { ProcessTable } from "../../proc";
 import type { Evidence } from "../../types";
-import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, SearchOutcome } from "../agent";
+import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, PastSession, SearchOutcome } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
@@ -154,11 +154,13 @@ export class ClaudeProvider implements AgentProvider {
   }
 
   past(scope: PastScope, exclude: ReadonlySet<string>): PastList {
-    const { transcripts, capped, incomplete } = this.pastTranscripts.list(scope, exclude);
-    this.pastFiles = new Map(transcripts.map((p) => [p.id, p.file]));
-    this.pastMeta = new Map(transcripts.map((p) => [p.id, { cwd: p.cwd, branch: p.branch, modifiedAt: p.modifiedAt }]));
+    const { transcripts, capped, incomplete, also } = this.pastTranscripts.list(scope, exclude);
+    const all = [...transcripts, ...also];
+    this.pastFiles = new Map(all.map((p) => [p.id, p.file]));
+    this.pastMeta = new Map(all.map((p) => [p.id, { cwd: p.cwd, branch: p.branch, modifiedAt: p.modifiedAt }]));
     for (const id of [...this.pastIndexes.keys()]) if (!this.pastFiles.has(id)) this.pastIndexes.delete(id);
-    return { sessions: transcripts.map((p) => ({ agent: this.id, id: p.id, cwd: p.cwd, title: p.title, branch: p.branch, resumable: p.resumable, modifiedAt: p.modifiedAt })), capped, incomplete };
+    const session = (p: (typeof all)[number]): PastSession => ({ agent: this.id, id: p.id, cwd: p.cwd, title: p.title, branch: p.branch, resumable: p.resumable, modifiedAt: p.modifiedAt });
+    return { sessions: transcripts.map(session), capped, incomplete, also: also.map(session) };
   }
 
   /**

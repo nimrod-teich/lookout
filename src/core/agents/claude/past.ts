@@ -178,9 +178,10 @@ export class PastTranscripts {
    * The newest `limit` of the scope's transcripts, newest first, without the
    * ids in `exclude` (the live and the archived) and without transcripts that
    * hold no conversation. `capped` when older conversations were left out;
-   * `incomplete` when transcripts were left unread for the next list.
+   * `incomplete` when transcripts were left unread for the next list. `also`:
+   * the sessions of `scope.also` the list does not hold, wherever they ran.
    */
-  list(scope: PastScope, exclude: ReadonlySet<string>): { transcripts: PastTranscript[]; capped: boolean; incomplete: boolean } {
+  list(scope: PastScope, exclude: ReadonlySet<string>): { transcripts: PastTranscript[]; capped: boolean; incomplete: boolean; also: PastTranscript[] } {
     const seen = new Set<string>();
     // The window's own folders first, as their window resumes them: Claude Code keeps a folder's transcripts in the project
     // directory named after it, found here as the file system names it (without regard to case where it has none).
@@ -199,30 +200,49 @@ export class PastTranscripts {
     // Transcripts without a conversation do not count toward the limit.
     for (; next < candidates.length && out.length < scope.limit; next++) {
       const candidate = candidates[next]!;
-      let cached = this.infos.get(candidate.file);
-      if (!cached || stale(candidate)) {
-        // A long history is read a slice at a time; what is left shows in the next lists.
-        if (reads++ >= READS_PER_LIST) {
-          unread++;
-          continue;
-        }
-        let info: TranscriptInfo;
-        try {
-          info = transcriptInfo(candidate.file);
-        } catch {
-          info = {};
-        }
-        cached = { mtimeMs: candidate.mtimeMs, size: candidate.size, info };
-        this.infos.set(candidate.file, cached);
+      // A long history is read a slice at a time; what is left shows in the next lists.
+      if (stale(candidate) && reads++ >= READS_PER_LIST) {
+        unread++;
+        continue;
       }
-      const { title, cwd, branch } = cached.info;
-      if (!title) continue;
-      // Where it started, as it says: two folders can share a project directory ("my.app" and "my-app").
-      out.push({ id: candidate.id, file: candidate.file, cwd: cwd ?? candidate.folder ?? "", title, branch, resumable: candidate.folder !== undefined, modifiedAt: Math.round(candidate.mtimeMs) });
+      const listed = this.listed(candidate);
+      if (listed) out.push(listed);
     }
     // Older ones left out: one not read yet, or one read that holds a conversation.
     const capped = candidates.slice(next).some((candidate) => stale(candidate) || this.infos.get(candidate.file)?.info.title !== undefined);
-    return { transcripts: out, capped, incomplete: unread > 0 };
+    // Sessions asked for by id besides, wherever they ran: the window's folders first, then every project.
+    const shown = new Set(out.map((transcript) => transcript.id));
+    const wanted = (scope.also ?? []).filter((id) => !shown.has(id) && !exclude.has(id));
+    const also: PastTranscript[] = [];
+    if (wanted.length > 0) {
+      const byId = new Map<string, Candidate>();
+      for (const candidate of [...found, ...(scope.all ? [] : this.everywhere())]) if (!byId.has(candidate.id)) byId.set(candidate.id, candidate);
+      for (const id of wanted) {
+        const candidate = byId.get(id);
+        const listed = candidate && this.listed(candidate);
+        if (listed) also.push(listed);
+      }
+    }
+    return { transcripts: out, capped, incomplete: unread > 0, also };
+  }
+
+  /** A transcript as the list shows it, its contents read once per file version; none when it holds no conversation. */
+  private listed(candidate: Candidate): PastTranscript | undefined {
+    let cached = this.infos.get(candidate.file);
+    if (!cached || cached.mtimeMs !== candidate.mtimeMs || cached.size !== candidate.size) {
+      let info: TranscriptInfo;
+      try {
+        info = transcriptInfo(candidate.file);
+      } catch {
+        info = {};
+      }
+      cached = { mtimeMs: candidate.mtimeMs, size: candidate.size, info };
+      this.infos.set(candidate.file, cached);
+    }
+    const { title, cwd, branch } = cached.info;
+    if (!title) return undefined;
+    // Where it started, as it says: two folders can share a project directory ("my.app" and "my-app").
+    return { id: candidate.id, file: candidate.file, cwd: cwd ?? candidate.folder ?? "", title, branch, resumable: candidate.folder !== undefined, modifiedAt: Math.round(candidate.mtimeMs) };
   }
 
   private transcriptsIn(dir: string, folder: string | undefined, into: Candidate[]): void {

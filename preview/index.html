@@ -41,12 +41,18 @@
   };
   /** Posts the fixture; the scope "folders" lists only the past sessions the agent resumes here. */
   let post = () => {};
+  let favouriteIds = [];
+  let earlierScope = "folders";
   let fixtureSessions = [];
   window.acquireVsCodeApi = () => ({
     postMessage: (m) => {
       console.log("to extension:", JSON.stringify(m));
       if (m.type === "search") setTimeout(() => window.postMessage({ type: "search", query: m.query, results: fakeSearch(m.query, fixtureSessions), pending: 0 }, "*"), 100);
       if (m.type === "earlierScope") post(m.scope);
+      if (m.type === "favourite") {
+        favouriteIds = favouriteIds.includes(m.id) ? favouriteIds.filter((id) => id !== m.id) : [m.id, ...favouriteIds];
+        post(earlierScope);
+      }
     },
     getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), earlier: params.get("earlier") === "1" }),
     setState: () => {},
@@ -70,12 +76,16 @@
     const earlier = { scope: "folders", limit: 500, capped: false, ...fixture.earlier };
     if (params.get("scope")) earlier.scope = params.get("scope");
     if (params.get("capped") === "1") earlier.capped = true;
+    favouriteIds = fixture.favourites ?? [];
     post = (scope) => {
+      earlierScope = scope;
       earlier.scope = scope;
       // As the extension sends them: newest first.
       const past = (fixture.past ?? []).filter((p) => scope === "all" || p.resumable !== false).sort((a, b) => b.modifiedAt - a.modifiedAt);
       fixtureSessions = [...fixture.sessions, ...past];
-      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, earlier: { ...earlier } }, "*");
+      // Starred sessions that are not running and that the scope does not list come along.
+      const favourites = { ids: favouriteIds, past: (fixture.past ?? []).filter((p) => favouriteIds.includes(p.id) && !past.includes(p)) };
+      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, earlier: { ...earlier }, favourites }, "*");
     };
     post(earlier.scope);
     const q = params.get("q");

@@ -402,5 +402,10 @@
     "scope": "folders",
     "limit": 500,
     "capped": false
-  }
+  },
+  "favourites": [
+    "4",
+    "p6",
+    "p2"
+  ]
 }

@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { countStates } from "../core/format";
 import type { SearchOutcome } from "../core/agents/agent";
 import type { PastView, SessionView } from "../core/types";
-import type { BoardUsage, EarlierInfo, EarlierScope, FromBoard, ToBoard } from "../webview/protocol";
+import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "../webview/protocol";
 
 export const BOARD_VIEW = "lookout.board";
 
@@ -15,6 +15,10 @@ export interface BoardActions {
   earlier(): EarlierInfo;
   /** Lists and searches the earlier sessions of this window's folders, or of every project. */
   setEarlierScope(scope: EarlierScope): void;
+  /** The starred sessions. */
+  favourites(): Favourites;
+  /** Stars a session, or takes its star away. */
+  toggleFavourite(id: string): void;
   /** Resumes a past session in the agent's panel. */
   resume(id: string): void;
   usage(): BoardUsage | undefined;
@@ -68,7 +72,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
     if (this.view) {
       this.view.badge = attention > 0 ? { value: attention, tooltip: `${counts.waiting} need you, ${counts.done} finished` } : undefined;
       if (this.view.visible) {
-        const message: ToBoard = { type: "sessions", sessions: [...sessions], past: [...this.actions.past()], now: Date.now(), usage: this.actions.usage(), earlier: this.actions.earlier() };
+        const message: ToBoard = { type: "sessions", sessions: [...sessions], past: [...this.actions.past()], now: Date.now(), usage: this.actions.usage(), earlier: this.actions.earlier(), favourites: this.actions.favourites() };
         void this.view.webview.postMessage(message);
       }
     }
@@ -117,8 +121,16 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
       }
       case "resume": {
         // Only a session the board was shown.
-        const view = this.actions.past().find((p) => p.id === message.id);
+        const view = [...this.actions.past(), ...this.actions.favourites().past].find((p) => p.id === message.id);
         if (view) this.actions.resume(view.id);
+        return;
+      }
+      case "favourite": {
+        // Only a session the board was shown, or one already starred.
+        const id = message.id;
+        if (typeof id !== "string") return;
+        const known = this.actions.sessions().some((v) => v.id === id) || this.actions.past().some((p) => p.id === id) || this.actions.favourites().ids.includes(id);
+        if (known) this.actions.toggleFavourite(id);
         return;
       }
       case "earlierScope":

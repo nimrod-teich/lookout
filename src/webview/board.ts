@@ -4,7 +4,7 @@ import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
 import { Harbour } from "./harbour";
 import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type Chip, type GroupKey } from "./model";
-import type { BoardUsage, EarlierInfo, EarlierScope, FromBoard, ToBoard } from "./protocol";
+import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "./protocol";
 
 declare function acquireVsCodeApi(): {
   postMessage(message: FromBoard): void;
@@ -32,6 +32,30 @@ let pending = 0;
 let past: PastView[] = [];
 /** Which earlier sessions are listed, the most listed, and whether older ones were left out. */
 let earlier: EarlierInfo = { scope: "folders", limit: 500, capped: false };
+/** The sessions the user starred, newest star first. */
+let favourites: Favourites = { ids: [], past: [] };
+let favouritesEl: HTMLElement | undefined;
+const favouriteCards = new Map<string, HTMLElement>();
+
+/** The star that marks a favourite; a click stars the session or takes its star away. */
+function starButton(id: string): HTMLElement {
+  const star = el("span", "star", "☆");
+  star.setAttribute("role", "button");
+  star.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "favourite", id });
+  });
+  return star;
+}
+
+function setStar(card: HTMLElement, id: string): void {
+  const star = card.querySelector(".star");
+  if (!star) return;
+  const on = favourites.ids.includes(id);
+  star.classList.toggle("on", on);
+  star.textContent = on ? "★" : "☆";
+  (star as HTMLElement).title = on ? "Take the star away" : "Star this session: it stays under Favourites";
+}
 /** The user opened the Earlier group; kept across reloads. */
 let earlierOpen = vscode.getState()?.earlier === true;
 const pastCards = new Map<string, HTMLElement>();
@@ -355,7 +379,7 @@ function createCard(view: SessionView): HTMLElement {
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  row.append(el("span", "title"), el("span", "elapsed"));
+  row.append(el("span", "title"), el("span", "elapsed"), starButton(view.id));
   const line = el("span", "line");
   line.append(el("span", "mark"), el("span", "kind"), el("span", "text"));
   const options = el("span", "options hidden");
@@ -414,6 +438,7 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   card.title = cardTitle(view);
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = elapsedText(view);
+  setStar(card, view.id);
   const line = card.querySelector(".line")!;
   const second = cardLine(view, now());
   line.querySelector(".mark")!.textContent = MARKS[view.state];
@@ -524,7 +549,7 @@ function createPastCard(view: PastView): HTMLElement {
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  row.append(el("span", "title"), el("span", "elapsed"));
+  row.append(el("span", "title"), el("span", "elapsed"), starButton(view.id));
   main.append(row, el("span", "chips"), el("span", "hits hidden"));
   card.append(main);
   card.addEventListener("click", () => {
@@ -546,12 +571,100 @@ function updatePastCard(card: HTMLElement, view: PastView): void {
     : `Not running · last written ${pastElapsed(view)} · from ${view.cwd || "another project"}, not one of this window's folders: click to read its conversation; the agent resumes it from a window open on that folder`;
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = pastElapsed(view);
+  setStar(card, view.id);
   const chipsEl = card.querySelector(".chips")!;
   const values: Chip[] = [{ text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
   if (view.branch) values.push(branchChip(view.branch));
   while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
   values.forEach((value, i) => setChip((chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"))) as HTMLElement, value));
   renderHits(card.querySelector(".hits")!, query === "" ? undefined : hits.get(view.id));
+}
+
+/** A starred session as the board has it now: running, or not. */
+function favouriteOf(id: string): { live?: SessionView; past?: PastView } {
+  const live = allSessions.find((view) => view.id === id);
+  if (live) return { live };
+  const view = past.find((p) => p.id === id) ?? favourites.past.find((p) => p.id === id);
+  return view ? { past: view } : {};
+}
+
+function createFavouriteCard(id: string): HTMLElement {
+  const card = el("button", "card fav");
+  card.type = "button";
+  card.dataset.id = id;
+  card.append(el("span", "rail"));
+  const main = el("span", "main");
+  const row = el("span", "row");
+  row.append(el("span", "title"), el("span", "elapsed"), starButton(id));
+  main.append(row, el("span", "chips"));
+  card.append(main);
+  card.addEventListener("click", () => {
+    const { live, past: view } = favouriteOf(id);
+    if (live) harbour.jump(id);
+    // The agent resumes only the sessions of this window's folders; another project's opens its conversation.
+    else if (view?.resumable) vscode.postMessage({ type: "resume", id });
+    else if (view) vscode.postMessage({ type: "openHit", query, id });
+  });
+  return card;
+}
+
+function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, view: PastView | undefined): void {
+  const shown = (live ?? view)!;
+  card.className = live ? `card fav state-${live.state}` : "card fav past";
+  card.title = live ? `${stateTitle(live)} · click to jump to it` : view!.resumable ? "Not running · click to resume it in the agent's panel" : `Not running · from ${view!.cwd || "another project"}: click to read its conversation`;
+  card.querySelector(".title")!.textContent = shown.title;
+  card.querySelector(".elapsed")!.textContent = live ? `${stateTitle(live)}${elapsedText(live) ? ` · ${elapsedText(live)}` : ""}` : pastElapsed(view!);
+  setStar(card, shown.id);
+  const values: Chip[] = [{ text: shown.worktree ? `${shown.project} · ${shown.worktree}` : shown.project }];
+  if (shown.branch) values.push(branchChip(shown.branch));
+  const chipsEl = card.querySelector(".chips")!;
+  while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
+  values.forEach((value, i) => setChip((chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"))) as HTMLElement, value));
+}
+
+/**
+ * The starred sessions, at the top: running ones and earlier ones, newest
+ * star first; while a search runs, those with matches. Returns what the
+ * groups follow.
+ */
+function renderFavourites(after: HTMLElement): HTMLElement {
+  const shown = favourites.ids
+    .map((id) => ({ id, ...favouriteOf(id) }))
+    .filter((f) => (f.live || f.past) && (query === "" || hits.has(f.id)));
+  if (shown.length === 0) {
+    favouritesEl?.remove();
+    favouritesEl = undefined;
+    favouriteCards.clear();
+    return after;
+  }
+  if (!favouritesEl) {
+    favouritesEl = el("section", "group group-favourites");
+    const heading = el("h2", "heading");
+    heading.append(el("i", "star-mark", "★"), el("span", "label", "Favourites"), el("span", "count"));
+    favouritesEl.append(heading, el("div", "cards"));
+  }
+  favouritesEl.querySelector(".count")!.textContent = String(shown.length);
+  if (favouritesEl.previousElementSibling !== after) root.insertBefore(favouritesEl, after.nextSibling);
+  const list = favouritesEl.querySelector(".cards")!;
+  let previous: HTMLElement | undefined;
+  for (const f of shown) {
+    let card = favouriteCards.get(f.id);
+    if (!card) {
+      card = createFavouriteCard(f.id);
+      favouriteCards.set(f.id, card);
+    }
+    updateFavouriteCard(card, f.live, f.past);
+    const prev = previous ?? null;
+    if (card.parentElement !== list || card.previousElementSibling !== prev) list.insertBefore(card, prev ? prev.nextSibling : list.firstChild);
+    previous = card;
+  }
+  const ids = new Set(shown.map((f) => f.id));
+  for (const [id, card] of favouriteCards) {
+    if (ids.has(id)) continue;
+    card.remove();
+    favouriteCards.delete(id);
+  }
+  return favouritesEl;
 }
 
 const SCOPES: { scope: EarlierScope; label: string; title: string }[] = [
@@ -650,12 +763,13 @@ function render(): void {
     else if (allSessions.length > 0) empty.append(el("p", "big", "Everything is hidden"), el("p", "small", "Click a state in the legend to show it again."));
     else empty.append(el("p", "big", "Nothing on the horizon"), el("p", "small", "Sessions appear here as soon as an agent starts."));
     root.append(empty);
+    renderFavourites(beam);
     renderEarlier(empty);
     return;
   }
   const seenIds = new Set<string>();
   const seenGroups = new Set<string>();
-  let previousGroup: HTMLElement = beam;
+  let previousGroup: HTMLElement = renderFavourites(beam);
   for (const group of groups) {
     seenGroups.add(group.key);
     let section = groupsEl.get(group.key);
@@ -736,6 +850,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   allSessions = message.sessions;
   past = message.past ?? [];
   if (message.earlier) earlier = message.earlier;
+  favourites = message.favourites ?? { ids: [], past: [] };
   usage = message.usage;
   clockOffset = message.now - Date.now();
   applyFilters();

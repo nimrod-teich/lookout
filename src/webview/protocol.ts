@@ -22,9 +22,15 @@ export interface EarlierInfo {
   capped: boolean;
 }
 
+/** The sessions the user starred, newest star first, and those of them that are not running, wherever they ran. */
+export interface Favourites {
+  ids: string[];
+  past: PastView[];
+}
+
 /** Extension → webview. */
 export type ToBoard =
-  | { type: "sessions"; sessions: SessionView[]; past: PastView[]; now: number; usage?: BoardUsage; earlier?: EarlierInfo }
+  | { type: "sessions"; sessions: SessionView[]; past: PastView[]; now: number; usage?: BoardUsage; earlier?: EarlierInfo; favourites?: Favourites }
   /** `pending` sessions were not read yet; the board asks again. */
   | { type: "search"; query: string; results: SearchResult[]; pending: number };
 
@@ -47,4 +53,6 @@ export type FromBoard =
   /** Resume a session that is not running, in the agent's panel. */
   | { type: "resume"; id: string }
   /** List and search the earlier sessions of this window's folders, or of every project. */
-  | { type: "earlierScope"; scope: EarlierScope };
+  | { type: "earlierScope"; scope: EarlierScope }
+  /** Star a session, or take its star away. */
+  | { type: "favourite"; id: string };
