@@ -6,7 +6,7 @@ import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archi
 import { ClaudeProvider } from "../core/agents/claude/provider";
 import type { HistoryMessage, SnippetSize } from "../core/history";
 import { Attention } from "../core/attention";
-import { buildPastView, sortViews } from "../core/model";
+import { buildPastView, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
 import { Monitor } from "../core/monitor";
 import { createProcessTable, type ProcessTable } from "../core/proc";
 import type { PastView, SessionView } from "../core/types";
@@ -72,6 +72,12 @@ export interface ControllerHost {
   workspaceFolders(): string[];
   /** VS Code's extension storage directory, next to which it keeps extension state. */
   globalStorageDir: string;
+  /**
+   * The agent's tabs open in this window whose session is not running: after
+   * a reload the agent restores its tabs but starts a session only once its
+   * tab is opened. Matched to earlier sessions by `label(title)`.
+   */
+  restoredTabs?(): AgentTabs;
 }
 
 /** The usage numbers as the UI gets them. */
@@ -321,7 +327,12 @@ export class Controller implements vscode.Disposable {
       .map(buildPastView);
     past.sort((a, b) => b.modifiedAt - a.modifiedAt);
     this.earlierCapped = capped || past.length > EARLIER_LIMIT;
-    this.publish(sortViews(update.views), past.slice(0, EARLIER_LIMIT), favouritePast);
+    // Tabs the agent restored after a reload, not started yet: their sessions stay on the board, idle.
+    const restored = this.host.restoredTabs ? restoredTabViews(past, update.views, this.host.restoredTabs()) : [];
+    const shownPast = restored.length ? past.filter((view) => !restored.some((r) => r.id === view.id)) : past;
+    // An idle tab or terminal with nothing sent is not worth a card.
+    const shown = update.views.filter((view) => !(view.empty && view.state === "idle"));
+    this.publish(sortViews([...shown, ...restored]), shownPast.slice(0, EARLIER_LIMIT), favouritePast);
     for (const view of [...this.pastViews, ...this.favouritePast]) this.pastSeen.set(view.id, view);
     if (incomplete) this.scheduleFill();
     this.saveDone();

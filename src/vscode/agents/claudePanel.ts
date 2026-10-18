@@ -31,6 +31,14 @@ function isClaudeTab(tab: vscode.Tab, label: string): boolean {
   return tab.input instanceof vscode.TabInputWebview && tab.input.viewType.includes(CLAUDE_PANEL_VIEW_TYPE) && tab.label === label;
 }
 
+/** The labels of the Claude Code tabs open in this window. */
+export function claudeTabLabels(): string[] {
+  return vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .filter((tab) => tab.input instanceof vscode.TabInputWebview && tab.input.viewType.includes(CLAUDE_PANEL_VIEW_TYPE))
+    .map((tab) => tab.label);
+}
+
 function findClaudeTab(title: string): vscode.Tab | undefined {
   const label = claudeTabLabel(title);
   const matches = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => isClaudeTab(tab, label));

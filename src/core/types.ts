@@ -83,6 +83,10 @@ export interface SessionView {
   model?: string;
   /** Shell commands it left running after its turn: it counts as working while they run. */
   background?: Background;
+  /** Nothing sent yet: an open tab or terminal without a conversation. */
+  empty?: boolean;
+  /** Its agent tab is open but the session is not started: restored after a window reload. */
+  restored?: boolean;
   /** The reasoning effort the model last answered with. */
   effort?: string;
   /** Tokens in the context window at the last model call. */

@@ -11,6 +11,7 @@ import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
 import { panelAdapter } from "./vscode/agents";
+import { claudeTabLabel, claudeTabLabels } from "./vscode/agents/claudePanel";
 import { Findings } from "./vscode/findings";
 import { Controller } from "./vscode/controller";
 import { CrossWindowJumps, raiseWindow } from "./vscode/crossWindow";
@@ -55,6 +56,7 @@ export function activate(context: vscode.ExtensionContext): void {
       claudeBinary: findClaudeBinary,
       workspaceFolders: () => vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [],
       globalStorageDir: path.dirname(context.globalStorageUri.fsPath),
+      restoredTabs: () => ({ labels: claudeTabLabels(), label: claudeTabLabel }),
     },
     terminals,
     log,
@@ -146,7 +148,7 @@ export function activate(context: vscode.ExtensionContext): void {
     search: (query, zone) => controller.search(query, zone, { hits: PAGE_HITS, snippet: PAGE_SNIPPET }),
     titleOf: (id) => controller.titleOf(id) ?? id,
     whereOf: (id) => controller.whereOf(id),
-    isLive: (id) => controller.sessions.some((view) => view.id === id),
+    isLive: (id) => controller.sessions.some((view) => view.id === id && !view.restored),
     spanOf: (id) => {
       const times = (controller.history(id) ?? []).map((message) => message.at).filter((at): at is number => at !== undefined);
       return times.length ? { started: Math.min(...times), lastActive: Math.max(...times) } : {};
@@ -180,7 +182,8 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   const render = () => {
     statusBar.render({
-      views: controller.sessions,
+      // A tab restored after a reload runs nothing until it is opened.
+      views: controller.sessions.filter((view) => !view.restored),
       usage: controller.usage,
       enabled: config.statusBarEnabled,
       showUsage: config.statusBarUsage,

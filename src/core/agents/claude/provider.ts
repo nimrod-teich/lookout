@@ -146,6 +146,8 @@ export class ClaudeProvider implements AgentProvider {
         title: titleOf(transcript),
         cwd: transcript.cwd ?? file.cwd,
         panel: file.entrypoint === PANEL_ENTRYPOINT,
+        // Claude Code writes the transcript once something is sent.
+        empty: this.tracked.get(file.sessionId)?.file === undefined,
         activity: status === "working" && !background ? activityOf(transcript) : undefined,
         agents: status === "working" && !background ? agentsOf(transcript) : 0,
         background,
