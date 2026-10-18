@@ -14,6 +14,14 @@ const CLAUDE_LAST_MESSAGE = "claude-vscode.focusLastMessage";
 const ACTIVATE_WAIT_MS = 1500;
 /** Time for a tab that came to the front to tell the Claude Code extension it has the focus. */
 const FOCUS_SETTLE_MS = 150;
+/**
+ * The Claude Code extension's "Focus input": puts the cursor in the prompt box
+ * of every visible chat, inserting the active text editor's selection, if any,
+ * as an @-mention.
+ */
+const CLAUDE_FOCUS_INPUT = "claude-vscode.focus";
+/** Time for the chat to scroll to its newest message before the prompt box takes the focus. */
+const SCROLL_SETTLE_MS = 150;
 const CLAUDE_PANEL_VIEW_TYPE = "claudeVSCodePanel";
 const FOCUS_GROUP = [
   "workbench.action.focusFirstEditorGroup",
@@ -31,15 +39,19 @@ export function claudeTabLabel(title: string): string {
   return title.length > 25 ? `${title.substring(0, 24)}…` : title;
 }
 
+function isClaudePanel(tab: vscode.Tab): boolean {
+  return tab.input instanceof vscode.TabInputWebview && tab.input.viewType.includes(CLAUDE_PANEL_VIEW_TYPE);
+}
+
 function isClaudeTab(tab: vscode.Tab, label: string): boolean {
-  return tab.input instanceof vscode.TabInputWebview && tab.input.viewType.includes(CLAUDE_PANEL_VIEW_TYPE) && tab.label === label;
+  return isClaudePanel(tab) && tab.label === label;
 }
 
 /** The labels of the Claude Code tabs open in this window. */
 export function claudeTabLabels(): string[] {
   return vscode.window.tabGroups.all
     .flatMap((group) => group.tabs)
-    .filter((tab) => tab.input instanceof vscode.TabInputWebview && tab.input.viewType.includes(CLAUDE_PANEL_VIEW_TYPE))
+    .filter(isClaudePanel)
     .map((tab) => tab.label);
 }
 
@@ -100,7 +112,8 @@ export function cancelNewest(): void {
 }
 
 /**
- * Brings the session's newest message into view, or the prompt it waits on.
+ * Brings the session's newest message into view, or the prompt it waits on,
+ * with the cursor in its prompt box.
  * Claude Code's command acts on the chat it last saw focused, so it runs only
  * once the session's tab is in front and has had a moment to report its
  * focus; a tab that does not come to the front is left as it is.
@@ -117,7 +130,28 @@ async function showNewest(view: SessionView, log: Log): Promise<void> {
     await vscode.commands.executeCommand(CLAUDE_LAST_MESSAGE);
   } catch (err) {
     log.errorOnce(`${CLAUDE_LAST_MESSAGE} failed: ${err instanceof Error ? err.message : String(err)}`);
+    return;
   }
+  // The command scrolls by focusing the newest message, which then keeps a focus
+  // outline; the prompt box takes the focus back and the scroll stays. A chat that
+  // waits on a prompt keeps the focus on it.
+  await sleep(SCROLL_SETTLE_MS);
+  if (jump !== latestJump || !isActive(view) || !inputFocusIsHarmless()) return;
+  try {
+    await vscode.commands.executeCommand(CLAUDE_FOCUS_INPUT);
+  } catch (err) {
+    log.errorOnce(`${CLAUDE_FOCUS_INPUT} failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Claude Code's "Focus input" acts only on this chat and inserts nothing: no
+ * other chat tab is in front of its group, and no text is selected in the
+ * active text editor.
+ */
+function inputFocusIsHarmless(): boolean {
+  const visibleChats = vscode.window.tabGroups.all.filter((group) => group.activeTab && isClaudePanel(group.activeTab)).length;
+  return visibleChats === 1 && (vscode.window.activeTextEditor?.selection.isEmpty ?? true);
 }
 
 /** Brings the session's tab forward, at its newest message. */
