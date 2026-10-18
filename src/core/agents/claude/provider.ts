@@ -113,7 +113,7 @@ export class ClaudeProvider implements AgentProvider {
 
   constructor(
     private readonly configDir: string,
-    proc: ProcessTable,
+    private readonly proc: ProcessTable,
   ) {
     this.registry = new SessionRegistry(sessionsDir(configDir), proc);
     this.pastTranscripts = new PastTranscripts(configDir);
@@ -141,6 +141,7 @@ export class ClaudeProvider implements AgentProvider {
         panel: file.entrypoint === PANEL_ENTRYPOINT,
         activity: status === "working" ? activityOf(transcript) : undefined,
         agents: status === "working" ? agentsOf(transcript) : 0,
+        background: status === "working" ? undefined : this.backgroundOf(file.pid),
         // Claude Code stamps the branch of the checkout it started in; a session working in a worktree is on that one's.
         branch: (transcript.cwd ? branchAt(transcript.cwd) : undefined) ?? transcript.gitBranch,
         effort: transcript.effort,
@@ -218,6 +219,18 @@ export class ClaudeProvider implements AgentProvider {
       if (!branch || !query.branches.some((part) => branch.includes(part))) return false;
     }
     return true;
+  }
+
+  /**
+   * The shell commands a session left running in the background: children of
+   * its process started from Claude Code's shell snapshot. Their count, and
+   * when the oldest started.
+   */
+  private backgroundOf(pid: number): { count: number; since?: number } | undefined {
+    const shells = (this.proc.children?.(pid) ?? []).filter((child) => child.args.includes("/shell-snapshots/snapshot-"));
+    if (shells.length === 0) return undefined;
+    const starts = shells.map((shell) => shell.startedMs).filter((at): at is number => at !== undefined);
+    return { count: shells.length, since: starts.length ? Math.min(...starts) : undefined };
   }
 
   history(id: string): HistoryMessage[] | undefined {

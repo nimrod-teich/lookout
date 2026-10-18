@@ -43,6 +43,8 @@ describe("card text", () => {
     // A finished or idle session's card says nothing more: its state and title say it.
     expect(cardLine(view({ state: "done" }), now)).toEqual({});
     expect(cardLine(view({ state: "idle" }), now)).toEqual({});
+    expect(cardLine(view({ state: "idle", background: { count: 1, since: now - 2 * 3_600_000 } }), now)).toEqual({ label: "1 background job · 2h 00m" });
+    expect(cardLine(view({ state: "idle", background: { count: 2 } }), now)).toEqual({ label: "2 background jobs" });
     expect(cardLine(view({ state: "unknown", evidence: { source: "session file", note: "it records no state" } }), now)).toEqual({ text: "it records no state" });
     expect(secondLine(view({ state: "waiting", reason: { kind: "plan", ask: "Cache the specs" } }), now)).toBe("Plan approval · Cache the specs");
     expect(secondLine(view({ state: "idle" }), now)).toBeUndefined();

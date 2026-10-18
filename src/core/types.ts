@@ -81,6 +81,8 @@ export interface SessionView {
   /** The git branch it works on. */
   branch?: string;
   model?: string;
+  /** Shell commands it left running in the background while not working: how many, and since when. */
+  background?: { count: number; since?: number };
   /** The reasoning effort the model last answered with. */
   effort?: string;
   /** Tokens in the context window at the last model call. */

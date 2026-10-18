@@ -20,6 +20,8 @@ export interface ProcessTable {
   pidDomain(): string | undefined;
   /** Set by the owner to learn that details that were missing are now known. */
   onDidUpdate?: () => void;
+  /** A process's children, with their command lines; Linux only. */
+  children?(pid: number): { pid: number; args: string; startedMs?: number }[];
 }
 
 /** Parent pids of a process, nearest first, as far as they are known. */
@@ -56,6 +58,43 @@ class LinuxProcessTable implements ProcessTable {
     } catch {
       return null;
     }
+  }
+
+  children(pid: number): { pid: number; args: string; startedMs?: number }[] {
+    let ids: number[];
+    try {
+      ids = fs.readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number);
+    } catch {
+      return [];
+    }
+    const out: { pid: number; args: string; startedMs?: number }[] = [];
+    for (const child of ids) {
+      try {
+        const ticks = Number(this.get(child)?.startTicks);
+        const boot = this.bootMs();
+        // Clock ticks are 100 a second on Linux.
+        const startedMs = boot !== undefined && Number.isFinite(ticks) ? boot + ticks * 10 : undefined;
+        out.push({ pid: child, args: fs.readFileSync(`/proc/${child}/cmdline`, "utf8").replace(/\0/g, " ").trim(), startedMs });
+      } catch {
+        // Gone meanwhile.
+      }
+    }
+    return out;
+  }
+
+  private boot: number | undefined | null = null;
+
+  /** When the machine booted, epoch ms, from `/proc/stat`. */
+  private bootMs(): number | undefined {
+    if (this.boot === null) {
+      try {
+        const btime = /^btime (\d+)$/m.exec(fs.readFileSync("/proc/stat", "utf8"))?.[1];
+        this.boot = btime === undefined ? undefined : Number(btime) * 1000;
+      } catch {
+        this.boot = undefined;
+      }
+    }
+    return this.boot;
   }
 
   pidDomain(): string | undefined {
