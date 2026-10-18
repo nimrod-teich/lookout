@@ -57,6 +57,26 @@ Every part of Lookout, in full: the board and its cards, favourites, the Earlier
   </tr>
 </table>
 
+<p align="center">
+  <img src="../media/readme/board.png" width="380" alt="The board in the dark theme: harbour, legend, usage, and the cards grouped by state">
+  <img src="../media/readme/board-light.png" width="380" alt="The same board in the light theme">
+</p>
+
+<table>
+  <tr>
+    <td width="36%"><img src="../media/readme/board-search.png" alt="The board after a search for a word: every session with a match keeps its card, with the matching lines quoted under it"></td>
+    <td><img src="../media/readme/search-page.png" alt="The search page: every match of the word across the sessions, with the agent, project and branch of each, and a click opens the conversation at that message"></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="../media/readme/conversation.png" width="100%" alt="A conversation tab opened from a search hit, scrolled to the match, with its own search and an Open session button">
+</p>
+
+<p align="center">
+  <img src="../media/readme/status-bar.png" alt="The status bar item: the session counts by state and the 5-hour usage bar with the time to its reset">
+</p>
+
 ## Session states
 
 | State | Meaning |
