@@ -1,9 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { HistoryIndex, type HistoryMessage, type SearchResult, type SnippetSize } from "../../history";
+import { HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
 import { branchAt } from "../../git";
-import { projectOf } from "../../model";
-import { hasFilters, type Query } from "../../terms";
+import type { Query } from "../../terms";
+import { searchConversations, type Searchable } from "../../search";
 import { findLastLine, JsonlTail, lineStartAtOrAfter, readLineAt } from "../../jsonlTail";
 import { factsOf } from "./history";
 import { PastTranscripts } from "./past";
@@ -48,8 +48,6 @@ interface Tracked {
 const STALLED_MS = 15 * 60_000;
 /** A process in its first minute has not written its state yet; it is idle, not unknown. */
 const STARTING_MS = 60_000;
-/** A message is stamped before its line is written, so it is never newer than the file; a second covers rounding. */
-const MTIME_SLACK_MS = 1_000;
 
 function starting(file: SessionFile, now: number): boolean {
   return file.startedAt !== undefined && now - file.startedAt < STARTING_MS;
@@ -177,57 +175,21 @@ export class ClaudeProvider implements AgentProvider {
   }
 
   /**
-   * Searches the live and the past sessions' transcripts: the words in the
-   * messages written within the query's times, of the sessions its
-   * `project:`, `branch:` and `file:` pick. Each transcript is read into
-   * memory on its first search, then only what was appended; a first read
-   * happens only while the budget allows, the live sessions first. A query
-   * of operators alone lists the sessions they pick, without matches.
+   * Searches the live and the past sessions' transcripts (see
+   * `searchConversations`), the live sessions first. A session's project and
+   * branch are where it works now, or, for a past one, where it last worked.
    */
   search(parsed: Query, limit: number, budgetMs: number, snippet?: SnippetSize): SearchOutcome {
-    if (parsed.terms.length === 0 && !hasFilters(parsed)) return { results: [], pending: 0 };
-    const range = { since: parsed.since, before: parsed.before };
-    const timed = parsed.since !== undefined || parsed.before !== undefined;
-    const started = Date.now();
-    const results: SearchResult[] = [];
-    let pending = 0;
-    for (const id of [...this.tracked.keys(), ...this.pastFiles.keys()]) {
-      // A transcript last written before the bound holds no message after it: not worth reading.
-      const past = this.tracked.has(id) ? undefined : this.pastMeta.get(id);
-      if (past && parsed.since !== undefined && past.modifiedAt + MTIME_SLACK_MS < parsed.since) continue;
-      if (!this.picked(id, parsed)) continue;
-      const index = this.indexFor(id);
-      if (!index) continue;
-      if (!index.ready && Date.now() - started >= budgetMs) {
-        pending++;
-        continue;
+    const conversations = function* (this: ClaudeProvider): Iterable<Searchable> {
+      for (const [id, tracked] of this.tracked) yield { id, cwd: tracked.state.cwd ?? "", branch: tracked.state.gitBranch, index: () => this.indexFor(id) };
+      for (const id of this.pastFiles.keys()) {
+        if (this.tracked.has(id)) continue;
+        // Without what the list said of it, no project or branch picks it.
+        const meta = this.pastMeta.get(id);
+        yield { id, pastModifiedAt: meta?.modifiedAt, cwd: meta?.cwd ?? "", branch: meta?.branch, index: () => this.indexFor(id) };
       }
-      index.refresh();
-      if (parsed.files.length > 0 && !index.touched(parsed.files)) continue;
-      if (parsed.terms.length > 0) {
-        const { count, hits } = index.search(parsed.terms, limit, range, snippet);
-        if (count > 0) results.push({ id, count, hits });
-      } else if (!timed || index.hasMessageIn(range)) results.push({ id, count: 0, hits: [] });
-    }
-    return { results, pending };
-  }
-
-  /** The session's project and branch fit the query's `project:` and `branch:`, any of their values. */
-  private picked(id: string, query: Query): boolean {
-    if (query.projects.length === 0 && query.branches.length === 0) return true;
-    const tracked = this.tracked.get(id);
-    const meta = tracked ? { cwd: tracked.state.cwd ?? "", branch: tracked.state.gitBranch } : this.pastMeta.get(id);
-    if (!meta) return false;
-    if (query.projects.length > 0) {
-      const { project, worktree } = projectOf(meta.cwd);
-      const names = [project, worktree ?? ""].map((name) => name.toLowerCase());
-      if (!query.projects.some((part) => names.some((name) => name.includes(part)))) return false;
-    }
-    if (query.branches.length > 0) {
-      const branch = meta.branch?.toLowerCase();
-      if (!branch || !query.branches.some((part) => branch.includes(part))) return false;
-    }
-    return true;
+    };
+    return searchConversations(conversations.call(this), parsed, limit, budgetMs, snippet);
   }
 
   /**
