@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import type { AgentProvider, SearchOutcome } from "../core/agents/agent";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { ClaudeProvider } from "../core/agents/claude/provider";
-import type { HistoryMessage } from "../core/history";
+import type { HistoryMessage, SnippetSize } from "../core/history";
 import { Attention } from "../core/attention";
 import { buildPastView, sortViews } from "../core/model";
 import { Monitor } from "../core/monitor";
@@ -452,18 +452,19 @@ export class Controller implements vscode.Disposable {
 
   /**
    * Searches the conversations of the live and the past sessions: the newest
-   * few matches per session, for the cards. Days go by `zone`, the time zone
-   * of whoever searches (minutes behind UTC): in a remote window the
+   * few matches per session, for the cards, or for the search page `page`
+   * asks (more matches, cut wider). Days go by `zone`, the time zone of
+   * whoever searches (minutes behind UTC): in a remote window the
    * extension's own clock can be in another.
    */
-  search(query: string, zone?: number): SearchOutcome {
+  search(query: string, zone?: number, page?: { hits: number; snippet: SnippetSize }): SearchOutcome {
     const started = Date.now();
     const parsed = parseQuery(query, started, zone);
     const outcome: SearchOutcome = { results: [], pending: 0 };
     if (parsed.terms.length === 0 && !hasFilters(parsed)) return outcome;
     for (const provider of this.providers) {
       const left = Math.max(0, SEARCH_BUDGET_MS - (Date.now() - started));
-      const part = provider.search?.(parsed, SEARCH_HITS, left);
+      const part = provider.search?.(parsed, page?.hits ?? SEARCH_HITS, left, page?.snippet);
       if (!part) continue;
       outcome.results.push(...part.results);
       outcome.pending += part.pending;

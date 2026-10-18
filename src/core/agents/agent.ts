@@ -1,4 +1,4 @@
-import type { HistoryMessage, SearchResult } from "../history";
+import type { HistoryMessage, SearchResult, SnippetSize } from "../history";
 import type { Query } from "../terms";
 import type { Evidence, Reason, TypedQuestion } from "../types";
 
@@ -121,7 +121,7 @@ export interface AgentProvider {
    * conversation not read yet is read only while `budgetMs` allows; the rest
    * are counted as pending.
    */
-  search?(query: Query, limit: number, budgetMs: number): SearchOutcome;
+  search?(query: Query, limit: number, budgetMs: number, snippet?: SnippetSize): SearchOutcome;
   /** The sessions of the scope that are not running, newest first, without the ids in `exclude`. */
   past?(scope: PastScope, exclude: ReadonlySet<string>): PastList;
   /** The conversation of one live session, oldest first; undefined when the agent keeps no transcript for it. */

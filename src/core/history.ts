@@ -40,20 +40,27 @@ export interface SearchResult {
   hits: SearchHit[];
 }
 
-/** Characters kept before and after the first match: few before, so the match sits on the first line of a narrow card. */
-const BEFORE = 24;
-const AFTER = 96;
+/** Characters a snippet keeps before and after the first match. */
+export interface SnippetSize {
+  before: number;
+  after: number;
+}
+
+/** For a card: few before, so the match sits on the first line of a narrow card. */
+export const CARD_SNIPPET: SnippetSize = { before: 24, after: 96 };
+/** For the search page, which has the width for the sentence around a match. */
+export const PAGE_SNIPPET: SnippetSize = { before: 120, after: 360 };
 
 /** Cuts a message around its first match and marks every term in the cut. */
-export function snippetOf(text: string, terms: string[]): { snippet: string; ranges: [number, number][] } {
+export function snippetOf(text: string, terms: string[], size: SnippetSize = CARD_SNIPPET): { snippet: string; ranges: [number, number][] } {
   const lower = text.toLowerCase();
   let first = -1;
   for (const term of terms) {
     const at = lower.indexOf(term);
     if (at >= 0 && (first < 0 || at < first)) first = at;
   }
-  const start = first < 0 ? 0 : Math.max(0, first - BEFORE);
-  const end = Math.min(text.length, (first < 0 ? 0 : first) + AFTER);
+  const start = first < 0 ? 0 : Math.max(0, first - size.before);
+  const end = Math.min(text.length, (first < 0 ? 0 : first) + size.after);
   let snippet = text.slice(start, end).replace(/\s+/g, " ").trim();
   if (start > 0) snippet = `…${snippet}`;
   if (end < text.length) snippet = `${snippet}…`;
@@ -140,7 +147,7 @@ export class HistoryIndex {
   }
 
   /** The messages containing every term, written within `range`, newest first; `limit` of them cut into snippets. */
-  search(terms: string[], limit: number, range?: TimeRange): { count: number; hits: SearchHit[] } {
+  search(terms: string[], limit: number, range?: TimeRange, size?: SnippetSize): { count: number; hits: SearchHit[] } {
     if (terms.length === 0) return { count: 0, hits: [] };
     let count = 0;
     const hits: SearchHit[] = [];
@@ -148,7 +155,7 @@ export class HistoryIndex {
       const message = this.messages[i]!;
       if (!inRange(message.at, range) || !matchesAll(message.text, terms)) continue;
       count++;
-      if (hits.length < limit) hits.push({ index: i, role: message.role, at: message.at, ...snippetOf(message.text, terms) });
+      if (hits.length < limit) hits.push({ index: i, role: message.role, at: message.at, ...snippetOf(message.text, terms, size) });
     }
     return { count, hits };
   }

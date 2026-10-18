@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { describeAlert, noticeBody } from "./core/format";
+import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
@@ -18,6 +19,7 @@ import { createLog } from "./vscode/log";
 import { notifyFinished, notifyWaiting } from "./vscode/notifications";
 import { OsNotifier } from "./vscode/osNotifier";
 import { pickSession } from "./vscode/quickPick";
+import { PAGE_HITS, SearchPage } from "./vscode/searchPage";
 import { StatusBar } from "./vscode/statusBar";
 import { Terminals } from "./vscode/terminals";
 
@@ -26,6 +28,7 @@ const JUMP_NEXT_ATTENTION = "lookout.jumpNextAttention";
 const MARK_ALL_SEEN = "lookout.markAllSeen";
 const SHOW_BOARD = "lookout.showBoard";
 const REFRESH_USAGE = "lookout.refreshUsage";
+const SEARCH = "lookout.search";
 
 /** WSL reports itself as Linux; its kernel says otherwise. */
 function insideWsl(): boolean {
@@ -135,6 +138,17 @@ export function activate(context: vscode.ExtensionContext): void {
       else await resume(id);
     },
   });
+  /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
+  const openHit = (query: string, id: string, index?: number) => {
+    if (!findings.show(id, query, index)) void vscode.window.showInformationMessage(`Lookout has not found the transcript of "${controller.titleOf(id) ?? id}" yet.`);
+  };
+  const searchPage = new SearchPage(context.extensionUri, {
+    search: (query, zone) => controller.search(query, zone, { hits: PAGE_HITS, snippet: PAGE_SNIPPET }),
+    titleOf: (id) => controller.titleOf(id) ?? id,
+    whereOf: (id) => controller.whereOf(id),
+    isLive: (id) => controller.sessions.some((view) => view.id === id),
+    open: openHit,
+  });
   const board = new Board(context.extensionUri, {
     sessions: () => controller.sessions,
     past: () => controller.past,
@@ -155,9 +169,8 @@ export function activate(context: vscode.ExtensionContext): void {
     // The command, so the board's link says what the command says when it cannot fetch.
     refreshUsage: () => void vscode.commands.executeCommand(REFRESH_USAGE),
     search: (query, zone) => controller.search(query, zone),
-    openHit: (query, id, index) => {
-      if (!findings.show(id, query, index)) void vscode.window.showInformationMessage(`Lookout has not found the transcript of "${controller.sessions.find((v) => v.id === id)?.title ?? id}" yet.`);
-    },
+    openHit,
+    openSearch: (query) => searchPage.show(query),
   });
   const render = () => {
     statusBar.render({
@@ -180,6 +193,7 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     board,
     findings,
+    searchPage,
     controller.onDidChangeUsage(render),
     controller.onDidReachUsageThreshold((alert) => {
       const said = describeAlert(alert.meter);
@@ -231,6 +245,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand(MARK_ALL_SEEN, () => controller.markAllSeen()),
     vscode.commands.registerCommand(SHOW_BOARD, () => vscode.commands.executeCommand(`${BOARD_VIEW}.focus`)),
+    vscode.commands.registerCommand(SEARCH, () => searchPage.show("")),
     vscode.commands.registerCommand(REFRESH_USAGE, async () => {
       if (!controller.canRefreshUsage) {
         void vscode.window.showInformationMessage(`Lookout can't fetch usage: ${controller.usageNote ?? "usage refresh is off"}.`);

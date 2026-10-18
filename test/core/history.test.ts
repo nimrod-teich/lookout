@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { HistoryIndex, snippetOf, type HistoryMessage, type LineFacts } from "../../src/core/history";
+import { HistoryIndex, PAGE_SNIPPET, snippetOf, type HistoryMessage, type LineFacts } from "../../src/core/history";
 import { tempConfigDir } from "./helpers";
 
 /** The test file format: one `{ role, text, at?, paths? }` per line. */
@@ -34,6 +34,15 @@ describe("snippetOf", () => {
 
   it("keeps a short message whole", () => {
     expect(snippetOf("Fix the cache", ["cache"])).toEqual({ snippet: "Fix the cache", ranges: [[8, 13]] });
+  });
+
+  it("cuts wider for the search page", () => {
+    const text = `${"a ".repeat(200)}the billing webhook${" b".repeat(400)}`;
+    const card = snippetOf(text, ["billing"]).snippet;
+    const page = snippetOf(text, ["billing"], PAGE_SNIPPET).snippet;
+    expect(card.length).toBeLessThan(130);
+    expect(page.length).toBeGreaterThan(400);
+    expect(page.indexOf("billing")).toBeGreaterThan(100);
   });
 });
 

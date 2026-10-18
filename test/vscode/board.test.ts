@@ -10,7 +10,7 @@ const EARLIER: EarlierInfo = { scope: "folders", limit: 500, capped: false };
 
 function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
   const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(),
-    dismiss: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => ({ results: query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [], pending: 0 })), openHit: vi.fn(), past: () => PAST, resume: vi.fn(),
+    dismiss: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => ({ results: query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [], pending: 0 })), openHit: vi.fn(), openSearch: vi.fn(), past: () => PAST, resume: vi.fn(),
     earlier: () => EARLIER, setEarlierScope: vi.fn() };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
@@ -144,6 +144,13 @@ describe("Board", () => {
     expect(actions.openHit).toHaveBeenCalledTimes(2);
     expect(actions.openHit).toHaveBeenNthCalledWith(1, "cache", "00000000-0000-4000-8000-000000000001", 4);
     expect(actions.openHit).toHaveBeenNthCalledWith(2, "cache", "00000000-0000-4000-8000-000000000001", undefined);
+  });
+
+  it("relays a request to read a search on the search page", () => {
+    const { actions, webviewView } = setup([view()]);
+    webviewView.receive({ type: "openSearch", query: "cache since:3d" });
+    webviewView.receive({ type: "openSearch", query: 3 });
+    expect(actions.openSearch.mock.calls).toEqual([["cache since:3d"]]);
   });
 
   it("stops sending after the view is disposed", () => {

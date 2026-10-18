@@ -42,6 +42,10 @@ Running several AI coding agents at once means clicking through tabs to find out
     <td>A box above the cards looks through every conversation, live and earlier (in the Earlier group's scope): what you wrote and what the agent replied, not tool traffic. Every word must appear in one message. Operators narrow it: <code>since:</code> and <code>before:</code> keep the messages written in a time (<code>today</code>, <code>yesterday</code>, <code>12h</code>, <code>3d</code>, <code>2w</code>, <code>2026-10-01</code>); <code>project:</code> and <code>branch:</code> keep the sessions whose project, worktree or git branch contains the value; <code>file:</code> keeps the sessions whose tool calls worked on a path containing it. Several <code>project:</code>, <code>branch:</code> or <code>file:</code> values mean any of them; of several times, the narrowest counts; a value with spaces goes in quotes. Days begin at midnight in your time zone, also in a remote window. Operators alone list the sessions they keep. The sessions with matches stay, each with its newest three matches under the card and the words marked; the rest hide until the box is cleared. Big transcripts are read a little at a time, and the box says how many are left.</td>
   </tr>
   <tr>
+    <td><b>Search&nbsp;page</b></td>
+    <td>The same search with the room to read it, in an editor tab: <code>Lookout: Search All Sessions</code>, the search icon on the board's title bar, or a click on the board's "195 matches in 61 sessions". Every session with matches is listed, the newest match first, with its project, git branch, whether it is running, and up to 20 of its matches, each with who wrote it, when, and the sentence around it. The page takes the same operators as the board. A click on a match opens the conversation tab at that message; a click on a session, or on "+N more", at its newest match.</td>
+  </tr>
+  <tr>
     <td><b>Conversation&nbsp;tab</b></td>
     <td>A click on a match, or on "+N more", opens that session's whole conversation in an editor tab, scrolled to the match, under its title, project and git branch, in the harbour's night colours with the messages' Markdown rendered: headings, lists, quotes, links, inline code and code blocks. The tab has a search of its own: it marks the words, dims the messages without them, and steps through the matches with Enter and the arrows. It follows the conversation as it grows, and an Open session button brings the agent's own tab or terminal to the front.</td>
   </tr>
@@ -125,6 +129,7 @@ Windows and macOS support is new. The process handling is tested on both in CI; 
 | `Lookout: Mark All Sessions as Seen` | | Clears every "finished" mark. |
 | `Lookout: Show Sessions` | | Opens the board. |
 | `Lookout: Refresh Usage` | | Has Claude Code fetch the account's usage again. |
+| `Lookout: Search All Sessions` | | Opens the search page: every conversation's matches in an editor tab. |
 
 | Setting | Default | Description |
 | --- | --- | --- |
