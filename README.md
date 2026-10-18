@@ -20,7 +20,7 @@
   <a href="#how-it-works">How it works</a>
 </p>
 
-Running several AI coding agents at once means clicking through tabs and terminals to find out which one finished and which one is stuck on a question. Lookout keeps that answer in the status bar, takes you to the right tab or terminal with one keystroke, and finds any conversation, running or not, by a word you remember from it. Claude Code in its VS Code panel or a terminal, Codex and Copilot CLI in terminals: one board, one jump key, one search, each agent with its own colour and boat once more than one is running. It reads only what the agents already write on disk.
+Running several AI coding agents at once means clicking through tabs and terminals to find out which one finished and which one is stuck on a question. Lookout keeps that answer in the status bar, takes you to the right tab or terminal with one keystroke, and finds any conversation, running or not, by a word you remember from it. Claude Code in its VS Code panel or a terminal, Codex and Copilot CLI in terminals: one board, one jump key, one search, each agent with its own colour and boat once more than one is on the board. It reads only what the agents already write on disk.
 
 ## What it does
 
