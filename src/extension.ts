@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { boardAgents, canJump, canRename, canResume, markersShown } from "./core/agents/catalog";
+import { agentInfo, boardAgents, canJump, canRename, canResume, markersShown } from "./core/agents/catalog";
 import { describeAlert, noticeBody } from "./core/format";
 import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
@@ -22,6 +22,7 @@ import { createLog } from "./vscode/log";
 import { notifyFinished, notifyWaiting } from "./vscode/notifications";
 import { OsNotifier } from "./vscode/osNotifier";
 import { pickSession } from "./vscode/quickPick";
+import { resumeInTerminal } from "./vscode/resume";
 import { PAGE_HITS, SearchPage } from "./vscode/searchPage";
 import { StatusBar } from "./vscode/statusBar";
 import { Terminals } from "./vscode/terminals";
@@ -137,6 +138,13 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     if (!canResume(view)) return;
+    // An agent of the terminal resumes in a new terminal, in the folder the session worked in.
+    if (agentInfo(view.agent).resumesIn === "terminal") {
+      const command = controller.resumeCommand(id);
+      if (command) resumeInTerminal(view.agent, view.title, command);
+      else void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}": its folder is not known.`);
+      return;
+    }
     if (!(await panelAdapter(view.agent)?.resume(id, log))) void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}".`);
   };
   const findings = new Findings(context.extensionUri, {

@@ -1,11 +1,16 @@
 import * as fs from "node:fs";
 import { questionIn, quoteAsk } from "../../asks";
 import { branchAt } from "../../git";
+import { HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
 import { JsonlTail, readLineAt } from "../../jsonlTail";
 import type { NamedProcess, ProcessFinder } from "../../proc";
 import { pulseBins } from "../../pulse";
+import { searchConversations, type Searchable } from "../../search";
+import type { Query } from "../../terms";
 import type { Evidence } from "../../types";
-import type { AgentProvider, AgentSession, AgentStatus } from "../agent";
+import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, PastSession, ResumeCommand, SearchOutcome } from "../agent";
+import { factsOf } from "./history";
+import { PastRollouts, type PastRollout } from "./past";
 import { matchRollouts, type LiveProcess, type RolloutInfo } from "./match";
 import { CODEX, sessionIndexFile, sessionsDir, ThreadNames } from "./paths";
 import { invocationOf } from "./process";
@@ -20,6 +25,8 @@ const TITLE_MAX = 60;
 interface Tracked {
   tail: JsonlTail;
   state: RolloutState;
+  /** Its messages, built on the first search. */
+  history?: HistoryIndex;
   /** The file's mtime at the last look, to tell which rollouts moved since. */
   mtimeMs?: number;
   /** The last read failed. */
@@ -38,8 +45,14 @@ export class CodexProvider implements AgentProvider {
   private readonly catalog: RolloutCatalog;
   private readonly names: ThreadNames;
   private readonly tracked = new Map<string, Tracked>();
+  /** The rollout of each live session, by id. */
+  private liveFiles = new Map<string, string>();
   /** The mtimes seen at the previous poll, by file. */
   private previous = new Map<string, number>();
+  private readonly pastRollouts: PastRollouts;
+  /** The past sessions last listed, by id. */
+  private pastListed = new Map<string, PastRollout>();
+  private readonly pastIndexes = new Map<string, HistoryIndex>();
 
   constructor(
     private readonly home: string,
@@ -47,6 +60,7 @@ export class CodexProvider implements AgentProvider {
   ) {
     this.catalog = new RolloutCatalog(sessionsDir(home));
     this.names = new ThreadNames(sessionIndexFile(home));
+    this.pastRollouts = new PastRollouts(sessionsDir(home), this.names);
   }
 
   poll(now: number): AgentSession[] {
@@ -56,6 +70,7 @@ export class CodexProvider implements AgentProvider {
       .filter(({ call }) => call.session);
     if (processes.length === 0) {
       this.tracked.clear();
+      this.liveFiles.clear();
       return [];
     }
     const live: LiveProcess[] = processes.map(({ process, call }) => ({ pid: process.pid, cwd: call.cd ?? process.cwd, startedMs: process.startedMs, resumeId: call.resumeId }));
@@ -73,15 +88,80 @@ export class CodexProvider implements AgentProvider {
     };
     const matched = matchRollouts(live, rollouts, moved);
     this.previous = new Map(rollouts.map((r) => [r.file, r.mtimeMs]));
-    const used = new Set<string>();
+    const files = new Map<string, string>();
     const sessions = processes.map(({ process }) => {
       const rollout = matched.get(process.pid);
       if (!rollout) return this.empty(process);
-      used.add(rollout.file);
-      return this.session(process, rollout, now);
+      const session = this.session(process, rollout, now);
+      files.set(session.id, rollout.file);
+      return session;
     });
+    const used = new Set(files.values());
     for (const file of this.tracked.keys()) if (!used.has(file)) this.tracked.delete(file);
+    this.liveFiles = files;
     return sessions;
+  }
+
+  /**
+   * The threads that are not running, newest first: those of the window's
+   * folders, or every one. A thread of the window's folders resumes in a
+   * terminal there. Compressed rollouts are not read, and the list says how many.
+   */
+  past(scope: PastScope, exclude: ReadonlySet<string>): PastList {
+    const { rollouts, capped, incomplete, also, compressed } = this.pastRollouts.list(scope, exclude);
+    this.pastListed = new Map([...rollouts, ...also].map((r) => [r.id, r]));
+    for (const id of [...this.pastIndexes.keys()]) if (!this.pastListed.has(id)) this.pastIndexes.delete(id);
+    const session = (r: PastRollout): PastSession => ({ agent: this.id, id: r.id, cwd: r.cwd, title: r.title, resumable: r.inFolders, modifiedAt: r.modifiedAt });
+    const notes = compressed > 0 ? [`${compressed} older Codex ${compressed === 1 ? "session is" : "sessions are"} compressed (.jsonl.zst) and not listed or searched.`] : undefined;
+    return { sessions: rollouts.map(session), capped, incomplete, also: also.map(session), notes };
+  }
+
+  /** Searches the live and the past threads: what you wrote and what Codex replied (see `searchConversations`). */
+  search(parsed: Query, limit: number, budgetMs: number, snippet?: SnippetSize): SearchOutcome {
+    const conversations = function* (this: CodexProvider): Iterable<Searchable> {
+      for (const [id, file] of this.liveFiles) {
+        const cwd = this.tracked.get(file)?.state.cwd ?? "";
+        yield { id, cwd, branch: cwd ? branchAt(cwd) : undefined, index: () => this.indexFor(id) };
+      }
+      for (const [id, past] of this.pastListed) {
+        if (this.liveFiles.has(id)) continue;
+        // Codex records no branch: `branch:` picks only the live sessions, whose branch git tells.
+        yield { id, pastModifiedAt: past.modifiedAt, cwd: past.cwd, index: () => this.indexFor(id) };
+      }
+    };
+    return searchConversations(conversations.call(this), parsed, limit, budgetMs, snippet);
+  }
+
+  history(id: string): HistoryMessage[] | undefined {
+    const index = this.indexFor(id);
+    if (!index) return undefined;
+    index.refresh();
+    return index.messages;
+  }
+
+  /** `codex resume <id>`, in the folder the thread worked in. */
+  resumeCommand(id: string): ResumeCommand | undefined {
+    const past = this.pastListed.get(id);
+    if (!past || !past.cwd) return undefined;
+    return { args: ["codex", "resume", id], cwd: past.cwd };
+  }
+
+  private indexFor(id: string): HistoryIndex | undefined {
+    const live = this.liveFiles.get(id);
+    if (live) {
+      const tracked = this.tracked.get(live);
+      if (!tracked) return undefined;
+      tracked.history ??= new HistoryIndex(live, factsOf);
+      return tracked.history;
+    }
+    const past = this.pastListed.get(id);
+    if (!past) return undefined;
+    let index = this.pastIndexes.get(id);
+    if (!index) {
+      index = new HistoryIndex(past.file, factsOf);
+      this.pastIndexes.set(id, index);
+    }
+    return index;
   }
 
   /** A session with nothing sent yet: Codex writes its rollout with the first prompt. */

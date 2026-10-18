@@ -99,6 +99,8 @@ export interface PastList {
   incomplete: boolean;
   /** The sessions of `scope.also` that `sessions` does not hold. */
   also: PastSession[];
+  /** What the list leaves out and why, said under the Earlier group. */
+  notes?: string[];
 }
 
 /** A search's outcome: the sessions with matches, and how many were not read within the time given. */
@@ -137,4 +139,17 @@ export interface AgentProvider {
   past?(scope: PastScope, exclude: ReadonlySet<string>): PastList;
   /** The conversation of one live session, oldest first; undefined when the agent keeps no transcript for it. */
   history?(id: string): HistoryMessage[] | undefined;
+  /**
+   * How to resume a session that is not running in a terminal: the command
+   * and the folder to run it in. For agents whose sessions resume in a
+   * terminal rather than in an editor panel.
+   */
+  resumeCommand?(id: string): ResumeCommand | undefined;
+}
+
+/** A command that resumes a session in a terminal. */
+export interface ResumeCommand {
+  /** The program and its arguments, run as they are. */
+  args: string[];
+  cwd: string;
 }

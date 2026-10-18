@@ -426,7 +426,6 @@
       "agent": "codex",
       "title": "Rewrite the retry backoff",
       "project": "api",
-      "branch": "fix/backoff",
       "cwd": "/work/api",
       "resumable": true,
       "modifiedAt": 10800000
@@ -436,7 +435,6 @@
       "agent": "codex",
       "title": "Draft the migration plan",
       "project": "infra",
-      "branch": "main",
       "cwd": "/work/infra",
       "resumable": false,
       "modifiedAt": 108000000
@@ -446,7 +444,6 @@
       "agent": "copilot",
       "title": "Review the auth middleware",
       "project": "api",
-      "branch": "main",
       "cwd": "/work/api",
       "resumable": true,
       "modifiedAt": 18000000
@@ -455,7 +452,10 @@
   "earlier": {
     "scope": "folders",
     "limit": 500,
-    "capped": false
+    "capped": false,
+    "notes": [
+      "3 older Codex sessions are compressed (.jsonl.zst) and not listed or searched."
+    ]
   },
   "favourites": [
     "c2",

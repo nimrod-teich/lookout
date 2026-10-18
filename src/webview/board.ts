@@ -749,10 +749,15 @@ function pastElapsed(view: PastView): string {
   return `${formatElapsed(now() - view.modifiedAt)} ago`;
 }
 
+/** Where a session that is not running resumes. */
+function resumeWhere(agent: string): string {
+  return agentInfo(agent).resumesIn === "terminal" ? "in a terminal" : "in the agent's panel";
+}
+
 /** What a click on an earlier session does, and why. */
 function pastTitle(view: PastView, resumable: boolean): string {
   const written = `Not running · last written ${pastElapsed(view)}`;
-  if (resumable) return `${written} · click to resume it in the agent's panel`;
+  if (resumable) return `${written} · click to resume it ${resumeWhere(view.agent)}`;
   if (view.resumable) return `${written} · click to read its conversation; Lookout cannot resume ${agentInfo(view.agent).label}'s sessions`;
   return `${written} · from ${view.cwd || "another project"}, not one of this window's folders: click to read its conversation; the agent resumes it from a window open on that folder`;
 }
@@ -808,7 +813,7 @@ function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, v
   const title = live
     ? `${stateTitle(live)}${canJump(live) ? " · click to jump to it" : ""}`
     : canResume(view!)
-      ? "Not running · click to resume it in the agent's panel"
+      ? `Not running · click to resume it ${resumeWhere(view!.agent)}`
       : view!.resumable
         ? `Not running · click to read its conversation; Lookout cannot resume ${agentInfo(view!.agent).label}'s sessions`
         : `Not running · from ${view!.cwd || "another project"}: click to read its conversation`;
@@ -916,9 +921,11 @@ function renderEarlier(after: HTMLElement): void {
   for (const button of earlierEl.querySelectorAll<HTMLElement>(".scope")) button.setAttribute("aria-pressed", String(button.dataset.scope === earlier.scope));
   earlierEl.querySelector(".count")!.textContent = query === "" ? String(shown.length) : `${shown.length} of ${listed.length}`;
   // More earlier sessions than are listed: the newest only, and searches cover those.
+  // And what an agent's list leaves out, such as compressed sessions.
   const note = earlierEl.querySelector(".note")!;
-  note.classList.toggle("hidden", !earlier.capped || !open);
-  note.textContent = earlier.capped ? `Showing the newest ${earlier.limit}; older sessions are not listed or searched.` : "";
+  const notes = [...(earlier.capped ? [`Showing the newest ${earlier.limit}; older sessions are not listed or searched.`] : []), ...(earlier.notes ?? [])];
+  note.classList.toggle("hidden", notes.length === 0 || !open);
+  note.textContent = notes.join(" ");
   if (earlierEl.previousElementSibling !== after) root.insertBefore(earlierEl, after.nextSibling);
   const list = earlierEl.querySelector(".cards")!;
   list.classList.toggle("hidden", !open);

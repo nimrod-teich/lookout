@@ -13,6 +13,8 @@ export const APPROVAL = "01a14ee6-c111-70e2-9f36-f32a6f1197e4";
 export const WORKING = "01a14ee7-9316-79e0-b436-42f35d3b5fb3";
 export const QUESTION = "01a14ee8-0965-7292-b784-1fa20762eae5";
 export const ASKED_IN_REPLY = "01a14ee8-0983-7592-bcc8-8e4e81aed496";
+/** Appended a line with a shell command, then edited the file with a patch. */
+export const EDITED = "01a14f09-6731-7410-ad6a-03c39a31824e";
 
 /** A moment shortly after the fixtures were written: 2026-10-18 12:30 UTC. */
 export const NOW = Date.parse("2026-10-18T12:30:00.000Z");
