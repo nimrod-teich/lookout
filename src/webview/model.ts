@@ -79,7 +79,7 @@ export function cardLine(view: SessionView, now: number): CardLine {
     }
     case "done":
     case "idle":
-      return {};
+      return view.restored ? { label: "tab open · not started" } : {};
     case "unknown":
       return { text: view.evidence?.note };
   }

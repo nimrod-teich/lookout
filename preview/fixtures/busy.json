@@ -307,6 +307,26 @@
       }
     },
     {
+      "id": "6r",
+      "agent": "claude-code",
+      "pid": 0,
+      "title": "Lava backup providers WebSocket failover",
+      "state": "idle",
+      "since": 10800000,
+      "lastWriteAt": 10800000,
+      "evidence": {
+        "source": "transcript",
+        "at": 10800000,
+        "note": "its tab is open; the agent starts the session once the tab is opened"
+      },
+      "project": "lava",
+      "branch": "main",
+      "cwd": "/work/lava",
+      "host": "panel",
+      "agents": 0,
+      "restored": true
+    },
+    {
       "id": "7",
       "agent": "claude-code",
       "pid": 7,

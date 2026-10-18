@@ -91,6 +91,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
     ...locate(session, ancestors, ctx),
     activity: session.activity,
     agents: session.agents ?? 0,
+    empty: session.empty,
     branch: session.branch,
     model: session.model,
     effort: session.effort,
@@ -106,6 +107,53 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
 /** The view of a session that is not running. */
 export function buildPastView(session: PastSession): PastView {
   return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), branch: session.branch, cwd: session.cwd, resumable: session.resumable, modifiedAt: session.modifiedAt };
+}
+
+/** The agent's tabs open in a window: their labels, and the label it gives a title. */
+export interface AgentTabs {
+  labels: readonly string[];
+  label(title: string): string;
+}
+
+/**
+ * The earlier sessions whose agent tab is open in this window, as idle
+ * sessions not started yet: after a reload the agent restores its tabs but
+ * starts a session only once its tab is opened. Each tab not held by a
+ * running session of this window's panel takes the newest resumable session
+ * its label fits.
+ */
+export function restoredTabViews(past: readonly PastView[], live: readonly SessionView[], tabs: AgentTabs): SessionView[] {
+  const open = [...tabs.labels];
+  for (const view of live) {
+    if (view.host !== "panel") continue;
+    const at = open.indexOf(tabs.label(view.title));
+    if (at >= 0) open.splice(at, 1);
+  }
+  const taken = new Set(live.map((view) => view.id));
+  const out: SessionView[] = [];
+  for (const label of open) {
+    const view = past.find((p) => p.resumable && !taken.has(p.id) && tabs.label(p.title) === label);
+    if (!view) continue;
+    taken.add(view.id);
+    out.push({
+      id: view.id,
+      agent: view.agent,
+      pid: 0,
+      title: view.title,
+      state: "idle",
+      since: view.modifiedAt,
+      lastWriteAt: view.modifiedAt,
+      evidence: { source: "transcript", at: view.modifiedAt, note: "its tab is open; the agent starts the session once the tab is opened" },
+      project: view.project,
+      worktree: view.worktree,
+      branch: view.branch,
+      cwd: view.cwd,
+      host: "panel",
+      agents: 0,
+      restored: true,
+    });
+  }
+  return out;
 }
 
 /** A prompt the agent reports blocks it; a question read from a reply does not, so it comes after. */

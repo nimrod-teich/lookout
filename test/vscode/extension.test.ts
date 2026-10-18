@@ -48,6 +48,13 @@ function writeSession(fields: Record<string, unknown>): void {
   fs.writeFileSync(path.join(configDir, "sessions", `${child.pid}.json`), JSON.stringify(record));
 }
 
+/** A conversation for the session, without a title yet: it reads "Empty tab", or "Empty session" in a terminal. */
+function writeTranscript(): void {
+  const dir = path.join(configDir, "projects", "-work-app");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${SESSION}.jsonl`), JSON.stringify({ type: "user", cwd: "/work/app", message: { content: "run the tests" } }) + "\n");
+}
+
 function statusText(): string | undefined {
   return stub.ops.filter(([target, action]) => target === "statusBar:lookout.status" && action === "set:text").at(-1)?.[2] as string | undefined;
 }
@@ -88,6 +95,7 @@ afterEach(() => {
 
 describe("the extension", () => {
   it("shows a session, jumps to its panel, marks its finished turn, and drops it when it exits", async () => {
+    writeTranscript();
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
     activate(context());
     const registry = path.join(configDir, "global-storage", "windows", `${process.pid}.json`);
@@ -138,6 +146,20 @@ describe("the extension", () => {
     for (const subscription of subscriptions.splice(0)) subscription.dispose();
     expect(fs.existsSync(registry)).toBe(false);
   }, 90_000);
+
+  it("leaves an idle tab with nothing sent off the board and the status bar, and shows it once it works", async () => {
+    writeSession({ status: "idle", statusUpdatedAt: Date.now() });
+    activate(context());
+    const board = stub.webviewProviders.get("lookout.board") as { resolveWebviewView(view: unknown): void };
+    const boardView = createWebviewView();
+    board.resolveWebviewView(boardView);
+    const sessions = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions?: { id: string }[] } | undefined)?.sessions;
+    await vi.waitFor(() => expect(sessions()).toEqual([]), WAIT);
+    expect(stub.ops.some(([target, action]) => target === "statusBar:lookout.status" && action === "show")).toBe(false);
+    writeSession({ status: "busy", statusUpdatedAt: Date.now() });
+    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    expect(sessions()?.map((v) => v.id)).toEqual([SESSION]);
+  }, 60_000);
 
   it("names what a prompt asks even when the transcript lags, and announces a question typed at the end of a turn", async () => {
     const transcript = path.join(configDir, "projects", "-work-app", `${SESSION}.jsonl`);
@@ -333,6 +355,7 @@ describe("the extension", () => {
   });
 
   it("answers another window's jump: brings the session forward, comes to the front, and says so", async () => {
+    writeTranscript();
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });
     activate(context());
     await placed();
@@ -364,6 +387,7 @@ describe("the extension", () => {
       const windows = path.join(configDir, "global-storage", "windows");
       fs.mkdirSync(windows, { recursive: true });
       fs.writeFileSync(path.join(windows, `${other}.json`), JSON.stringify({ pid: other, label: "api", terminals: [shell.pid] }));
+      writeTranscript();
       const record = { pid: sessionPid, sessionId: SESSION, cwd: "/work/app", startedAt: Date.now(), kind: "interactive", entrypoint: "cli", status: "idle", statusUpdatedAt: Date.now() };
       fs.writeFileSync(path.join(configDir, "sessions", `${sessionPid}.json`), JSON.stringify(record));
       activate(context());
@@ -495,6 +519,22 @@ describe("the extension", () => {
       // Its conversation can be read.
       boardView.receive({ type: "openHit", query: "", id: ELSEWHERE });
       expect(stub.panels.find((panel) => panel.viewType === "lookout.findings")?.posted.at(-1)).toMatchObject({ type: "conversation", session: { id: ELSEWHERE } });
+    }, 60_000);
+
+    it("keeps a session whose tab the agent restored after a reload on the board, idle until the tab is opened", async () => {
+      stub.addClaudeGroup(["tune the deploy script", "deploy the other service"]);
+      activate(context());
+      const { boardView, listed } = openBoard();
+      const sessions = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions?: { id: string; state: string; restored?: boolean }[] } | undefined)?.sessions;
+      await vi.waitFor(() => expect(sessions()?.map((v) => [v.id, v.state, v.restored])).toEqual([[HERE, "idle", true]]), WAIT);
+      // Not listed under Earlier as well; another project's tab opens blank, so it is not shown.
+      expect(listed()?.past).toEqual([]);
+      // Not counted as running.
+      expect(stub.ops.some(([target, action]) => target === "statusBar:lookout.status" && action === "show")).toBe(false);
+      // A click opens its tab, which starts it.
+      stub.commands.set(CLAUDE_OPEN, () => undefined);
+      boardView.receive({ type: "jump", id: HERE });
+      await vi.waitFor(() => expect(stub.ops.some(([target, command, args]) => target === "commands" && command === CLAUDE_OPEN && (args as unknown[])[0] === HERE)).toBe(true), WAIT);
     }, 60_000);
 
     it("lists a long history in quick slices, not one slice per poll", async () => {
