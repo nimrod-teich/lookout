@@ -23,6 +23,8 @@ export interface EarlierInfo {
   scope: EarlierScope;
   limit: number;
   capped: boolean;
+  /** What the agents' lists leave out and why, e.g. compressed sessions. */
+  notes?: string[];
 }
 
 /** The sessions the user starred, newest star first, and those of them that are not running, wherever they ran. */

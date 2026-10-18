@@ -43,6 +43,8 @@ export interface AgentInfo {
   colors: { dark: string; light: string };
   glyph: AgentGlyph;
   capabilities: Capabilities;
+  /** Where a session that is not running resumes: in the agent's editor panel, or in a terminal. */
+  resumesIn: "panel" | "terminal";
 }
 
 const HULL = "M1 11.2h14l-2.4 3.2H3.4z";
@@ -58,6 +60,7 @@ export const AGENTS: readonly AgentInfo[] = [
     // A sloop: one mast, one sail.
     glyph: { icon: "lookout-sloop", path: `${HULL}M7.5 1h1.1v10.2H7.5zM7.1 2v8.3H2.3z`, lamp: [8, 11.2] },
     capabilities: { jumpTerminal: true, jumpPanel: true, rename: true, resume: true, search: true, usage: true },
+    resumesIn: "panel",
   },
   {
     id: "codex",
@@ -67,7 +70,8 @@ export const AGENTS: readonly AgentInfo[] = [
     colors: { dark: "#7ae8df", light: "#14a093" },
     // A cutter: one mast, a mainsail aft and a headsail forward.
     glyph: { icon: "lookout-cutter", path: `${HULL}M6.4 1h1.1v10.2H6.4zM6 2.2v8.1H1.6zM7.9 3l6 7.3h-6z`, lamp: [6.95, 1.4] },
-    capabilities: { jumpTerminal: true, jumpPanel: false, rename: false, resume: false, search: false, usage: false },
+    capabilities: { jumpTerminal: true, jumpPanel: false, rename: false, resume: true, search: true, usage: false },
+    resumesIn: "terminal",
   },
   {
     id: "copilot",
@@ -78,6 +82,7 @@ export const AGENTS: readonly AgentInfo[] = [
     // A ferry: a long hull, two decks with a row of windows, a funnel.
     glyph: { icon: "lookout-ferry", path: "M.6 10.4h14.8l-1.8 4H2.4zM2.4 7.2h10.8v3.2H2.4zM3.6 8.2v1.2h1.4V8.2zm2.7 0v1.2h1.4V8.2zm2.7 0v1.2h1.4V8.2zM4.4 4.6h6v2.6h-6zM10.9 2.6h1.6v4.6h-1.6z", lamp: [7.4, 3.9] },
     capabilities: { jumpTerminal: true, jumpPanel: false, rename: false, resume: false, search: true, usage: false },
+    resumesIn: "terminal",
   },
 ];
 
@@ -85,7 +90,7 @@ const ALL: Capabilities = { jumpTerminal: true, jumpPanel: true, rename: true, r
 
 /** An agent the catalog does not list: named by its id, in the neutral colour, with every action as before. */
 function unlisted(id: string): AgentInfo {
-  return { id, key: id, label: id, hue: "--agent-other", colors: { dark: "#9fb0c0", light: "#717171" }, glyph: AGENTS[0]!.glyph, capabilities: ALL };
+  return { id, key: id, label: id, hue: "--agent-other", colors: { dark: "#9fb0c0", light: "#717171" }, glyph: AGENTS[0]!.glyph, capabilities: ALL, resumesIn: "panel" };
 }
 
 const BY_ID = new Map(AGENTS.map((agent) => [agent.id, agent]));

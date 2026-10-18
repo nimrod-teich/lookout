@@ -1,7 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import type { AgentProvider, SearchOutcome } from "../core/agents/agent";
+import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents/agent";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
@@ -131,6 +131,8 @@ export class Controller implements vscode.Disposable {
   private earlierScope: EarlierScope;
   /** The scope holds older sessions than the limit lets the board list. */
   private earlierCapped = false;
+  /** What the agents' lists leave out and why. */
+  private earlierNotes: string[] = [];
   /** The starred sessions that are not running, wherever they ran. */
   private favouritePast: PastView[] = [];
   private archived = new ArchivedSessions([]);
@@ -193,8 +195,14 @@ export class Controller implements vscode.Disposable {
   }
 
   /** Which earlier sessions are listed, the most listed, and whether older ones were left out. */
-  get earlier(): { scope: EarlierScope; limit: number; capped: boolean } {
-    return { scope: this.earlierScope, limit: EARLIER_LIMIT, capped: this.earlierCapped };
+  get earlier(): { scope: EarlierScope; limit: number; capped: boolean; notes?: string[] } {
+    return { scope: this.earlierScope, limit: EARLIER_LIMIT, capped: this.earlierCapped, notes: this.earlierNotes.length ? this.earlierNotes : undefined };
+  }
+
+  /** How to resume a session that is not running in a terminal, for an agent whose sessions resume there. */
+  resumeCommand(id: string): ResumeCommand | undefined {
+    const agent = this.pastView(id)?.agent;
+    return this.providers.find((provider) => provider.id === agent)?.resumeCommand?.(id);
   }
 
   /** Lists and searches the earlier sessions of this window's folders, or of every project; kept for the workspace. */
@@ -336,18 +344,21 @@ export class Controller implements vscode.Disposable {
     const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit: EARLIER_LIMIT, also: this.favouriteIds() };
     let capped = false;
     let incomplete = false;
+    const notes: string[] = [];
     const favouritePast: PastView[] = [];
     const past = this.providers
       .flatMap((provider) => {
         const list = provider.past?.(scope, exclude);
         capped ||= list?.capped ?? false;
         incomplete ||= list?.incomplete ?? false;
+        notes.push(...(list?.notes ?? []));
         favouritePast.push(...(list?.also ?? []).map(buildPastView));
         return list?.sessions ?? [];
       })
       .map(buildPastView);
     past.sort((a, b) => b.modifiedAt - a.modifiedAt);
     this.earlierCapped = capped || past.length > EARLIER_LIMIT;
+    this.earlierNotes = notes;
     // Tabs the agent restored after a reload, not started yet: their sessions stay on the board, idle.
     const restored = this.host.restoredTabs ? restoredTabViews(past, update.views, this.host.restoredTabs()) : [];
     const shownPast = restored.length ? past.filter((view) => !restored.some((r) => r.id === view.id)) : past;
@@ -609,7 +620,7 @@ export class Controller implements vscode.Disposable {
   }
 
   private publish(views: SessionView[], past: PastView[], favouritePast: PastView[]): void {
-    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.favouriteIds(), favouritePast]);
+    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.earlierNotes, this.favouriteIds(), favouritePast]);
     if (snapshot === this.snapshot) return;
     this.snapshot = snapshot;
     this.current = views;

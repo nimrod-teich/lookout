@@ -4,7 +4,8 @@ import { CodexProvider } from "../../../../src/core/agents/codex/provider";
 import { quietFor } from "../../../../src/core/format";
 import { buildView } from "../../../../src/core/model";
 import type { NamedProcess, ProcessFinder } from "../../../../src/core/proc";
-import { APPROVAL, ASKED_IN_REPLY, homeFile, IDLE, NOW, QUESTION, STARTED, tempCodexHome, WORKING } from "./fixtures";
+import { parseQuery } from "../../../../src/core/terms";
+import { APPROVAL, ASKED_IN_REPLY, EDITED, homeFile, IDLE, NOW, QUESTION, STARTED, tempCodexHome, WORKING } from "./fixtures";
 
 class FakeFinder implements ProcessFinder {
   constructor(public processes: NamedProcess[] = []) {}
@@ -119,5 +120,55 @@ describe("CodexProvider", () => {
     const watcher = provider.watch(() => {});
     expect(watcher).toBeDefined();
     watcher?.dispose();
+  });
+
+  it("lists the threads that are not running, resumable in the window's folders, and says how many are compressed", () => {
+    const { home, provider } = setup([codex(13, "/work/c")]);
+    fs.writeFileSync(`${home}/sessions/2026/10/18/rollout-2026-10-01T10-00-00-01a10000-0000-7000-8000-000000000000.jsonl.zst`, "zstd");
+    provider.poll(NOW);
+    const list = provider.past({ folders: ["/work/a"], all: true, limit: 500 }, new Set([WORKING]));
+    expect(list.sessions.map((s) => s.id)).not.toContain(WORKING);
+    expect(list.sessions.find((s) => s.id === IDLE)).toMatchObject({ agent: "codex", title: "Answer 2+2", cwd: "/work/a", resumable: true });
+    expect(list.sessions.find((s) => s.id === APPROVAL)).toMatchObject({ resumable: false });
+    expect(list.notes).toEqual(["1 older Codex session is compressed (.jsonl.zst) and not listed or searched."]);
+  });
+
+  it("resumes a thread with codex resume, in the folder it worked in", () => {
+    const { provider } = setup([]);
+    provider.past({ folders: [], all: true, limit: 500 }, new Set());
+    expect(provider.resumeCommand(IDLE)).toEqual({ args: ["codex", "resume", IDLE], cwd: "/work/a" });
+    expect(provider.resumeCommand("01a10000-0000-7000-8000-00000000dead")).toBeUndefined();
+  });
+
+  it("searches what was said in live and earlier threads, narrowed by the operators", () => {
+    const { provider } = setup([codex(13, "/work/c")]);
+    provider.poll(NOW);
+    provider.past({ folders: [], all: true, limit: 500 }, new Set([WORKING]));
+    const search = (q: string) => provider.search(parseQuery(q, NOW, 0), 3, 10_000).results.map((r) => [r.id, r.count]);
+    expect(search("four")).toEqual([[IDLE, 1]]);
+    // The live session first, then the earlier ones.
+    const approval = search("approval").map(([id]) => id);
+    expect(approval[0]).toBe(WORKING);
+    expect(approval.slice(1).sort()).toEqual([APPROVAL, ASKED_IN_REPLY].sort());
+    // The prompt and Codex's note both say it.
+    expect(search("approval project:b")).toEqual([[APPROVAL, 2]]);
+    expect(search("file:notes.md")).toEqual([[EDITED, 0]]);
+    expect(search("hello file:notes.md").map(([id]) => id)).toEqual([EDITED]);
+    expect(search("four since:2026-10-19")).toEqual([]);
+    expect(search("four before:2026-10-19")).toEqual([[IDLE, 1]]);
+    // Codex records no branch: an earlier thread is never picked by one.
+    expect(search("four branch:main")).toEqual([]);
+  });
+
+  it("gives the conversation of a live or an earlier thread, oldest first", () => {
+    const { provider } = setup([codex(11, "/work/a")]);
+    provider.poll(NOW);
+    expect(provider.history(IDLE)?.map((m) => [m.role, m.text])).toEqual([
+      ["you", "What is 2+2? Answer with one word and do not run any commands."],
+      ["agent", "Four"],
+    ]);
+    provider.past({ folders: [], all: true, limit: 500 }, new Set([IDLE]));
+    expect(provider.history(EDITED)?.[0]).toMatchObject({ role: "you", text: "Append a line saying hello to notes.md, then show me the file with cat." });
+    expect(provider.history("nope")).toBeUndefined();
   });
 });

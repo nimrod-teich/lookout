@@ -308,6 +308,16 @@ function notify(kind: string) {
 }
 
 export const window = {
+  /** A terminal a test can see created, written to and shown: each step is an op on `terminal:<name>`. */
+  createTerminal: (options: { name?: string; cwd?: string }) => {
+    const name = options.name ?? "terminal";
+    stub.ops.push([`terminal:${name}`, "create", options]);
+    return {
+      name,
+      sendText: (text: string, addNewLine?: boolean) => void stub.ops.push([`terminal:${name}`, "sendText", { text, addNewLine }]),
+      show: (preserveFocus?: boolean) => void stub.ops.push([`terminal:${name}`, "show", preserveFocus]),
+    };
+  },
   createStatusBarItem: (id: string) =>
     recorded(`statusBar:${id}`, ["text", "tooltip", "backgroundColor", "color", "name", "command", "accessibilityInformation"], ["show", "hide", "dispose"]),
   createOutputChannel: (name: string) => ({

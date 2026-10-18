@@ -87,7 +87,9 @@ describe("a Codex rollout", () => {
   });
 
   it("are all copies of real sessions, with no home folder, time zone or account id left", () => {
-    const text = fs.readdirSync(path.join(FIXTURES, "extra")).map((n) => fs.readFileSync(path.join(FIXTURES, "extra", n), "utf8")).join("");
+    const files = (fs.readdirSync(FIXTURES, { recursive: true }) as string[]).filter((name) => name.endsWith(".jsonl"));
+    expect(files.length).toBeGreaterThan(5);
+    const text = files.map((name) => fs.readFileSync(path.join(FIXTURES, name), "utf8")).join("");
     expect(text).not.toMatch(/\/home\/bob|Jerusalem/);
     expect(text).not.toMatch(/"creator_(user|account)_id":"(?!<masked>)/);
   });
