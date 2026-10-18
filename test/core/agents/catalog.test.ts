@@ -120,7 +120,7 @@ describe("capabilities", () => {
     expect(canJump({ agent: "claude-code", host: "terminal" })).toBe(true);
     expect(canJump({ agent: "codex", host: "terminal" })).toBe(true);
     expect(canJump({ agent: "codex", host: "panel" })).toBe(true);
-    expect(canJump({ agent: "copilot", host: "panel" })).toBe(false);
+    expect(canJump({ agent: "copilot", host: "panel" })).toBe(true);
     expect(canJump({ agent: "codex", host: "window" })).toBe(true);
     expect(canJump({ agent: "copilot", host: "elsewhere" })).toBe(true);
     expect(canJump({ agent: "copilot", host: "editor" })).toBe(true);

@@ -148,7 +148,7 @@ export function activate(context: vscode.ExtensionContext): void {
       else void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}": its folder is not known.`);
       return;
     }
-    if (!(await panelAdapter(view.agent)?.resume(id, log))) void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}".`);
+    if (!(await panelAdapter(view.agent)?.resume(id, log, view))) void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}".`);
   };
   const findings = new Findings(context.extensionUri, {
     titleOf: (id) => controller.titleOf(id) ?? id,
@@ -258,7 +258,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.tabGroups.onDidChangeTabGroups(noticeFocus),
     vscode.window.onDidChangeActiveTerminal(noticeFocus),
     vscode.window.onDidChangeWindowState(noticeFocus),
-    vscode.workspace.onDidChangeWorkspaceFolders(() => controller.poll()),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => controller.foldersChanged()),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration("lookout") && !event.affectsConfiguration("claudeCode.environmentVariables")) return;
       const next = readConfig();

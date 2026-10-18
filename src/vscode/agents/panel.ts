@@ -1,4 +1,4 @@
-import type { SessionView } from "../../core/types";
+import type { PastView, SessionView } from "../../core/types";
 import type { Log } from "../log";
 
 export type PanelReveal = "revealed" | "revealed-by-tab" | "refused-invalid" | "failed";
@@ -16,5 +16,5 @@ export interface PanelAdapter {
    */
   rename(view: SessionView, log: Log): Promise<boolean>;
   /** Opens a session that is not running in the agent's panel, where the agent resumes it. Resolves false when it could not. */
-  resume(id: string, log: Log): Promise<boolean>;
+  resume(id: string, log: Log, view?: PastView): Promise<boolean>;
 }

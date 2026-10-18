@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { questionIn, quoteAsk } from "../../asks";
 import { within } from "../../folders";
 import { branchAt } from "../../git";
+import type { AgentHostSessions } from "../../agentHost";
 import { HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
 import { JsonlTail } from "../../jsonlTail";
 import type { ProcessFinder, ProcessTable } from "../../proc";
@@ -17,6 +18,13 @@ import { resumeIdOf } from "./process";
 
 /** The terminal program; sessions Copilot runs for an editor say otherwise. */
 const CLI_CLIENT = "github/cli";
+/** VS Code, running Copilot in its Chat view through its agent host (the "Copilot" session type). */
+const VSCODE_CLIENT = "vscode-agent-host";
+
+/** A session Lookout watches: the terminal program's, or VS Code's. */
+function watched(workspace: Workspace | undefined): boolean {
+  return !workspace?.clientName || workspace.clientName === CLI_CLIENT || workspace.clientName === VSCODE_CLIENT;
+}
 const TITLE_MAX = 60;
 /** The first read of a session's events starts this far before their end. */
 const BACKFILL_BYTES = 8 * 1024 * 1024;
@@ -71,6 +79,11 @@ function firstPromptOf(file: string): string | undefined {
  * says where it runs. Working or idle is Copilot's own `working` flag in
  * `open-sessions-state.json`; an approval prompt is a `permission.requested`
  * event without its `permission.completed`.
+ *
+ * VS Code's Copilot sessions (client `vscode-agent-host`) are kept the same
+ * way, their lock naming the `copilot-runtime` that VS Code's agent host runs
+ * for every window; VS Code's own id for each, read through
+ * `AgentHostSessions`, is how a jump opens it in VS Code's Chat.
  */
 export class CopilotProvider implements AgentProvider {
   readonly id = COPILOT;
@@ -89,7 +102,18 @@ export class CopilotProvider implements AgentProvider {
     private readonly finder: ProcessFinder,
     private readonly proc: ProcessTable,
     private readonly now: () => number = Date.now,
+    /** The `copilot-runtime` processes VS Code's agent host runs. */
+    private readonly runtimes?: ProcessFinder,
+    /** VS Code's ids for the sessions it runs. */
+    private readonly agentHost?: AgentHostSessions,
   ) {}
+
+  /** VS Code's address for one of its sessions: `agent-host-copilotcli:/<VS Code id>`. */
+  private vscodeSessionOf(id: string, workspace: Workspace | undefined): string | undefined {
+    if (workspace?.clientName !== VSCODE_CLIENT) return undefined;
+    const vscodeId = this.agentHost?.idOf(id, workspace.createdAt);
+    return vscodeId ? `agent-host-copilotcli:/${vscodeId}` : undefined;
+  }
 
   /** Every session folder, with its workspace and when its events were last written; looked through at most every 15 seconds. */
   private scan(force = false): Folder[] {
@@ -119,7 +143,7 @@ export class CopilotProvider implements AgentProvider {
   }
 
   poll(now: number): AgentSession[] {
-    const running = this.finder.find();
+    const running = [...this.finder.find(), ...(this.runtimes?.find() ?? [])];
     const alive = (pid: number) => (running.length ? running.some((p) => p.pid === pid) : this.proc.get(pid) !== null);
     const open = readOpenSessions(openSessionsFile(this.home));
     // The open sessions first: Copilot lists them; then any folder whose lock names a live process.
@@ -139,7 +163,7 @@ export class CopilotProvider implements AgentProvider {
       const pid = lockPids(dir).find(alive) ?? resumed.get(id);
       if (pid === undefined) continue;
       const workspace = readWorkspace(dir);
-      if (workspace?.clientName && workspace.clientName !== CLI_CLIENT) continue;
+      if (!watched(workspace)) continue;
       const file = path.join(dir, "events.jsonl");
       const session = this.session(id, pid, file, workspace, open.get(id), running.find((p) => p.pid === pid)?.startedMs ?? this.proc.get(pid)?.startedMs, now);
       sessions.push(session);
@@ -192,7 +216,8 @@ export class CopilotProvider implements AgentProvider {
       since: since ?? startedMs,
       title: workspace?.name ?? (state.firstPrompt ? quoteAsk(state.firstPrompt, TITLE_MAX) : undefined),
       cwd,
-      panel: false,
+      panel: workspace?.clientName === VSCODE_CLIENT,
+      vscodeSession: this.vscodeSessionOf(id, workspace),
       // Nothing sent yet: no prompt, and no name Copilot gave it.
       empty: state.promptAt === undefined && !workspace?.name,
       activity: status === "working" ? activityOf(state) : undefined,
@@ -229,7 +254,7 @@ export class CopilotProvider implements AgentProvider {
   /** The sessions that are not running, newest first; one of the window's folders resumes with `copilot --resume`. */
   past(scope: PastScope, exclude: ReadonlySet<string>): PastList {
     const candidates = this.scan()
-      .filter((f) => !exclude.has(f.id) && !this.liveFiles.has(f.id) && (!f.workspace?.clientName || f.workspace.clientName === CLI_CLIENT))
+      .filter((f) => !exclude.has(f.id) && !this.liveFiles.has(f.id) && watched(f.workspace))
       .sort((a, b) => b.mtimeMs - a.mtimeMs);
     const listed: (Folder & { title: string; cwd: string })[] = [];
     let reads = 0;
@@ -266,7 +291,13 @@ export class CopilotProvider implements AgentProvider {
     }
     this.pastListed = new Map([...listed, ...also].map((f) => [f.id, f]));
     for (const id of [...this.pastIndexes.keys()]) if (!this.pastListed.has(id)) this.pastIndexes.delete(id);
-    const session = (f: Folder & { title: string; cwd: string }): PastSession => ({ agent: this.id, id: f.id, cwd: f.cwd, title: f.title, resumable: f.cwd !== "" && within(f.cwd, scope.folders), modifiedAt: Math.round(f.mtimeMs) });
+    const session = (f: Folder & { title: string; cwd: string }): PastSession => {
+      const base: PastSession = { agent: this.id, id: f.id, cwd: f.cwd, title: f.title, resumable: f.cwd !== "" && within(f.cwd, scope.folders), modifiedAt: Math.round(f.mtimeMs) };
+      if (f.workspace?.clientName !== VSCODE_CLIENT) return base;
+      // VS Code's own session: it opens again in VS Code's Chat, not with `copilot --resume`.
+      const vscodeSession = base.resumable ? this.vscodeSessionOf(f.id, f.workspace) : undefined;
+      return { ...base, resumesIn: "panel", ...(vscodeSession ? { vscodeSession } : {}) };
+    };
     return { sessions: listed.map(session), capped, incomplete: unread > 0, also: also.map(session) };
   }
 
@@ -296,7 +327,7 @@ export class CopilotProvider implements AgentProvider {
   /** `copilot --resume <id>`, in the folder the session worked in. */
   resumeCommand(id: string): ResumeCommand | undefined {
     const past = this.pastListed.get(id);
-    if (!past?.cwd) return undefined;
+    if (!past?.cwd || past.workspace?.clientName === VSCODE_CLIENT) return undefined;
     return { args: ["copilot", "--resume", id], cwd: past.cwd };
   }
 

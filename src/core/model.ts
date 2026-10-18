@@ -1,5 +1,6 @@
 import type { AgentSession, PastSession } from "./agents/agent";
 import { canJump } from "./agents/catalog";
+import { within } from "./folders";
 import type { Host, PastView, SessionView, State } from "./types";
 import type { OtherWindow } from "./windows";
 
@@ -33,6 +34,8 @@ export interface WindowContext {
   terminalPids: ReadonlySet<number>;
   /** Extension host pids of the other VS Code windows on this host, with their names and terminals. */
   windows: ReadonlyMap<number, OtherWindow>;
+  /** The window's folders: a session VS Code runs in its Chat view is the window's when it works in one of them. */
+  folders?: readonly string[];
 }
 
 interface Location {
@@ -43,6 +46,14 @@ interface Location {
 }
 
 function locate(session: AgentSession, ancestors: readonly number[], ctx: WindowContext): Location {
+  // VS Code runs it in its agent host, which serves every window: it is the window's whose folders hold it.
+  if (session.vscodeSession) {
+    if (session.cwd && within(session.cwd, ctx.folders ?? [])) return { host: "panel" };
+    for (const [pid, other] of ctx.windows) {
+      if (pid !== ctx.hostPid && session.cwd && within(session.cwd, other.folders ?? [])) return { host: "window", windowLabel: other.label, windowPid: pid };
+    }
+    return { host: "editor" };
+  }
   if (session.panel && ancestors.includes(ctx.hostPid)) return { host: "panel" };
   const terminalPid = ancestors.find((pid) => ctx.terminalPids.has(pid));
   if (terminalPid !== undefined) return { host: "terminal", terminalPid };
@@ -93,6 +104,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
     ...projectOf(session.cwd),
     cwd: session.cwd,
     ...locate(session, ancestors, ctx),
+    ...(session.vscodeSession ? { vscodeSession: session.vscodeSession } : {}),
     activity: session.activity,
     agents: session.agents ?? 0,
     empty: session.empty,
@@ -110,7 +122,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
 
 /** The view of a session that is not running. */
 export function buildPastView(session: PastSession): PastView {
-  return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), branch: session.branch, cwd: session.cwd, resumable: session.resumable, modifiedAt: session.modifiedAt, ...(session.resumesIn ? { resumesIn: session.resumesIn } : {}) };
+  return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), branch: session.branch, cwd: session.cwd, resumable: session.resumable, modifiedAt: session.modifiedAt, ...(session.resumesIn ? { resumesIn: session.resumesIn } : {}), ...(session.vscodeSession ? { vscodeSession: session.vscodeSession } : {}) };
 }
 
 /** The agent's tabs open in a window: their labels, and the label it gives a title. */

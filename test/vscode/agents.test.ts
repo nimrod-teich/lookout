@@ -125,10 +125,10 @@ describe("the board with markers", () => {
 });
 
 describe("nextAttention", () => {
-  it("skips a session its agent does not let Lookout bring forward", () => {
+  it("takes the sessions of every agent Lookout can bring forward, in their tab or their terminal", () => {
     const tab = view({ id: "a", agent: "copilot", state: "waiting", host: "panel", since: 1 });
     const terminal = view({ id: "b", agent: "codex", state: "waiting", host: "terminal", since: 2 });
-    expect(nextAttention([tab, terminal], undefined)?.id).toBe("b");
-    expect(nextAttention([tab], undefined)).toBeUndefined();
+    expect(nextAttention([tab, terminal], undefined)?.id).toBe("a");
+    expect(nextAttention([tab, terminal], "a")?.id).toBe("b");
   });
 });

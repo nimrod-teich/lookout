@@ -10,6 +10,8 @@ interface WindowRecord {
   label: string;
   /** Shell pids of the window's integrated terminals. */
   terminals?: number[];
+  /** The window's folders. */
+  folders?: string[];
 }
 
 /** Another VS Code window on this host that runs Lookout. */
@@ -17,6 +19,8 @@ export interface OtherWindow {
   label: string;
   /** Shell pids of its integrated terminals: the sessions it hosts in them descend from these. */
   terminals: readonly number[];
+  /** Its folders: a session VS Code runs in its Chat view is its when it works in one of them. A window running an older Lookout gives none. */
+  folders?: readonly string[];
 }
 
 /**
@@ -35,11 +39,11 @@ export class WindowRegistry {
     private readonly proc: ProcessTable,
   ) {}
 
-  /** Records this window, and again whenever its terminals change. */
-  register(pid: number, label: string, terminals: Iterable<number> = []): void {
+  /** Records this window, and again whenever its terminals or folders change. */
+  register(pid: number, label: string, terminals: Iterable<number> = [], folders: readonly string[] = []): void {
     try {
       fs.mkdirSync(this.dir, { recursive: true });
-      const record: WindowRecord = { pid, label, terminals: [...terminals].sort((a, b) => a - b) };
+      const record: WindowRecord = { pid, label, terminals: [...terminals].sort((a, b) => a - b), ...(folders.length ? { folders: [...folders] } : {}) };
       // Written whole under another name, then renamed: a reader never sees half a record.
       const temp = path.join(this.dir, `.${pid}.json.tmp`);
       fs.writeFileSync(temp, JSON.stringify(record));
@@ -82,7 +86,7 @@ export class WindowRegistry {
         fs.rmSync(path.join(this.dir, name), { force: true });
         continue;
       }
-      windows.set(record.pid, { label: record.label, terminals: record.terminals ?? [] });
+      windows.set(record.pid, { label: record.label, terminals: record.terminals ?? [], ...(record.folders?.length ? { folders: record.folders } : {}) });
     }
     this.cache = windows;
     return windows;
@@ -94,7 +98,8 @@ export class WindowRegistry {
       const raw = JSON.parse(fs.readFileSync(path.join(this.dir, name), "utf8")) as Partial<WindowRecord>;
       if (typeof raw.pid !== "number" || typeof raw.label !== "string" || `${raw.pid}.json` !== name) return null;
       const terminals = Array.isArray(raw.terminals) ? raw.terminals.filter((pid): pid is number => Number.isInteger(pid) && pid > 0) : [];
-      return { pid: raw.pid, label: raw.label, terminals };
+      const folders = Array.isArray(raw.folders) ? raw.folders.filter((folder): folder is string => typeof folder === "string") : [];
+      return { pid: raw.pid, label: raw.label, terminals, folders };
     } catch {
       return null;
     }

@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
-import { createRequire } from "node:module";
 import * as path from "node:path";
+import { loadSqlite } from "../../sqlite";
 
 /** The key under which VS Code stores the Claude Code extension's state; compared without case. */
 const STATE_KEY = "anthropic.claude-code";
@@ -39,28 +39,6 @@ export function stateDbCandidates(globalStorageDir: string, platform: string = p
       return false;
     }
   });
-}
-
-interface Statement {
-  all(...params: unknown[]): unknown[];
-}
-
-interface Database {
-  prepare(sql: string): Statement;
-  close(): void;
-}
-
-interface Sqlite {
-  DatabaseSync: new (file: string, options: { readOnly: boolean }) => Database;
-}
-
-/** Node's own sqlite, in Node 22.5 and later; nothing on older runtimes. */
-function loadSqlite(): Sqlite | undefined {
-  try {
-    return createRequire(path.join(process.cwd(), "lookout.js"))("node:sqlite") as Sqlite;
-  } catch {
-    return undefined;
-  }
 }
 
 /** The sessions the Claude Code extension's user archived, read from VS Code's state database. */
