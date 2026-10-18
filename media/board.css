@@ -1120,14 +1120,20 @@ body.vscode-reduce-motion .hover-card {
   display: none;
 }
 
+/* In the top right corner, out of the flow: the context ring keeps the card's right edge. */
 .actions {
-  flex: none;
-  align-self: flex-start;
+  position: absolute;
+  top: 6px;
+  right: 8px;
   display: flex;
   gap: 2px;
-  margin-left: -4px;
   opacity: 0;
   transition: opacity 120ms ease;
+}
+
+/* Without a ring, the title row leaves the corner to the actions. */
+.card:has(> .ring.hidden) .row {
+  padding-right: 22px;
 }
 
 .card:hover .actions,
