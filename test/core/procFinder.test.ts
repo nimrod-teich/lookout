@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LinuxProcessFinder, parseLsofCwd, parseLsofFiles, parsePsNamedProcesses, parseWindowsNamedProcesses, programName, SnapshotProcessFinder, splitCommandLine } from "../../src/core/proc";
+import { LinuxProcessFinder, LinuxProcessTable, parseLsofCwd, parseLsofFiles, parsePsNamedProcesses, parseWindowsNamedProcesses, programName, SnapshotProcessFinder, splitCommandLine } from "../../src/core/proc";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -66,6 +66,36 @@ describe("finding a program's processes", () => {
     ]);
     const finder = new LinuxProcessFinder("codex", root, () => 1_000);
     expect(finder.find()).toEqual([{ pid: 11, ppid: 7, args: ["codex", "What is 2+2?"], cwd: "/work/a", startedMs: 1792300000 * 1000 + 5000 }]);
+  });
+
+  // WSL 2 sets the clock forward after Windows slept, and the boot time /proc/stat gives moves with it.
+  it.skipIf(process.platform === "win32")("on Linux, keeps a process's start when the boot time moves, and gives a new one the boot time of its first sight", () => {
+    const root = fakeProc([{ pid: 11, comm: "codex", args: ["codex"], ticks: 500 }]);
+    let now = 0;
+    const finder = new LinuxProcessFinder("codex", root, () => now);
+    const start = 1792300000 * 1000 + 5000;
+    expect(finder.find()[0]?.startedMs).toBe(start);
+    // The machine slept 26 minutes: the clock jumps, and the boot time with it.
+    fs.writeFileSync(path.join(root, "stat"), "cpu  1 2 3\nbtime 1792301560\n");
+    const later = fakeProc([{ pid: 12, comm: "codex", args: ["codex"], ticks: 900 }]);
+    fs.cpSync(path.join(later, "12"), path.join(root, "12"), { recursive: true });
+    now = 1_000;
+    const byPid = new Map(finder.find().map((p) => [p.pid, p.startedMs]));
+    expect(byPid.get(11)).toBe(start);
+    expect(byPid.get(12)).toBe(1792301560 * 1000 + 9000);
+  });
+
+  it.skipIf(process.platform === "win32")("on Linux, gives a process's children their start the same way", () => {
+    const root = fakeProc([
+      { pid: 20, comm: "claude", args: ["claude"], ticks: 100 },
+      { pid: 21, comm: "bash", args: ["bash", "-c", "npm run dev"], ppid: 20, ticks: 700 },
+    ]);
+    fs.mkdirSync(path.join(root, "20", "task", "20"), { recursive: true });
+    fs.writeFileSync(path.join(root, "20", "task", "20", "children"), "21 ");
+    const table = new LinuxProcessTable(root);
+    expect(table.children(20)).toEqual([{ pid: 21, args: "bash -c npm run dev", startedMs: 1792300000 * 1000 + 7000 }]);
+    fs.writeFileSync(path.join(root, "stat"), "cpu  1 2 3\nbtime 1792301560\n");
+    expect(table.children(20)[0]?.startedMs).toBe(1792300000 * 1000 + 7000);
   });
 
   it.skipIf(process.platform === "win32")("on Linux, looks again at most once a second", () => {
