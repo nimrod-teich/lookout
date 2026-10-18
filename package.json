@@ -13,6 +13,9 @@
     "url": "https://github.com/nimrod-teich/lookout/issues"
   },
   "homepage": "https://github.com/nimrod-teich/lookout#readme",
+  "sponsor": {
+    "url": "https://github.com/sponsors/nimrod-teich"
+  },
   "engines": {
     "vscode": "^1.94.0"
   },

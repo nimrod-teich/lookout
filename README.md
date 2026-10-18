@@ -115,4 +115,4 @@ Node 22 or newer. `npm run check`, `npm run lint` and `npm test` are what CI run
 
 ---
 
-<p align="center"><sub>Lookout is an independent project. It is not affiliated with or endorsed by Anthropic or any other agent vendor.</sub></p>
+<p align="center"><sub>Lookout is an independent project, free and MIT. It is not affiliated with or endorsed by Anthropic or any other agent vendor. If it saves you a tab hunt a day, <a href="https://github.com/sponsors/nimrod-teich">sponsor it ♥</a>.</sub></p>
