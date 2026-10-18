@@ -36,6 +36,8 @@ const DISMISSED_KEY = "lookout.dismissed";
 const EARLIER_SCOPE_KEY = "lookout.earlierScope";
 /** The sessions the user starred, newest star first; kept for the machine, so every window shows them. */
 const FAVOURITES_KEY = "lookout.favourites";
+/** The sessions the user archived in Lookout, newest first; kept for the machine. They leave Earlier for the Archived group. */
+const ARCHIVE_KEY = "lookout.archive";
 /** The earlier sessions listed at most, the newest. */
 const EARLIER_LIMIT = 500;
 /** While the earlier sessions are still being read, the next slice is listed this soon. */
@@ -140,6 +142,8 @@ export class Controller implements vscode.Disposable {
   private agentUsageShown = "";
   /** The starred sessions that are not running, wherever they ran. */
   private favouritePast: PastView[] = [];
+  /** The archived sessions that are not running, wherever they ran. */
+  private archivePast: PastView[] = [];
   private archived = new ArchivedSessions([]);
   private savedDone = "";
   private savedDismissed = "";
@@ -235,6 +239,33 @@ export class Controller implements vscode.Disposable {
     this.poll();
   }
 
+  /** The sessions the user archived in Lookout, newest archive first, and those of them that are not running. */
+  get archive(): { ids: string[]; past: PastView[] } {
+    return { ids: this.archiveIds(), past: this.archivePast };
+  }
+
+  private archiveIds(): string[] {
+    const ids = this.host.globalState.get<unknown>(ARCHIVE_KEY, []);
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  }
+
+  /**
+   * Archives a session, taking its star away, or brings it back to Earlier.
+   * Lookout keeps the archive itself: the agent's own list of archived
+   * sessions is not written.
+   */
+  toggleArchive(id: string): void {
+    const ids = this.archiveIds();
+    if (ids.includes(id)) {
+      void this.host.globalState.update(ARCHIVE_KEY, ids.filter((other) => other !== id));
+    } else {
+      void this.host.globalState.update(ARCHIVE_KEY, [id, ...ids]);
+      const stars = this.favouriteIds();
+      if (stars.includes(id)) void this.host.globalState.update(FAVOURITES_KEY, stars.filter((other) => other !== id));
+    }
+    this.poll();
+  }
+
   /** Where a live or a past session works: its project, worktree and git branch. */
   whereOf(id: string): string | undefined {
     const view = this.current.find((v) => v.id === id) ?? this.pastView(id);
@@ -250,7 +281,7 @@ export class Controller implements vscode.Disposable {
 
   /** A session that is not running, as listed now or, when the scope has changed since, as last listed. */
   pastView(id: string): PastView | undefined {
-    return this.pastViews.find((view) => view.id === id) ?? this.favouritePast.find((view) => view.id === id) ?? this.pastSeen.get(id);
+    return this.pastViews.find((view) => view.id === id) ?? this.favouritePast.find((view) => view.id === id) ?? this.archivePast.find((view) => view.id === id) ?? this.pastSeen.get(id);
   }
 
   /** The usage numbers, or nothing when there are none to show: none cached, unreadable, or another account's. */
@@ -356,31 +387,43 @@ export class Controller implements vscode.Disposable {
     this.notePrompts(views);
     const update = this.attention.update(views, (view) => isWatched(view, this.terminals), { typedQuestions: this.typedQuestions });
     const exclude = new Set<string>([...update.views.map((view) => view.id), ...this.archived.read()]);
-    const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit: EARLIER_LIMIT, also: this.favouriteIds() };
+    // A session that runs again leaves the archive.
+    let archive = this.archiveIds();
+    if (archive.some((id) => update.views.some((view) => view.id === id))) {
+      archive = archive.filter((id) => !update.views.some((view) => view.id === id));
+      void this.host.globalState.update(ARCHIVE_KEY, archive);
+    }
+    const archived = new Set(archive);
+    // The starred and the archived sessions are asked for by id besides, wherever they ran.
+    const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit: EARLIER_LIMIT, also: [...this.favouriteIds(), ...archive] };
     let capped = false;
     let incomplete = false;
     const notes: string[] = [];
-    const favouritePast: PastView[] = [];
+    const also: PastView[] = [];
     const past = this.providers
       .flatMap((provider) => {
         const list = provider.past?.(scope, exclude);
         capped ||= list?.capped ?? false;
         incomplete ||= list?.incomplete ?? false;
         notes.push(...(list?.notes ?? []));
-        favouritePast.push(...(list?.also ?? []).map(buildPastView));
+        also.push(...(list?.also ?? []).map(buildPastView));
         return list?.sessions ?? [];
       })
       .map(buildPastView);
     past.sort((a, b) => b.modifiedAt - a.modifiedAt);
-    this.earlierCapped = capped || past.length > EARLIER_LIMIT;
-    this.earlierNotes = notes;
     // Tabs the agent restored after a reload, not started yet: their sessions stay on the board, idle.
     const restored = this.host.restoredTabs ? restoredTabViews(past, update.views, this.host.restoredTabs()) : [];
-    const shownPast = restored.length ? past.filter((view) => !restored.some((r) => r.id === view.id)) : past;
+    const notRestored = (view: PastView) => !restored.some((r) => r.id === view.id);
+    // The archived leave Earlier for the Archived group, newest archive first.
+    const shownPast = past.filter((view) => !archived.has(view.id) && notRestored(view));
+    const archivePast = [...past, ...also].filter((view) => archived.has(view.id) && notRestored(view)).sort((a, b) => archive.indexOf(a.id) - archive.indexOf(b.id));
+    const favouritePast = also.filter((view) => !archived.has(view.id));
+    this.earlierCapped = capped || shownPast.length > EARLIER_LIMIT;
+    this.earlierNotes = notes;
     // An idle tab or terminal with nothing sent is not worth a card.
     const shown = update.views.filter((view) => !(view.empty && view.state === "idle"));
-    this.publish(sortViews([...shown, ...restored]), shownPast.slice(0, EARLIER_LIMIT), favouritePast);
-    for (const view of [...this.pastViews, ...this.favouritePast]) this.pastSeen.set(view.id, view);
+    this.publish(sortViews([...shown, ...restored]), shownPast.slice(0, EARLIER_LIMIT), favouritePast, archivePast);
+    for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast]) this.pastSeen.set(view.id, view);
     if (incomplete) this.scheduleFill();
     this.saveDone();
     for (const view of update.finished) this.announceFinished(view);
@@ -660,13 +703,14 @@ export class Controller implements vscode.Disposable {
     }, DEBOUNCE_MS);
   }
 
-  private publish(views: SessionView[], past: PastView[], favouritePast: PastView[]): void {
-    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.earlierNotes, this.favouriteIds(), favouritePast]);
+  private publish(views: SessionView[], past: PastView[], favouritePast: PastView[], archivePast: PastView[]): void {
+    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.earlierNotes, this.favouriteIds(), favouritePast, archivePast]);
     if (snapshot === this.snapshot) return;
     this.snapshot = snapshot;
     this.current = views;
     this.pastViews = past;
     this.favouritePast = favouritePast;
+    this.archivePast = archivePast;
     this.changed.fire(views);
   }
 

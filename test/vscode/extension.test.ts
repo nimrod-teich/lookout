@@ -565,6 +565,43 @@ describe("the extension", () => {
       expect(stub.panels.find((panel) => panel.viewType === "lookout.findings")?.posted.at(-1)).toMatchObject({ type: "conversation", session: { id: ELSEWHERE } });
     }, 60_000);
 
+    it("archives an earlier session from the board, takes its star away, lists it under Archived in every window, and brings it back", async () => {
+      savedGlobal["lookout.favourites"] = [HERE];
+      activate(context());
+      const { boardView, listed } = openBoard();
+      await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+      const archive = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { archive?: { id: string; resumable: boolean }[] } | undefined)?.archive;
+      expect(archive()).toEqual([]);
+      boardView.receive({ type: "archive", id: HERE });
+      await vi.waitFor(() => expect(archive()?.map((p) => p.id)).toEqual([HERE]), WAIT);
+      expect(listed()?.past).toEqual([]);
+      expect(savedGlobal["lookout.archive"]).toEqual([HERE]);
+      expect(savedGlobal["lookout.favourites"]).toEqual([]);
+      // Archived in another window: listed here though this window's folders do not hold it. HERE comes back to Earlier.
+      savedGlobal["lookout.archive"] = [ELSEWHERE, HERE];
+      boardView.receive({ type: "archive", id: HERE });
+      await vi.waitFor(() => expect(archive()?.map((p) => [p.id, p.resumable])).toEqual([[ELSEWHERE, false]]), WAIT);
+      expect(listed()?.past.map((p) => p.id)).toEqual([HERE]);
+      // A search finds it.
+      boardView.receive({ type: "search", query: "other service", zone: 0 });
+      const found = boardView.posted.filter((m) => (m as { type: string }).type === "search").at(-1) as { results: { id: string }[] };
+      expect(found.results.map((r) => r.id)).toEqual([ELSEWHERE]);
+      // Its conversation can be read.
+      boardView.receive({ type: "openHit", query: "", id: ELSEWHERE });
+      expect(stub.panels.find((panel) => panel.viewType === "lookout.findings")?.posted.at(-1)).toMatchObject({ type: "conversation", session: { id: ELSEWHERE } });
+    }, 60_000);
+
+    it("takes a session out of the archive once it runs again", async () => {
+      savedGlobal["lookout.archive"] = [ELSEWHERE, HERE];
+      writeSession({ sessionId: HERE });
+      activate(context());
+      const { boardView } = openBoard();
+      await vi.waitFor(() => expect(savedGlobal["lookout.archive"]).toEqual([ELSEWHERE]), WAIT);
+      const last = () => boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions: { id: string }[]; archive?: { id: string }[] } | undefined;
+      await vi.waitFor(() => expect(last()?.sessions.map((s) => s.id)).toContain(HERE), WAIT);
+      expect(last()?.archive?.map((p) => p.id)).toEqual([ELSEWHERE]);
+    }, 60_000);
+
     it("keeps a session whose tab the agent restored after a reload on the board, idle until the tab is opened", async () => {
       stub.addClaudeGroup(["tune the deploy script", "deploy the other service"]);
       activate(context());

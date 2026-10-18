@@ -19,6 +19,10 @@ export interface BoardActions {
   favourites(): Favourites;
   /** Stars a session, or takes its star away. */
   toggleFavourite(id: string): void;
+  /** The sessions archived in Lookout, and those of them that are not running. */
+  archive?(): { ids: string[]; past: PastView[] };
+  /** Archives a session, or brings it back to Earlier. */
+  toggleArchive?(id: string): void;
   /** Resumes a past session in the agent's panel. */
   resume(id: string): void;
   /** One agent's usage, or each agent's. */
@@ -87,6 +91,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
           markers: this.actions.markers?.(),
           earlier: this.actions.earlier(),
           favourites: this.actions.favourites(),
+          archive: this.actions.archive?.().past,
         };
         void this.view.webview.postMessage(message);
       }
@@ -140,7 +145,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
       }
       case "resume": {
         // Only a session the board was shown.
-        const view = [...this.actions.past(), ...this.actions.favourites().past].find((p) => p.id === message.id);
+        const view = [...this.actions.past(), ...this.actions.favourites().past, ...(this.actions.archive?.().past ?? [])].find((p) => p.id === message.id);
         if (view) this.actions.resume(view.id);
         return;
       }
@@ -150,6 +155,14 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         if (typeof id !== "string") return;
         const known = this.actions.sessions().some((v) => v.id === id) || this.actions.past().some((p) => p.id === id) || this.actions.favourites().ids.includes(id);
         if (known) this.actions.toggleFavourite(id);
+        return;
+      }
+      case "archive": {
+        // Only an earlier session the board was shown, or one already archived.
+        const id = message.id;
+        if (typeof id !== "string" || !this.actions.toggleArchive) return;
+        const known = this.actions.past().some((p) => p.id === id) || this.actions.favourites().past.some((p) => p.id === id) || (this.actions.archive?.().ids.includes(id) ?? false);
+        if (known) this.actions.toggleArchive(id);
         return;
       }
       case "earlierScope":

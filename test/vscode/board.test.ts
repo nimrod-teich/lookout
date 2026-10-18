@@ -10,10 +10,10 @@ const EARLIER: EarlierInfo = { scope: "folders", limit: 500, capped: false };
 const STARRED: PastView = { id: "00000000-0000-4000-8000-00000000000f", agent: "claude-code", title: "Starred elsewhere", project: "svc", cwd: "/work/svc", resumable: false, modifiedAt: 2 };
 const FAVOURITES = { ids: [STARRED.id, "00000000-0000-4000-8000-000000000001"], past: [STARRED] };
 
-function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
+function setup(sessions: SessionView[] = [], usage?: BoardUsage, more: Record<string, unknown> = {}) {
   const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(),
     dismiss: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => ({ results: query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [], pending: 0 })), openHit: vi.fn(), openSearch: vi.fn(), past: () => PAST, resume: vi.fn(),
-    earlier: () => EARLIER, setEarlierScope: vi.fn(), favourites: () => FAVOURITES, toggleFavourite: vi.fn() };
+    earlier: () => EARLIER, setEarlierScope: vi.fn(), favourites: () => FAVOURITES, toggleFavourite: vi.fn(), ...more };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
   board.resolveWebviewView(webviewView as never);
@@ -159,6 +159,24 @@ describe("Board", () => {
     expect(actions.toggleFavourite.mock.calls).toEqual([["00000000-0000-4000-8000-000000000001"], [PAST[0]!.id], [STARRED.id]]);
     webviewView.receive({ type: "resume", id: STARRED.id });
     expect(actions.resume).toHaveBeenCalledWith(STARRED.id);
+  });
+
+  it("sends the archive, archives only earlier sessions it showed or archived, and resumes an archived session", () => {
+    const archived: PastView = { ...STARRED, id: "00000000-0000-4000-8000-0000000000a1", title: "Archived elsewhere" };
+    const toggleArchive = vi.fn();
+    const { actions, webviewView } = setup([view({ id: "00000000-0000-4000-8000-000000000001" })], undefined, { archive: () => ({ ids: [archived.id, "00000000-0000-4000-8000-0000000000a2"], past: [archived] }), toggleArchive });
+    expect(webviewView.posted[0]).toMatchObject({ type: "sessions", archive: [archived] });
+    webviewView.receive({ type: "archive", id: PAST[0]!.id });
+    webviewView.receive({ type: "archive", id: STARRED.id });
+    webviewView.receive({ type: "archive", id: archived.id });
+    webviewView.receive({ type: "archive", id: "00000000-0000-4000-8000-0000000000a2" });
+    // Not a running session, nor one the board never showed.
+    webviewView.receive({ type: "archive", id: "00000000-0000-4000-8000-000000000001" });
+    webviewView.receive({ type: "archive", id: "00000000-0000-4000-8000-0000000000ee" });
+    webviewView.receive({ type: "archive", id: 7 });
+    expect(toggleArchive.mock.calls).toEqual([[PAST[0]!.id], [STARRED.id], [archived.id], ["00000000-0000-4000-8000-0000000000a2"]]);
+    webviewView.receive({ type: "resume", id: archived.id });
+    expect(actions.resume).toHaveBeenCalledWith(archived.id);
   });
 
   it("relays a request to read a search on the search page", () => {
