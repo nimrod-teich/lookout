@@ -1,5 +1,5 @@
 import type { HistoryMessage, SearchResult } from "../history";
-import type { Evidence, Reason, TypedQuestion } from "../types";
+import type { Evidence, PromptCache, Reason, TypedQuestion } from "../types";
 
 export type AgentStatus = "working" | "waiting" | "idle" | "unknown";
 
@@ -38,6 +38,14 @@ export interface AgentSession {
   contextWindow?: number;
   /** Tool calls per minute over the last 15 minutes, oldest first. */
   pulse?: number[];
+  /** Indices into `pulse` of the minutes the conversation was compacted. */
+  pulseMarks?: number[];
+  /** Times the agent compacted the conversation. */
+  compactions?: number;
+  /** Epoch ms of the last compaction. */
+  compactedAt?: number;
+  /** The model's prompt cache, as the agent's last call left it. */
+  cache?: PromptCache;
   /** Tokens the session used so far, and what they cost. */
   spend?: SessionSpend;
 }

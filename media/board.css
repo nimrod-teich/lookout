@@ -1000,6 +1000,35 @@ body.vscode-reduce-motion .hover-card {
   background: color-mix(in srgb, var(--ink) 14%, transparent);
 }
 
+/* The minute the conversation was compacted: a pin through the whole height of the pulse. */
+.pulse .bar.compacted {
+  position: relative;
+  opacity: 1;
+}
+
+.pulse .bar.compacted::before,
+.pulse .bar.compacted::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+}
+
+.pulse .bar.compacted::before {
+  bottom: 0;
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+}
+
+.pulse .bar.compacted::after {
+  bottom: 10px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
 .state-working .pulse .bar {
   background: var(--working);
 }
@@ -1040,8 +1069,13 @@ body.vscode-reduce-motion .hover-card {
   background: var(--vscode-sideBar-background);
 }
 
+/* Amber from 75%, red from 90%: close to full, the agent compacts. */
 .ring.warn {
   background: conic-gradient(var(--waiting) calc(var(--p) * 1%), color-mix(in srgb, var(--ink) 12%, transparent) 0);
+}
+
+.ring.full {
+  background: conic-gradient(var(--vscode-errorForeground, #f14c4c) calc(var(--p) * 1%), color-mix(in srgb, var(--ink) 12%, transparent) 0);
 }
 
 .ring.hidden {
@@ -1070,16 +1104,38 @@ body.vscode-reduce-motion .hover-card {
   line-height: 16px;
 }
 
-.chip.spend {
-  align-self: flex-start;
+/* What the session costs, and whether the next message finds it in the prompt cache. */
+.costs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 3px 6px;
   margin-top: 1px;
   font-size: calc(var(--vscode-font-size) - 2px);
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
 
-.chip.spend.hidden {
+.costs.hidden,
+.chip.spend.hidden,
+.chip.cache-slot.hidden {
   display: none;
+}
+
+/* Warm: a reply now is cheap. Cold: it pays full price. */
+.chip.cache.warm {
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 12%, transparent);
+}
+
+.chip.cache.cold {
+  opacity: 0.75;
+}
+
+.chip.compacted {
+  border: 1px dashed color-mix(in srgb, var(--ink) 30%, transparent);
+  background: none;
+  line-height: 14px;
 }
 
 .actions {

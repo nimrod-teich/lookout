@@ -59,7 +59,7 @@
       "host": "panel",
       "agents": 0,
       "model": "claude-opus-5-5",
-      "contextTokens": 142000,
+      "contextTokens": 152000,
       "lastReply": "I need to run the migration.",
       "pulse": [
         0,
@@ -96,6 +96,12 @@
       "evidence": {
         "source": "session file",
         "at": 185000
+      },
+      "compactions": 1,
+      "compactedAt": 2400000,
+      "cache": {
+        "lastCallAt": 185000,
+        "ttlMs": 3600000
       }
     },
     {
@@ -143,6 +149,10 @@
       "evidence": {
         "source": "session file",
         "at": 720000
+      },
+      "cache": {
+        "lastCallAt": 720000,
+        "ttlMs": 300000
       }
     },
     {
@@ -158,7 +168,7 @@
       "agents": 0,
       "activity": "Bash \u00b7 npm test -- checkout",
       "model": "claude-fable-5-1",
-      "contextTokens": 189585,
+      "contextTokens": 925000,
       "pulse": [
         2,
         3,
@@ -190,7 +200,16 @@
         "source": "session file",
         "at": 3000
       },
-      "lastWriteAt": 4000
+      "lastWriteAt": 4000,
+      "compactions": 2,
+      "compactedAt": 360000,
+      "pulseMarks": [
+        9
+      ],
+      "cache": {
+        "lastCallAt": 4000,
+        "ttlMs": 3600000
+      }
     },
     {
       "id": "4",
@@ -317,6 +336,10 @@
       "evidence": {
         "source": "session file",
         "at": 2760000
+      },
+      "cache": {
+        "lastCallAt": 2760000,
+        "ttlMs": 3600000
       }
     },
     {

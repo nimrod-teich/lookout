@@ -54,6 +54,123 @@ export function findLastLine(file: string, needle: string, maxBytes: number): nu
   }
 }
 
+/**
+ * A search for the lines before `end` that contain any of the needles,
+ * reading forward a slice at a time, so a large file is searched over
+ * several calls. `end` should be a line start. The needles must not contain
+ * a newline.
+ */
+export class LineSearch {
+  private readonly patterns: Buffer[];
+  private position = 0;
+  /** The unfinished last line of what was read, and where it starts in the file. */
+  private carry: Buffer = Buffer.alloc(0);
+  private carryAt = 0;
+  /** Everything before `end` has been searched. */
+  done = false;
+
+  constructor(
+    private readonly file: string,
+    needles: readonly string[],
+    private readonly end: number,
+  ) {
+    this.patterns = needles.map((needle) => Buffer.from(needle, "utf8"));
+    if (end <= 0) this.done = true;
+  }
+
+  /** Searches about `maxBytes` more; returns the starts of the lines found, oldest first. */
+  step(maxBytes: number): number[] {
+    if (this.done) return [];
+    let fd: number;
+    try {
+      fd = fs.openSync(this.file, "r");
+    } catch {
+      this.done = true;
+      return [];
+    }
+    const starts = new Set<number>();
+    try {
+      const stop = Math.min(this.end, this.position + Math.max(1, maxBytes));
+      while (this.position < stop) {
+        const buffer = Buffer.alloc(Math.min(1024 * 1024, stop - this.position));
+        const got = fs.readSync(fd, buffer, 0, buffer.length, this.position);
+        if (got === 0) {
+          this.position = this.end;
+          break;
+        }
+        const data = this.carry.length > 0 ? Buffer.concat([this.carry, buffer.subarray(0, got)]) : buffer.subarray(0, got);
+        const dataAt = this.carry.length > 0 ? this.carryAt : this.position;
+        const complete = data.lastIndexOf(NEWLINE) + 1;
+        this.search(data, dataAt, complete, starts);
+        this.carry = Buffer.from(data.subarray(complete));
+        this.carryAt = dataAt + complete;
+        this.position += got;
+        // A line too long to hold is searched as it is and dropped.
+        if (this.carry.length > MAX_LINE_BYTES) {
+          this.search(this.carry, this.carryAt, this.carry.length, starts);
+          this.carry = Buffer.alloc(0);
+          this.carryAt = this.position;
+        }
+      }
+      if (this.position >= this.end) {
+        this.search(this.carry, this.carryAt, this.carry.length, starts);
+        this.carry = Buffer.alloc(0);
+        this.done = true;
+      }
+    } catch {
+      this.done = true;
+    } finally {
+      fs.closeSync(fd);
+    }
+    return [...starts].sort((a, b) => a - b);
+  }
+
+  private search(data: Buffer, dataAt: number, length: number, starts: Set<number>): void {
+    for (const pattern of this.patterns) {
+      for (let i = data.indexOf(pattern); i >= 0 && i < length; i = data.indexOf(pattern, i + 1)) {
+        starts.add(dataAt + (i === 0 ? 0 : data.lastIndexOf(NEWLINE, i - 1) + 1));
+      }
+    }
+  }
+}
+
+/** The starts of the lines before `end` that contain any of the needles, oldest first, in one go. */
+export function findLines(file: string, needles: readonly string[], end: number): number[] {
+  const search = new LineSearch(file, needles, end);
+  const starts: number[] = [];
+  while (!search.done) starts.push(...search.step(Number.MAX_SAFE_INTEGER));
+  return starts;
+}
+
+/** The first line start at or after `offset`: `offset` itself when a line starts there, else just past the next newline, or the end of the file. */
+export function lineStartAtOrAfter(file: string, offset: number): number {
+  if (offset <= 0) return 0;
+  let fd: number;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch {
+    return offset;
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    if (offset >= size) return size;
+    const chunk = 64 * 1024;
+    let position = offset - 1;
+    for (;;) {
+      const buffer = Buffer.alloc(chunk);
+      const got = fs.readSync(fd, buffer, 0, chunk, position);
+      if (got === 0) return size;
+      const newline = buffer.subarray(0, got).indexOf(NEWLINE);
+      if (newline >= 0) return position + newline + 1;
+      position += got;
+    }
+  } catch {
+    return offset;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 /** The line that starts at `offset`, without its newline, or undefined when it cannot be read or is longer than `maxBytes`. */
 export function readLineAt(file: string, offset: number, maxBytes = 1024 * 1024): string | undefined {
   let fd: number;

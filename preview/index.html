@@ -42,6 +42,8 @@
     for (const s of fixture.sessions) {
       s.since = ago(s.since);
       s.lastWriteAt = ago(s.lastWriteAt);
+      s.compactedAt = ago(s.compactedAt);
+      if (s.cache) s.cache.lastCallAt = ago(s.cache.lastCallAt);
       if (s.evidence) s.evidence.at = ago(s.evidence.at);
     }
     const usage = fixture.usage;

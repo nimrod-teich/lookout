@@ -56,6 +56,20 @@ export interface TranscriptState {
   contextTokens?: number;
   /** When the assistant called tools, newest last; older than `PULSE_WINDOW_MS` is dropped. */
   toolCallTimes: number[];
+  /** Times Claude Code compacted the conversation. */
+  compactions: number;
+  /** When, for those whose time is known, oldest first. */
+  compactedAt: number[];
+  /** A compaction mark without a time, waiting for the other kind next to it. */
+  untimedMark?: "boundary" | "summary";
+  /** Epoch ms of the latest input of the main chain, a prompt, a tool result or an attachment: a call goes out right after it. */
+  lastInputAt?: number;
+  /** Message id of the latest model call that used the prompt cache. */
+  lastCallId?: string;
+  /** Epoch ms that call went out. */
+  lastCallAt?: number;
+  /** The last call that wrote to the prompt cache wrote 1-hour entries only. */
+  cacheTtl1h?: boolean;
   /** Totals from Claude Code's last cost checkpoint, which includes subagents. */
   checkpoint?: { tokens: TokenCounts; costUsd: number | undefined };
   /** Usage after the checkpoint, per model, deduplicated by message id. */
@@ -78,7 +92,65 @@ const REPLY_MAX = 16 * 1024;
 const OPTION_MAX = 60;
 
 export function emptyTranscript(): TranscriptState {
-  return { openTools: new Map(), toolCallTimes: [], since: new Map(), countedMessages: new Set(), joinedLate: false };
+  return { openTools: new Map(), toolCallTimes: [], compactions: 0, compactedAt: [], since: new Map(), countedMessages: new Set(), joinedLate: false };
+}
+
+/**
+ * Claude Code marks one compaction twice, a boundary and a summary, well
+ * under a second apart; compacting takes longer than this, so two
+ * compactions are always farther apart.
+ */
+const SAME_COMPACTION_MS = 10_000;
+const MAX_COMPACTION_TIMES = 50;
+/** How long the prompt cache keeps a conversation after a call, by the lifetime its entries were written with. */
+export const CACHE_TTL_5M_MS = 5 * 60_000;
+export const CACHE_TTL_1H_MS = 60 * 60_000;
+
+/**
+ * One compaction, from its boundary or its summary, whichever is seen first,
+ * in any order: older marks can be found after newer ones.
+ */
+function recordCompaction(state: TranscriptState, at: number, kind: "boundary" | "summary"): void {
+  if (!Number.isFinite(at)) {
+    // Without times, a boundary and a summary next to each other are one compaction.
+    if (state.untimedMark !== undefined && state.untimedMark !== kind) {
+      state.untimedMark = undefined;
+      return;
+    }
+    state.untimedMark = kind;
+    state.compactions++;
+    return;
+  }
+  state.untimedMark = undefined;
+  if (state.compactedAt.some((time) => Math.abs(time - at) < SAME_COMPACTION_MS)) return;
+  state.compactions++;
+  const later = state.compactedAt.findIndex((time) => time > at);
+  if (later < 0) state.compactedAt.push(at);
+  else state.compactedAt.splice(later, 0, at);
+  if (state.compactedAt.length > MAX_COMPACTION_TIMES) state.compactedAt.shift();
+}
+
+function compactionKind(e: Record<string, unknown>): "boundary" | "summary" {
+  return e.type === "system" ? "boundary" : "summary";
+}
+
+/** A transcript line that marks a compaction: Claude Code's boundary, or the summary that replaces the conversation. */
+export function isCompactionEntry(e: Record<string, unknown>): boolean {
+  return (e.type === "system" && e.subtype === "compact_boundary") || (e.type === "user" && e.isCompactSummary === true);
+}
+
+/** Counts the compaction a main-chain line marks, if it marks one; nothing else of the line is taken. */
+export function recordCompactionLine(state: TranscriptState, line: string): void {
+  let e: unknown;
+  try {
+    e = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (typeof e !== "object" || e === null) return;
+  const entry = e as Record<string, unknown>;
+  if (entry.isSidechain === true || !isCompactionEntry(entry)) return;
+  recordCompaction(state, typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : NaN, compactionKind(entry));
 }
 
 const MAX_COUNTED_MESSAGES = 4000;
@@ -244,13 +316,14 @@ function applyAssistant(state: TranscriptState, e: Record<string, unknown>): voi
   const model = str(message?.model);
   if (model && !model.startsWith("<")) state.model = model;
   const usage = message?.usage;
+  const at = typeof e.timestamp === "string" ? Date.parse(e.timestamp) : NaN;
+  const id = typeof message?.id === "string" ? message.id : undefined;
   if (usage) {
     const tokens = n(usage.input_tokens) + n(usage.cache_read_input_tokens) + n(usage.cache_creation_input_tokens);
     if (tokens > 0) state.contextTokens = tokens;
     applyUsage(state, message!);
+    applyCacheUse(state, usage, model, id, at);
   }
-  const at = typeof e.timestamp === "string" ? Date.parse(e.timestamp) : NaN;
-  const id = typeof message?.id === "string" ? message.id : undefined;
   for (const block of blocksOf(e.message)) {
     if (block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") {
       state.openTools.set(block.id, { id: block.id, name: block.name, summary: summarizeTool(block.name, block.input), ...askOf(block.name, block.input, state.cwd) });
@@ -268,6 +341,28 @@ function applyAssistant(state: TranscriptState, e: Record<string, unknown>): voi
       state.reply = { id, text: text.length > REPLY_MAX ? tailOf(text, REPLY_MAX) : text, at: Number.isFinite(at) ? at : undefined };
     }
   }
+}
+
+/**
+ * A model call that read or wrote the prompt cache. The cache keeps its
+ * entries from when the request went out, which is right after the input
+ * before it, not when the reply was written, minutes later for a long one.
+ * The lifetime is that of the shortest entries the last writing call made:
+ * the newest part of the conversation goes first.
+ */
+function applyCacheUse(state: TranscriptState, usage: Record<string, unknown>, model: string | undefined, id: string | undefined, at: number): void {
+  if (!model || model.startsWith("<") || !Number.isFinite(at)) return;
+  const creation = usage.cache_creation as Record<string, unknown> | undefined;
+  const wrote1h = n(creation?.ephemeral_1h_input_tokens);
+  const wrote5m = creation ? n(creation.ephemeral_5m_input_tokens) : n(usage.cache_creation_input_tokens);
+  if (n(usage.cache_read_input_tokens) + wrote1h + wrote5m === 0) return;
+  if (wrote5m > 0) state.cacheTtl1h = false;
+  else if (wrote1h > 0) state.cacheTtl1h = true;
+  // One call spans several lines with one id; it went out once.
+  if (id !== undefined && id === state.lastCallId) return;
+  state.lastCallId = id;
+  const sent = state.lastInputAt !== undefined && state.lastInputAt <= at ? state.lastInputAt : at;
+  state.lastCallAt = Math.max(state.lastCallAt ?? sent, sent);
 }
 
 /** The last `max` characters from a line start; a cut inside a code block gets its opening fence back. */
@@ -331,6 +426,10 @@ export function applyLine(state: TranscriptState, line: string, sidechain = fals
   }
   // Subagent entries carry their own cwd and tools; only the main chain is the session.
   if (e.isSidechain === true && !sidechain) return;
+  const time = typeof e.timestamp === "string" ? Date.parse(e.timestamp) : NaN;
+  if (isCompactionEntry(e)) recordCompaction(state, time, compactionKind(e));
+  // What a call is sent with: it goes out right after the last of these.
+  if ((e.type === "user" || e.type === "attachment") && Number.isFinite(time)) state.lastInputAt = Math.max(state.lastInputAt ?? time, time);
   if (typeof e.cwd === "string" && e.cwd !== "") state.cwd = e.cwd;
   if (typeof e.slug === "string" && e.slug !== "") state.slug = e.slug;
   if (e.type === "assistant") applyAssistant(state, e);
@@ -365,15 +464,44 @@ export function activityOf(state: TranscriptState): string | undefined {
  */
 export function pulseOf(state: TranscriptState, now: number, since?: number): number[] {
   const bins = new Array<number>(PULSE_BINS).fill(0);
-  const binMs = PULSE_WINDOW_MS / PULSE_BINS;
-  const start = now - PULSE_WINDOW_MS;
   for (const at of state.toolCallTimes) {
-    if (at < start || at > now) continue;
-    bins[Math.min(PULSE_BINS - 1, Math.floor((at - start) / binMs))]!++;
+    const bin = pulseBin(at, now);
+    if (bin !== undefined) bins[bin]!++;
   }
-  if (since === undefined || since <= start) return bins;
-  const keep = Math.max(1, Math.min(PULSE_BINS, Math.floor((now - since) / binMs) + 1));
-  return bins.slice(PULSE_BINS - keep);
+  return bins.slice(PULSE_BINS - pulseLength(now, since));
+}
+
+/** The minute of the pulse window a time falls in, 0 the oldest, or undefined outside it. */
+function pulseBin(at: number, now: number): number | undefined {
+  const start = now - PULSE_WINDOW_MS;
+  if (at < start || at > now) return undefined;
+  return Math.min(PULSE_BINS - 1, Math.floor((at - start) / (PULSE_WINDOW_MS / PULSE_BINS)));
+}
+
+/** How many of the newest minutes the pulse shows: all of them, or those since the session started. */
+function pulseLength(now: number, since?: number): number {
+  if (since === undefined || since <= now - PULSE_WINDOW_MS) return PULSE_BINS;
+  return Math.max(1, Math.min(PULSE_BINS, Math.floor((now - since) / (PULSE_WINDOW_MS / PULSE_BINS)) + 1));
+}
+
+/**
+ * Indices into the pulse of `pulseOf` (same window, same `since`) of the
+ * minutes the conversation was compacted.
+ */
+export function pulseMarksOf(state: TranscriptState, now: number, since?: number): number[] {
+  const skipped = PULSE_BINS - pulseLength(now, since);
+  const marks = new Set<number>();
+  for (const at of state.compactedAt) {
+    const bin = pulseBin(at, now);
+    if (bin !== undefined && bin >= skipped) marks.add(bin - skipped);
+  }
+  return [...marks].sort((a, b) => a - b);
+}
+
+/** The prompt cache as the last call that used it left it: from when that call went out, for 5 minutes, or an hour when the last call that wrote to it wrote 1-hour entries only. */
+export function cacheOf(state: TranscriptState): { lastCallAt: number; ttlMs: number } | undefined {
+  if (state.lastCallAt === undefined) return undefined;
+  return { lastCallAt: state.lastCallAt, ttlMs: state.cacheTtl1h ? CACHE_TTL_1H_MS : CACHE_TTL_5M_MS };
 }
 
 /** Claude's context window for a model id: 1M for the `[1m]` variants, or when the usage already passed 200k. */
