@@ -1255,6 +1255,42 @@ body.vscode-reduce-motion .hover-card {
   display: none;
 }
 
+/* Pages of earlier sessions: newer, which ones show, older. */
+.group-past .pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 12px 8px;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  color: var(--muted);
+}
+
+.group-past .pager.hidden {
+  display: none;
+}
+
+.group-past .pager button {
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  border-radius: 4px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.group-past .pager button:not(:disabled):hover {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.group-past .pager button:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+}
+
 .card.past {
   opacity: 0.85;
 }
