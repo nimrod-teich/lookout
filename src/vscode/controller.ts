@@ -6,6 +6,7 @@ import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
+import { chatStorageRoots, LocalChats } from "../core/agents/copilot/localChats";
 import { CopilotProvider } from "../core/agents/copilot/provider";
 import type { HistoryMessage, SnippetSize } from "../core/history";
 import { Attention } from "../core/attention";
@@ -348,7 +349,10 @@ export class Controller implements vscode.Disposable {
       const runtimes = createProcessFinder("copilot-runtime");
       runtimes.onDidUpdate = () => this.schedulePoll();
       const agentHost = new AgentHostSessions(path.resolve(this.host.globalStorageDir, "..", "..", "agentSessionData"));
-      this.providers.push(new CopilotProvider(config.copilotHome, finder, this.proc, Date.now, runtimes, agentHost));
+      // VS Code's Local chats, kept with the workspaces' storage on the side of VS Code that shows the window.
+      const roots = chatStorageRoots(this.host.globalStorageDir);
+      const localChats = new LocalChats(() => roots);
+      this.providers.push(new CopilotProvider(config.copilotHome, finder, this.proc, Date.now, runtimes, agentHost, localChats));
     }
     this.monitor = new Monitor(this.providers, this.proc);
     const cacheFile = usageCacheFile(config.claudeConfigDir);

@@ -13,6 +13,7 @@ import type { Query } from "../../terms";
 import type { Evidence } from "../../types";
 import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, PastSession, ResumeCommand, SearchOutcome } from "../agent";
 import { activityOf, applyCopilotLine, emptyCopilot, factsOf, openPermission, type CopilotState } from "./events";
+import { ChatLogIndex, localChatAddress, type LocalChat, type LocalChats } from "./localChats";
 import { COPILOT, lockPids, openSessionsFile, readOpenSessions, readWorkspace, sessionStateDir, type Workspace } from "./paths";
 import { resumeIdOf } from "./process";
 
@@ -114,7 +115,32 @@ export class CopilotProvider implements AgentProvider {
     private readonly runtimes?: ProcessFinder,
     /** VS Code's ids for the sessions it runs. */
     private readonly agentHost?: AgentHostSessions,
+    /** VS Code's Local chats. */
+    private readonly localChats?: LocalChats,
   ) {}
+
+  /** The Local chats as last listed, by id. */
+  private localListed = new Map<string, LocalChat>();
+  private readonly localIndexes = new Map<string, ChatLogIndex>();
+
+  /** A Local chat answering or waiting for you, as a live session: it has no process of its own. */
+  private chatSession(chat: LocalChat): AgentSession {
+    return {
+      agent: this.id,
+      id: chat.id,
+      pid: 0,
+      status: chat.state,
+      reason: chat.reason,
+      evidence: { source: "transcript", at: chat.mtimeMs, note: "VS Code saves a chat within seconds of a change" },
+      lastWriteAt: chat.mtimeMs,
+      since: chat.since,
+      title: chat.title,
+      cwd: chat.cwd,
+      panel: true,
+      vscodeSession: localChatAddress(chat.id),
+      model: chat.model,
+    };
+  }
 
   /**
    * VS Code's address for one of its sessions: `agent-host-copilotcli:/<VS
@@ -186,6 +212,9 @@ export class CopilotProvider implements AgentProvider {
     }
     for (const file of this.tracked.keys()) if (![...files.values()].includes(file)) this.tracked.delete(file);
     this.liveFiles = files;
+    const chats = this.localChats?.list() ?? [];
+    this.localListed = new Map(chats.map((chat) => [chat.id, chat]));
+    for (const chat of chats) if (chat.state !== "idle") sessions.push(this.chatSession(chat));
     return sessions;
   }
 
@@ -313,7 +342,13 @@ export class CopilotProvider implements AgentProvider {
       const vscodeSession = base.resumable ? this.vscodeSessionOf(f.id, f.workspace) : undefined;
       return { ...base, resumesIn: "panel", ...(vscodeSession ? { vscodeSession } : {}) };
     };
-    return { sessions: listed.map(session), capped, incomplete: unread > 0, also: also.map(session) };
+    // VS Code's Local chats not answering: they open again in VS Code's Chat.
+    const chat = (c: LocalChat): PastSession => ({ agent: this.id, id: c.id, cwd: c.cwd, title: c.title, resumable: c.cwd !== "" && within(c.cwd, scope.folders), modifiedAt: Math.round(c.mtimeMs), resumesIn: "panel", vscodeSession: localChatAddress(c.id) });
+    const idle = [...this.localListed.values()].filter((c) => c.state === "idle" && !exclude.has(c.id));
+    const chatsListed = idle.filter((c) => scope.all || within(c.cwd, scope.folders));
+    const chatsAlso = idle.filter((c) => (scope.also ?? []).includes(c.id) && !chatsListed.includes(c));
+    const sessions = [...listed.map(session), ...chatsListed.map(chat)].sort((a, b) => b.modifiedAt - a.modifiedAt);
+    return { sessions: sessions.slice(0, scope.limit), capped: capped || sessions.length > scope.limit, incomplete: unread > 0, also: [...also.map(session), ...chatsAlso.map(chat)] };
   }
 
   /** Searches the live and the past sessions' messages (see `searchConversations`). */
@@ -328,6 +363,7 @@ export class CopilotProvider implements AgentProvider {
         // Copilot records no branch: `branch:` picks only the live sessions.
         yield { id, pastModifiedAt: Math.round(past.mtimeMs), cwd: past.cwd, index: () => this.indexFor(id) };
       }
+      for (const [id, chat] of this.localListed) yield { id, pastModifiedAt: chat.state === "idle" ? Math.round(chat.mtimeMs) : undefined, cwd: chat.cwd, index: () => this.indexFor(id) };
     };
     return searchConversations(conversations.call(this), parsed, limit, budgetMs, snippet);
   }
@@ -347,6 +383,15 @@ export class CopilotProvider implements AgentProvider {
   }
 
   private indexFor(id: string): HistoryIndex | undefined {
+    const chat = this.localListed.get(id);
+    if (chat && this.localChats) {
+      let index = this.localIndexes.get(id);
+      if (!index) {
+        index = new ChatLogIndex(chat.file, this.localChats);
+        this.localIndexes.set(id, index);
+      }
+      return index;
+    }
     const live = this.liveFiles.get(id);
     if (live) {
       const tracked = this.tracked.get(live);
@@ -380,6 +425,11 @@ export class CopilotProvider implements AgentProvider {
       // No home yet.
     }
     for (const watcher of watchers) watcher.on("error", () => watcher.close());
-    return watchers.length ? { dispose: () => watchers.forEach((watcher) => watcher.close()) } : undefined;
+    // VS Code's Local chats are looked through in the background; a look that finds something new says so.
+    if (this.localChats) this.localChats.onDidUpdate = listener;
+    const clear = () => {
+      if (this.localChats?.onDidUpdate === listener) this.localChats.onDidUpdate = undefined;
+    };
+    return watchers.length || this.localChats ? { dispose: () => (watchers.forEach((watcher) => watcher.close()), clear()) } : undefined;
   }
 }
