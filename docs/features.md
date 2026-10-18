@@ -57,6 +57,11 @@ Every part of Lookout, in full: the board and its cards, favourites, the Earlier
   </tr>
 </table>
 
+<p align="center">
+  <img src="../media/readme/board-full.png" width="380" alt="The whole board in the dark theme: harbour, legend, usage, favourites, and the cards grouped by state">
+  <img src="../media/readme/board-light.png" width="380" alt="The same board in the light theme">
+</p>
+
 ## Session states
 
 | State | Meaning |
