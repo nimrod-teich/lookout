@@ -19,6 +19,7 @@ async function reveal(view: SessionView, terminals: Terminals, log: Log): Promis
     case "terminal":
       return view.terminalPid !== undefined && terminals.show(view.terminalPid) ? "revealed-terminal" : "failed";
     case "window":
+    case "editor":
     case "elsewhere":
       return "refused-not-here";
   }
@@ -26,6 +27,7 @@ async function reveal(view: SessionView, terminals: Terminals, log: Log): Promis
 
 function whereItRuns(view: SessionView): string {
   if (view.host === "window") return view.windowLabel ? `in the window "${view.windowLabel}"` : "in another window";
+  if (view.host === "editor") return "in a window where Lookout does not run";
   return "outside VS Code";
 }
 

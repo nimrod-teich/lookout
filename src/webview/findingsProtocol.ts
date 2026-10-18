@@ -9,7 +9,8 @@ export interface FindingsMessage extends HistoryMessage {
 export type ToFindings = {
   type: "conversation";
   /** `where`: the session's project, worktree and git branch, e.g. "api · ⎇ fix-login". */
-  session: { id: string; title: string; where?: string; agent?: string };
+  /** `openable` false: running where Lookout cannot bring it forward, so the tab offers no Open session. */
+  session: { id: string; title: string; where?: string; agent?: string; openable?: boolean };
   messages: FindingsMessage[];
   /** The search to apply; the tab keeps its own afterwards. */
   query: string;

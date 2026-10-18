@@ -161,6 +161,22 @@ describe("the extension", () => {
     expect(sessions()?.map((v) => v.id)).toEqual([SESSION]);
   }, 60_000);
 
+  it("opens the conversation of a session it cannot bring forward, and tells no one it cannot", async () => {
+    writeTranscript();
+    // `claude` in a terminal of no VS Code window: outside VS Code.
+    writeSession({ entrypoint: "cli", status: "idle" });
+    activate(context());
+    const board = stub.webviewProviders.get("lookout.board") as { resolveWebviewView(view: unknown): void };
+    const boardView = createWebviewView();
+    board.resolveWebviewView(boardView);
+    const shown = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions: { id: string; host: string }[] } | undefined)?.sessions;
+    await vi.waitFor(() => expect(shown()).toEqual([expect.objectContaining({ id: SESSION, host: "elsewhere" })]), WAIT);
+    boardView.receive({ type: "jump", id: SESSION });
+    // The tab offers no Open session: nothing here can bring it forward.
+    await vi.waitFor(() => expect(stub.panels.find((panel) => panel.viewType === "lookout.findings")?.posted.at(-1)).toMatchObject({ type: "conversation", session: { id: SESSION, openable: false } }), WAIT);
+    expect(infoMessages().filter((text) => text.includes("outside VS Code"))).toEqual([]);
+  }, 60_000);
+
   it("marks a terminal session's turn finished while the user is on a tab, and keeps the mark until its terminal comes forward", async () => {
     // A shell of this window's terminals runs the session.
     const shell = spawn(process.execPath, ["-e", 'const c = require("child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(c.pid); setInterval(() => {}, 1000);'], { stdio: ["ignore", "pipe", "ignore"] });

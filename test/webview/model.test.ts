@@ -29,6 +29,7 @@ describe("card text", () => {
     expect(hostChip(view({ host: "window", windowLabel: "api" }))).toBe("window: api");
     expect(hostChip(view({ host: "window" }))).toBe("another window");
     expect(hostChip(view({ host: "elsewhere" }))).toBe("outside VS Code");
+    expect(hostChip(view({ host: "editor" }))).toBe("window without Lookout");
   });
 
   it("picks the second line by state, with the kind of ask as its label", () => {

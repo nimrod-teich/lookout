@@ -6,9 +6,11 @@ export type State = "waiting" | "done" | "working" | "unknown" | "idle";
 
 /**
  * Where a session runs, relative to the window Lookout serves: in its agent
- * panel, in one of its terminals, in another VS Code window, or outside VS Code.
+ * panel, in one of its terminals, in another VS Code window, in an agent's
+ * panel in a window where no Lookout runs ("editor": a VS Code window with
+ * Lookout off or older, or another editor), or outside any editor.
  */
-export type Host = "panel" | "terminal" | "window" | "elsewhere";
+export type Host = "panel" | "terminal" | "window" | "editor" | "elsewhere";
 
 /**
  * Why a session needs the user: a permission prompt, a question, a plan to

@@ -252,6 +252,8 @@ window.addEventListener("message", (event: MessageEvent<ToFindings>) => {
   const scrollY = window.scrollY;
   conversation = message;
   titleEl.textContent = message.session.title;
+  // Running where nothing can bring it forward: this tab is all there is to open.
+  open.style.display = message.session.openable === false ? "none" : "";
   const agent = message.markers && message.session.agent ? message.session.agent : undefined;
   agentEl.replaceChildren(...(agent ? [agentGlyph(agent, 16)] : []));
   const where = [agent ? agentInfo(agent).label : undefined, message.session.where].filter(Boolean).join(" · ");

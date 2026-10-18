@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { agentInfo, boardAgents, canJump, canRename, canResume, markersShown } from "./core/agents/catalog";
+import { agentInfo, boardAgents, canJump, canRename, canResume, markersShown, unreachable } from "./core/agents/catalog";
 import { describeAlert, noticeBody } from "./core/format";
 import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
@@ -124,6 +124,8 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!canJump(view)) return;
     lastJump = view.id;
     if (view.host === "window") return jumpToOtherWindow(view);
+    // Nothing here can bring it forward: its conversation, to read what it does.
+    if (unreachable(view)) return openHit("", view.id);
     if (revealed(await jumpToSession(view, terminals, log))) controller.markSeen(view.id);
   };
   /** Opens a session that is not running: the agent resumes it in its panel, when it belongs to this window's folders. */
@@ -157,6 +159,10 @@ export function activate(context: vscode.ExtensionContext): void {
       const live = controller.sessions.find((view) => view.id === id);
       if (live) await jump(live);
       else await resume(id);
+    },
+    openable: (id) => {
+      const live = controller.sessions.find((view) => view.id === id);
+      return !live || !unreachable(live);
     },
   });
   /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
