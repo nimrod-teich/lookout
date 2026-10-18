@@ -52,13 +52,57 @@ export function parseProcStat(text: string): ProcessInfo | null {
   return { ppid, startTicks };
 }
 
-/** Linux: every lookup is one small synchronous read of `/proc`. */
-class LinuxProcessTable implements ProcessTable {
+/** Process starts kept at most: the oldest are forgotten past this. */
+const STARTS_KEPT = 4096;
+
+/**
+ * Process start times from `/proc`, epoch ms. `/proc/<pid>/stat` gives a
+ * process's start in clock ticks after boot (100 a second), and `/proc/stat`
+ * the boot time, which moves whenever the clock is set: WSL 2 pauses its
+ * virtual machine while Windows sleeps, then sets the clock forward by as
+ * long, and the boot time with it. A start reached from a later boot time is
+ * off by that much, so each process's start is fixed the first time it is
+ * seen, with the boot time of that moment.
+ */
+export class ProcStarts {
+  private readonly fixed = new Map<string, number | undefined>();
+
+  constructor(private readonly root: string = "/proc") {}
+
+  /** The start of process `pid`, which started `ticks` clock ticks after boot. */
+  of(pid: number, ticks: number): number | undefined {
+    const key = `${pid}:${ticks}`;
+    if (!this.fixed.has(key)) {
+      const boot = this.bootMs();
+      this.fixed.set(key, boot !== undefined && Number.isFinite(ticks) ? boot + ticks * 10 : undefined);
+      if (this.fixed.size > STARTS_KEPT) this.fixed.delete(this.fixed.keys().next().value!);
+    }
+    return this.fixed.get(key);
+  }
+
+  /** When the machine booted, epoch ms, as `/proc/stat` says now. */
+  private bootMs(): number | undefined {
+    try {
+      const btime = /^btime (\d+)$/m.exec(fs.readFileSync(`${this.root}/stat`, "utf8"))?.[1];
+      return btime === undefined ? undefined : Number(btime) * 1000;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+/** Linux: every lookup is one small synchronous read of `/proc` (`root`, for tests). */
+export class LinuxProcessTable implements ProcessTable {
   private domain: string | undefined | null = null;
+  private readonly starts: ProcStarts;
+
+  constructor(private readonly root: string = "/proc") {
+    this.starts = new ProcStarts(root);
+  }
 
   get(pid: number): ProcessInfo | null {
     try {
-      return parseProcStat(fs.readFileSync(`/proc/${pid}/stat`, "utf8"));
+      return parseProcStat(fs.readFileSync(`${this.root}/${pid}/stat`, "utf8"));
     } catch {
       return null;
     }
@@ -67,18 +111,15 @@ class LinuxProcessTable implements ProcessTable {
   children(pid: number): { pid: number; args: string; startedMs?: number }[] {
     let ids: number[];
     try {
-      ids = fs.readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number);
+      ids = fs.readFileSync(`${this.root}/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number);
     } catch {
       return [];
     }
     const out: { pid: number; args: string; startedMs?: number }[] = [];
     for (const child of ids) {
       try {
-        const ticks = Number(this.get(child)?.startTicks);
-        const boot = this.bootMs();
-        // Clock ticks are 100 a second on Linux.
-        const startedMs = boot !== undefined && Number.isFinite(ticks) ? boot + ticks * 10 : undefined;
-        out.push({ pid: child, args: fs.readFileSync(`/proc/${child}/cmdline`, "utf8").replace(/\0/g, " ").trim(), startedMs });
+        const startedMs = this.starts.of(child, Number(this.get(child)?.startTicks));
+        out.push({ pid: child, args: fs.readFileSync(`${this.root}/${child}/cmdline`, "utf8").replace(/\0/g, " ").trim(), startedMs });
       } catch {
         // Gone meanwhile.
       }
@@ -88,9 +129,9 @@ class LinuxProcessTable implements ProcessTable {
 
   output(pid: number): { size: number; deleted: boolean } | undefined {
     try {
-      const target = fs.readlinkSync(`/proc/${pid}/fd/1`);
+      const target = fs.readlinkSync(`${this.root}/${pid}/fd/1`);
       if (!target.startsWith("/")) return undefined;
-      return { size: fs.statSync(`/proc/${pid}/fd/1`).size, deleted: target.endsWith(" (deleted)") };
+      return { size: fs.statSync(`${this.root}/${pid}/fd/1`).size, deleted: target.endsWith(" (deleted)") };
     } catch {
       return undefined;
     }
@@ -99,7 +140,7 @@ class LinuxProcessTable implements ProcessTable {
   cpuTicks(pid: number, depth = 0): number | undefined {
     let total: number;
     try {
-      const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+      const stat = fs.readFileSync(`${this.root}/${pid}/stat`, "utf8");
       const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
       // utime and stime, fields 14 and 15, and cutime and cstime, 16 and 17: what its ended children used.
       total = Number(rest[11]) + Number(rest[12]) + Number(rest[13]) + Number(rest[14]);
@@ -109,7 +150,7 @@ class LinuxProcessTable implements ProcessTable {
     if (depth > 16) return total;
     let kids: string[] = [];
     try {
-      kids = fs.readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean);
+      kids = fs.readFileSync(`${this.root}/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean);
     } catch {
       // No children list: the process alone.
     }
@@ -117,26 +158,11 @@ class LinuxProcessTable implements ProcessTable {
     return Number.isFinite(total) ? total : undefined;
   }
 
-  private boot: number | undefined | null = null;
-
-  /** When the machine booted, epoch ms, from `/proc/stat`. */
-  private bootMs(): number | undefined {
-    if (this.boot === null) {
-      try {
-        const btime = /^btime (\d+)$/m.exec(fs.readFileSync("/proc/stat", "utf8"))?.[1];
-        this.boot = btime === undefined ? undefined : Number(btime) * 1000;
-      } catch {
-        this.boot = undefined;
-      }
-    }
-    return this.boot;
-  }
-
   pidDomain(): string | undefined {
     if (this.domain === null) {
       try {
         const machineId = fs.readFileSync("/etc/machine-id", "utf8").trim();
-        this.domain = `linux:${machineId}:${fs.readlinkSync("/proc/self/ns/pid")}`;
+        this.domain = `linux:${machineId}:${fs.readlinkSync(`${this.root}/self/ns/pid`)}`;
       } catch {
         this.domain = undefined;
       }
@@ -338,13 +364,15 @@ const LINUX_SCAN_MS = 1_000;
 export class LinuxProcessFinder implements ProcessFinder {
   private found: NamedProcess[] = [];
   private scannedAt = -Infinity;
-  private boot: number | undefined | null = null;
+  private readonly starts: ProcStarts;
 
   constructor(
     private readonly name: string,
     private readonly root: string = "/proc",
     private readonly now: () => number = Date.now,
-  ) {}
+  ) {
+    this.starts = new ProcStarts(root);
+  }
 
   find(): NamedProcess[] {
     if (this.now() - this.scannedAt < LINUX_SCAN_MS) return this.found;
@@ -371,9 +399,7 @@ export class LinuxProcessFinder implements ProcessFinder {
         } catch {
           // Another user's process, or gone meanwhile.
         }
-        const boot = this.bootMs();
-        const ticks = Number(stat?.startTicks);
-        found.push({ pid: Number(entry), ppid: stat?.ppid, args, cwd, startedMs: boot !== undefined && Number.isFinite(ticks) ? boot + ticks * 10 : undefined });
+        found.push({ pid: Number(entry), ppid: stat?.ppid, args, cwd, startedMs: this.starts.of(Number(entry), Number(stat?.startTicks)) });
       } catch {
         // Gone meanwhile, or not ours to read.
       }
@@ -400,17 +426,6 @@ export class LinuxProcessFinder implements ProcessFinder {
     return files;
   }
 
-  private bootMs(): number | undefined {
-    if (this.boot === null) {
-      try {
-        const btime = /^btime (\d+)$/m.exec(fs.readFileSync(`${this.root}/stat`, "utf8"))?.[1];
-        this.boot = btime === undefined ? undefined : Number(btime) * 1000;
-      } catch {
-        this.boot = undefined;
-      }
-    }
-    return this.boot;
-  }
 }
 
 /** Parses `pid|ppid|creation FILETIME|command line` rows, the output of the Windows finder's command. */
