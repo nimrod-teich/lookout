@@ -38,8 +38,8 @@ describe("card text", () => {
     expect(cardLine(view({ state: "waiting", reason: { kind: "question", ask: "Which color?", options: ["Red", "Blue"] } }), now)).toEqual({ label: "Question", text: "Which color?", options: ["Red", "Blue"] });
     expect(cardLine(view({ state: "waiting", reason: { kind: "typed", ask: "Want me to open the PR?" } }), now)).toMatchObject({ label: "Asked you a question", text: "Want me to open the PR?" });
     expect(cardLine(view({ state: "waiting" }), now)).toEqual({ text: "input needed" });
-    expect(cardLine(view({ state: "working", activity: "Bash · npm test", lastWriteAt: now - 60_000 }), now)).toEqual({ label: undefined, text: "Bash · npm test" });
-    expect(cardLine(view({ state: "working", lastWriteAt: now - 12 * 60_000 }), now)).toEqual({ label: "quiet 12m", text: "thinking" });
+    expect(cardLine(view({ state: "working", activity: "Bash · npm test", lastWriteAt: now - 60_000 }), now)).toEqual({});
+    expect(cardLine(view({ state: "working", lastWriteAt: now - 12 * 60_000 }), now)).toEqual({ label: "quiet 12m" });
     // A finished or idle session's card says nothing more: its state and title say it.
     expect(cardLine(view({ state: "done" }), now)).toEqual({});
     expect(cardLine(view({ state: "idle" }), now)).toEqual({});

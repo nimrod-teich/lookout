@@ -113,6 +113,9 @@ describe("StatusBar", () => {
     expect(tip).toContain("Session \\(5hr\\): 18% · resets in 1h  \n");
     expect(tip).toContain("Weekly \\(7 day\\): 31% · resets in 2d  \n");
     expect(tip).toContain("Weekly Fable: 84%  \n");
+    // Each limit with a bar coloured as the board's: green, amber from half, red from 80%.
+    expect(tip).toContain('<span style="color:#89d185;">▰▰▱▱▱▱▱▱▱▱</span> Session');
+    expect(tip).toContain('<span style="color:#f14c4c;">▰▰▰▰▰▰▰▰▱▱</span> Weekly Fable');
     expect(tip).not.toContain("As of");
     expect(tip).toContain("Click to jump to a session");
   });

@@ -63,8 +63,9 @@ export function cardLine(view: SessionView, now: number): CardLine {
       return { label: reasonLabel(reason.kind), text, options: reason.options };
     }
     case "working": {
+      // What it does is on its pulse and in its hover; the card says only when it went quiet.
       const quiet = quietFor(view, now);
-      return { label: quiet === undefined ? undefined : `quiet ${formatElapsed(quiet)}`, text: view.activity ?? "thinking" };
+      return quiet === undefined ? {} : { label: `quiet ${formatElapsed(quiet)}` };
     }
     case "done":
     case "idle":

@@ -160,6 +160,7 @@ export class MarkdownString {
     public value = "",
     public supportThemeIcons = false,
   ) {}
+  supportHtml = false;
   appendMarkdown(text: string): this {
     this.value += text;
     return this;
