@@ -675,7 +675,9 @@ function updateCard(card: HTMLElement, view: SessionView): void {
     spendEl.title = [
       `Tokens this session: ${formatTokens(spend.input)} input, ${formatTokens(spend.output)} output, ${formatTokens(spend.cacheRead)} cache read, ${formatTokens(spend.cacheWrite)} cache write.`,
       typeof spend.costUsd !== "number"
-        ? "No price for this model."
+        ? spend.basis
+          ? `${spend.basis}.`
+          : "No price for this model."
         : spend.basis
           ? `API-equivalent: ${formatUsd(spend.costUsd)}, ${spend.basis}.`
           : `API list price: ${formatUsd(spend.costUsd)}${spend.estimated ? ", part of it Lookout's estimate since the agent's last checkpoint (subagents since then not counted)" : ", the agent's own figure"}.`,

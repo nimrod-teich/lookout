@@ -5,6 +5,7 @@ import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
+import { CopilotProvider } from "../core/agents/copilot/provider";
 import type { HistoryMessage, SnippetSize } from "../core/history";
 import { Attention } from "../core/attention";
 import { buildPastView, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
@@ -306,6 +307,12 @@ export class Controller implements vscode.Disposable {
       finder.onDidUpdate = () => this.schedulePoll();
       this.providers.push(new CodexProvider(config.codexHome, finder));
     }
+    if (config.copilotEnabled) {
+      // Copilot's sessions name the process holding them; the finder tells which of those still run.
+      const finder = createProcessFinder("copilot");
+      finder.onDidUpdate = () => this.schedulePoll();
+      this.providers.push(new CopilotProvider(config.copilotHome, finder, this.proc));
+    }
     this.monitor = new Monitor(this.providers, this.proc);
     const cacheFile = usageCacheFile(config.claudeConfigDir);
     this.usageCache = new UsageCache(cacheFile);
@@ -318,7 +325,7 @@ export class Controller implements vscode.Disposable {
     this.refreshDisabledByEnv = config.usageRefreshDisabled;
     this.archived = new ArchivedSessions(stateDbCandidates(this.host.globalStorageDir));
     if (!this.archived.available) this.log.info("The agent's archived-session list is out of reach; every past session is listed");
-    this.log.info(`Watching ${this.providers.map((p) => p.label).join(", ")} (${config.claudeConfigDir}${config.codexEnabled ? `, ${config.codexHome}` : ""})`);
+    this.log.info(`Watching ${this.providers.map((p) => p.label).join(", ")} (${[config.claudeConfigDir, ...(config.codexEnabled ? [config.codexHome] : []), ...(config.copilotEnabled ? [config.copilotHome] : [])].join(", ")})`);
     this.watch();
     this.poll();
   }

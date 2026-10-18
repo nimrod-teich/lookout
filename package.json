@@ -200,6 +200,17 @@
           "default": "",
           "scope": "machine",
           "markdownDescription": "Codex's home folder, where its `sessions` are. Empty uses `CODEX_HOME` from the environment, then `~/.codex`."
+        },
+        "lookout.agents.copilot": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Watch Copilot CLI sessions: the `copilot` program running in a terminal. Lookout reads the session folders Copilot writes under `#lookout.copilotHome#`, and runs nothing."
+        },
+        "lookout.copilotHome": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Copilot CLI's home folder, where its `session-state` is. Empty uses `COPILOT_HOME` from the environment, then `~/.copilot`."
         }
       }
     },
