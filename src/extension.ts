@@ -64,7 +64,8 @@ export function activate(context: vscode.ExtensionContext): void {
     terminals,
     log,
   );
-  const statusBar = new StatusBar(JUMP);
+  // A click on the status bar opens the board.
+  const statusBar = new StatusBar(SHOW_BOARD);
   let config = readConfig();
   const desktop = desktopOf(process.platform, vscode.env.remoteName, process.platform === "linux" && insideWsl());
   const osNotifier = new OsNotifier(desktop, log);
@@ -210,8 +211,6 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   const render = () => {
     statusBar.render({
-      // A tab restored after a reload runs nothing until it is opened.
-      views: controller.sessions.filter((view) => !view.restored),
       usage: controller.usage,
       usageGroups: controller.usageGroups,
       usageAgent: config.usageAgent,
