@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpMailbox } from "../../src/core/jumpMailbox";
 import { activate } from "../../src/extension";
-import { createWebviewView, stub, workspace } from "./stub-vscode";
+import { createWebviewView, stub, TabInputWebview, workspace } from "./stub-vscode";
 
 // The whole extension against a real process: a child of this test process
 // plays a Claude Code panel session, so the real process table places it in
@@ -160,6 +160,50 @@ describe("the extension", () => {
     await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
     expect(sessions()?.map((v) => v.id)).toEqual([SESSION]);
   }, 60_000);
+
+  it("marks a terminal session's turn finished while the user is on a tab, and keeps the mark until its terminal comes forward", async () => {
+    // A shell of this window's terminals runs the session.
+    const shell = spawn(process.execPath, ["-e", 'const c = require("child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(c.pid); setInterval(() => {}, 1000);'], { stdio: ["ignore", "pipe", "ignore"] });
+    try {
+      const sessionPid = await new Promise<number>((resolve) => shell.stdout!.once("data", (chunk: Buffer) => resolve(Number(String(chunk).trim()))));
+      const terminal = stub.addTerminal("claude", shell.pid);
+      const transcript = path.join(configDir, "projects", "-work-app", `${SESSION}.jsonl`);
+      fs.mkdirSync(path.dirname(transcript), { recursive: true });
+      fs.writeFileSync(transcript, JSON.stringify({ type: "user", cwd: "/work/app", message: { content: "run the tests" } }) + "\n");
+      const record = (status: string) => fs.writeFileSync(path.join(configDir, "sessions", `${sessionPid}.json`), JSON.stringify({ pid: sessionPid, sessionId: SESSION, cwd: "/work/app", startedAt: Date.now(), kind: "interactive", entrypoint: "cli", status, statusUpdatedAt: Date.now() }));
+      record("idle");
+      const group = stub.addClaudeGroup(["Other"]);
+      stub.activate(group.tabs[0]!);
+      activate(context());
+      await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) 1 idle"), WAIT);
+
+      // The user sends the prompt in its terminal, then goes to a tab while it works.
+      stub.activeTerminal = terminal;
+      stub.activeTerminalChange.fire(terminal);
+      record("busy");
+      await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+      stub.activate(group.tabs[0]!);
+      group.tabs.push({ label: "Notes", input: new TabInputWebview("mainThreadWebview-markdown"), group });
+      stub.activate(group.tabs[1]!);
+      stub.focusChange.fire();
+
+      // Its terminal is still VS Code's active one: the finished turn is marked all the same, and stays marked
+      // through changes of tabs and window focus.
+      record("idle");
+      await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1"), WAIT);
+      stub.focusChange.fire();
+      stub.focusChange.fire();
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1");
+
+      // Its terminal comes forward: seen.
+      stub.activeTerminalChange.fire(terminal);
+      await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) 1 idle"), WAIT);
+      process.kill(sessionPid);
+    } finally {
+      shell.kill();
+    }
+  }, 90_000);
 
   it("names what a prompt asks even when the transcript lags, and announces a question typed at the end of a turn", async () => {
     const transcript = path.join(configDir, "projects", "-work-app", `${SESSION}.jsonl`);

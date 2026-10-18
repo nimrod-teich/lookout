@@ -3,10 +3,14 @@ import type { SessionView } from "../core/types";
 import { panelAdapter } from "./agents";
 import type { Terminals } from "./terminals";
 
-/** The user has this session in front of them: its tab or terminal is the active one in the focused window. */
+/**
+ * The user has this session in front of them: its tab is the active one in
+ * the focused window, or its terminal is the active one and the user went
+ * nowhere else since they were last in it.
+ */
 export function isWatched(view: SessionView, terminals: Terminals): boolean {
   if (!vscode.window.state.focused) return false;
   if (view.host === "panel") return panelAdapter(view.agent)?.isActive(view) ?? false;
-  if (view.host === "terminal") return view.terminalPid !== undefined && terminals.activePid() === view.terminalPid;
+  if (view.host === "terminal") return view.terminalPid !== undefined && terminals.activePid() === view.terminalPid && terminals.userIn(view.terminalPid);
   return false;
 }

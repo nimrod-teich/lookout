@@ -9,7 +9,7 @@ import { Attention } from "../core/attention";
 import { buildPastView, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
 import { Monitor } from "../core/monitor";
 import { createProcessTable, type ProcessTable } from "../core/proc";
-import type { PastView, SessionView } from "../core/types";
+import type { PastView, SessionView, State } from "../core/types";
 import { RefreshLedger } from "../core/refreshLedger";
 import { hasFilters, parseQuery } from "../core/terms";
 import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
@@ -124,6 +124,8 @@ export class Controller implements vscode.Disposable {
   private pastViews: PastView[] = [];
   /** Every earlier session listed in this window, as last listed: a conversation tab outlives a change of scope. */
   private readonly pastSeen = new Map<string, PastView>();
+  /** Each session's state at the last poll, to tell when one starts a turn. */
+  private readonly lastStates = new Map<string, State>();
   private earlierScope: EarlierScope;
   /** The scope holds older sessions than the limit lets the board list. */
   private earlierCapped = false;
@@ -310,6 +312,7 @@ export class Controller implements vscode.Disposable {
       this.log.errorOnce(`Poll failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
       return;
     }
+    this.notePrompts(views);
     const update = this.attention.update(views, (view) => isWatched(view, this.terminals), { typedQuestions: this.typedQuestions });
     const exclude = new Set<string>([...update.views.map((view) => view.id), ...this.archived.read()]);
     const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit: EARLIER_LIMIT, also: this.favouriteIds() };
@@ -533,6 +536,23 @@ export class Controller implements vscode.Disposable {
   windowsChanged(): void {
     this.windows.invalidate();
     this.schedulePoll();
+  }
+
+  /**
+   * A session of this window that starts a turn was sent a prompt where it
+   * runs, so the user was there: in its terminal, or, for a panel session,
+   * outside the terminals. Work its background jobs do is no prompt.
+   */
+  private notePrompts(views: readonly SessionView[]): void {
+    const now = Date.now();
+    for (const view of views) {
+      const before = this.lastStates.get(view.id);
+      if (view.state !== "working" || view.background || before === undefined || before === "working") continue;
+      if (view.host === "terminal" && view.terminalPid !== undefined) this.terminals.sawPrompt(view.terminalPid, view.since ?? now);
+      else if (view.host === "panel") this.terminals.sawPrompt("elsewhere", view.since ?? now);
+    }
+    this.lastStates.clear();
+    for (const view of views) this.lastStates.set(view.id, view.state);
   }
 
   /** Clears "done" from the session whose tab or terminal the user just brought to the front. */
