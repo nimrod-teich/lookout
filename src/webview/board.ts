@@ -379,7 +379,14 @@ function createCard(view: SessionView): HTMLElement {
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  row.append(el("span", "title"), el("span", "elapsed"), starButton(view.id));
+  // A click on the title renames the session through the agent; anywhere else on the card jumps to it.
+  const title = el("span", "title rename");
+  title.title = "Rename session";
+  title.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "rename", id: view.id });
+  });
+  row.append(title, el("span", "elapsed"));
   const line = el("span", "line");
   line.append(el("span", "mark"), el("span", "kind"), el("span", "text"));
   const options = el("span", "options hidden");
@@ -394,13 +401,6 @@ function createCard(view: SessionView): HTMLElement {
   ring.append(el("span", "ring-value"));
   card.append(ring);
   const actions = el("span", "actions");
-  const rename = el("span", "action rename", "✎");
-  rename.title = "Rename session";
-  rename.setAttribute("role", "button");
-  rename.addEventListener("click", (event) => {
-    event.stopPropagation();
-    vscode.postMessage({ type: "rename", id: view.id });
-  });
   const seen = el("span", "action seen", "✓");
   seen.title = "Mark as seen";
   seen.setAttribute("role", "button");
@@ -409,7 +409,7 @@ function createCard(view: SessionView): HTMLElement {
     // On a question read from the reply, the check dismisses that question.
     vscode.postMessage({ type: card.classList.contains("typed") ? "dismiss" : "seen", id: view.id });
   });
-  actions.append(rename, seen);
+  actions.append(starButton(view.id), seen);
   card.append(actions);
   card.addEventListener("click", () => harbour.jump(view.id));
   card.addEventListener("mouseenter", () => harbour.highlight(view.id, true));
