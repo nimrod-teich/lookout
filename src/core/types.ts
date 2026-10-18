@@ -129,6 +129,8 @@ export interface SessionSpend {
   estimated: boolean;
   /** Earlier usage is missing: the transcript was joined late. */
   partial: boolean;
+  /** How the price was reached, when not as for Claude: said in the card's hover. */
+  basis?: string;
 }
 
 /** Shell commands a session left running after its turn. */

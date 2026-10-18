@@ -1,5 +1,6 @@
 import type { HistoryMessage, SearchResult, SnippetSize } from "../history";
 import type { Query } from "../terms";
+import type { UsageSnapshot } from "../usage";
 import type { Background, Evidence, Reason, TypedQuestion } from "../types";
 export type { Background };
 
@@ -63,6 +64,8 @@ export interface SessionSpend {
   estimated: boolean;
   /** Earlier usage is missing: the transcript was joined late. */
   partial: boolean;
+  /** How the price was reached, when not as for Claude: said in the card's hover. */
+  basis?: string;
 }
 
 /** A session that is not running, known from its transcript. */
@@ -145,6 +148,11 @@ export interface AgentProvider {
    * terminal rather than in an editor panel.
    */
   resumeCommand?(id: string): ResumeCommand | undefined;
+  /**
+   * The account's limits, for agents that record them where Lookout can read
+   * them: when they were read, and the meters.
+   */
+  usage?(now: number): UsageSnapshot | undefined;
 }
 
 /** A command that resumes a session in a terminal. */

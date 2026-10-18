@@ -18,9 +18,14 @@
 //   with options; it is accepted at once and stays open until the next user
 //   message, after the turn has ended.
 // - `event_msg` `item_completed` with an `AgentMessage`: what Codex said.
-// - `event_msg` `token_count`: the context window and the tokens in it.
+// - `event_msg` `token_count`: the context window and the tokens in it, the
+//   thread's token totals, and the account's limits (`rate_limits`: a primary
+//   and a secondary window, each with `used_percent`, `window_minutes` and
+//   `resets_at` in epoch seconds).
+// - `token_usage_record`: one reply's tokens, for its API-equivalent price.
 import { quoteAsk } from "../../asks";
 import type { Reason } from "../../types";
+import { replyCost } from "./pricing";
 
 /** A command or tool call with no result yet. */
 export interface OpenCall {
@@ -32,6 +37,14 @@ export interface OpenCall {
   escalated: boolean;
   /** Why, in Codex's words. */
   justification?: string;
+}
+
+/** One of the account's limits, as the last `token_count` gave it. */
+export interface RateWindow {
+  usedPercent: number;
+  windowMinutes?: number;
+  /** Epoch ms the window resets. */
+  resetsAt?: number;
 }
 
 export interface RolloutState {
@@ -58,6 +71,14 @@ export interface RolloutState {
   lastReply?: { text: string; at: number; final: boolean };
   /** When Codex called tools, newest last. */
   toolCallTimes: number[];
+  /** The account's limits at the last `token_count` that carried them, and when that was. */
+  rateLimits?: { at: number; primary?: RateWindow; secondary?: RateWindow };
+  /** The thread's tokens so far, from the last `token_count`. */
+  totals?: { input: number; cached: number; cacheWrite: number; output: number };
+  /** The replies priced so far (by response id), and their sum; `unpriced` once a reply's model had no price. */
+  priced: Set<string>;
+  costUsd: number;
+  unpriced: boolean;
   /** Epoch ms of the last record read. */
   lastRecordAt?: number;
   /** Type of the last record read, `type` or `type/payload.type`. */
@@ -69,7 +90,22 @@ const MAX_TOOL_TIMES = 400;
 const CONTEXT_PREFIXES = ["<environment_context>", "<user_instructions>", "# AGENTS.md instructions", "<turn_aborted>", "<permissions instructions>"];
 
 export function emptyRollout(): RolloutState {
-  return { openCalls: new Map(), toolCallTimes: [] };
+  return { openCalls: new Map(), toolCallTimes: [], priced: new Set(), costUsd: 0, unpriced: false };
+}
+
+/** A limit window from `rate_limits`; `resets_in_seconds` (older Codex) counts from the record's time. */
+function windowOf(raw: unknown, at: number | undefined): RateWindow | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const usedPercent = num(o.used_percent);
+  if (usedPercent === undefined) return undefined;
+  const resetsAtS = num(o.resets_at);
+  const resetsIn = num(o.resets_in_seconds);
+  return {
+    usedPercent,
+    windowMinutes: num(o.window_minutes),
+    resetsAt: resetsAtS !== undefined ? resetsAtS * 1000 : resetsIn !== undefined && at !== undefined ? at + resetsIn * 1000 : undefined,
+  };
 }
 
 function str(value: unknown): string | undefined {
@@ -150,6 +186,17 @@ export function applyRolloutLine(state: RolloutState, line: string): void {
     case "event_msg":
       applyEvent(state, kind, payload, when);
       return;
+    case "token_usage_record": {
+      // One reply's tokens, priced once: a record can be written again on resume.
+      const response = str(payload.response_id);
+      const usage = payload.usage as Record<string, unknown> | undefined;
+      if (!response || !usage || state.priced.has(response)) return;
+      state.priced.add(response);
+      const cost = replyCost(state.model, { input: num(usage.input_tokens) ?? 0, cached: num(usage.cached_input_tokens) ?? 0, cacheWrite: num(usage.cache_write_input_tokens) ?? 0, output: num(usage.output_tokens) ?? 0 });
+      if (cost === undefined) state.unpriced = true;
+      else state.costUsd += cost;
+      return;
+    }
     case "response_item":
       applyItem(state, kind, payload, when);
       return;
@@ -171,9 +218,17 @@ function applyEvent(state: RolloutState, kind: string | undefined, payload: Reco
       state.openCalls.clear();
       return;
     case "token_count": {
-      const info = payload.info as { last_token_usage?: { total_tokens?: unknown }; model_context_window?: unknown } | null | undefined;
+      const info = payload.info as { last_token_usage?: { total_tokens?: unknown }; total_token_usage?: Record<string, unknown>; model_context_window?: unknown } | null | undefined;
       state.contextTokens = num(info?.last_token_usage?.total_tokens) ?? state.contextTokens;
       state.contextWindow = num(info?.model_context_window) ?? state.contextWindow;
+      const total = info?.total_token_usage;
+      if (total) state.totals = { input: num(total.input_tokens) ?? 0, cached: num(total.cached_input_tokens) ?? 0, cacheWrite: num(total.cache_write_input_tokens) ?? 0, output: num(total.output_tokens) ?? 0 };
+      const limits = payload.rate_limits as { primary?: unknown; secondary?: unknown } | null | undefined;
+      if (limits && at !== undefined) {
+        const primary = windowOf(limits.primary, at);
+        const secondary = windowOf(limits.secondary, at);
+        if (primary || secondary) state.rateLimits = { at, primary, secondary };
+      }
       return;
     }
     case "item_completed": {

@@ -141,8 +141,10 @@
         "output": 96000,
         "cacheRead": 5200000,
         "cacheWrite": 0,
-        "estimated": false,
-        "partial": false
+        "estimated": true,
+        "partial": false,
+        "costUsd": 5.16,
+        "basis": "Lookout's sum of each reply's tokens at OpenAI's API list prices; a ChatGPT plan is not billed per token"
       },
       "reason": {
         "kind": "permission",
@@ -280,8 +282,10 @@
         "output": 210000,
         "cacheRead": 12400000,
         "cacheWrite": 0,
-        "estimated": false,
-        "partial": false
+        "estimated": true,
+        "partial": false,
+        "costUsd": 11.14,
+        "basis": "Lookout's sum of each reply's tokens at OpenAI's API list prices; a ChatGPT plan is not billed per token"
       },
       "evidence": {
         "source": "rollout tail",

@@ -171,4 +171,32 @@ describe("CodexProvider", () => {
     expect(provider.history(EDITED)?.[0]).toMatchObject({ role: "you", text: "Append a line saying hello to notes.md, then show me the file with cat." });
     expect(provider.history("nope")).toBeUndefined();
   });
+
+  it("gives each session's tokens and their API-equivalent price, said to be Lookout's sum at list prices", () => {
+    const { provider } = setup([codex(11, "/work/a")]);
+    const spend = provider.poll(NOW)[0]!.spend!;
+    expect(spend).toMatchObject({ input: 2_740, cacheRead: 12_160, cacheWrite: 0, output: 5, estimated: true, partial: false });
+    expect(spend.costUsd).toBeCloseTo(0.006746, 9);
+    expect(spend.basis).toMatch(/API list prices/);
+  });
+
+  it("reads the account's limits from the live sessions' rollouts", () => {
+    const { provider } = setup([codex(11, "/work/a")]);
+    provider.poll(NOW);
+    expect(provider.usage(NOW)).toEqual({
+      fetchedAt: Date.parse("2026-10-18T12:03:45.201Z"),
+      meters: [
+        { key: "session", label: "5h limit", windowMs: 5 * 3_600_000, percent: 0, resetsAt: 1792343023000 },
+        { key: "weekly_all", label: "Weekly limit", windowMs: 168 * 3_600_000, percent: 0, resetsAt: 1792929823000 },
+      ],
+    });
+  });
+
+  it("with no session running, reads them from the newest rollout of the last week, and has none without one", () => {
+    const { home, provider } = setup([]);
+    // The working session's rollout, written last, recorded its limits last at 12:06:29 (it was copied mid-turn).
+    fs.utimesSync(homeFile(home, WORKING), NOW / 1000, NOW / 1000);
+    expect(provider.usage(NOW)?.fetchedAt).toBe(Date.parse("2026-10-18T12:06:29.128Z"));
+    expect(provider.usage(NOW + 8 * 86_400_000)).toBeUndefined();
+  });
 });

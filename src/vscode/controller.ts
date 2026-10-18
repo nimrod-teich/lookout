@@ -133,6 +133,10 @@ export class Controller implements vscode.Disposable {
   private earlierCapped = false;
   /** What the agents' lists leave out and why. */
   private earlierNotes: string[] = [];
+  /** The limits of the agents other than Claude that record theirs, by agent id. */
+  private agentUsage = new Map<string, UsageSnapshot>();
+  /** What the UI last got of them: the numbers and whether they were stale. */
+  private agentUsageShown = "";
   /** The starred sessions that are not running, wherever they ran. */
   private favouritePast: PastView[] = [];
   private archived = new ArchivedSessions([]);
@@ -262,7 +266,11 @@ export class Controller implements vscode.Disposable {
    */
   get usageGroups(): UsageGroup[] {
     const usage = this.usage;
-    return [{ agent: CLAUDE_CODE, fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: (usage?.meters ?? []).map((meter) => ({ ...meter, agent: CLAUDE_CODE })), canRefresh: this.canRefreshUsage }];
+    const now = Date.now();
+    const claude: UsageGroup = { agent: CLAUDE_CODE, fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: (usage?.meters ?? []).map((meter) => ({ ...meter, agent: CLAUDE_CODE })), canRefresh: this.canRefreshUsage };
+    // The others' numbers come with their sessions' records; Lookout cannot fetch them anew.
+    const others = [...this.agentUsage].map(([agent, snapshot]): UsageGroup => ({ agent, fetchedAt: snapshot.fetchedAt, stale: isStale(snapshot, now), meters: snapshot.meters.map((meter) => ({ ...meter, agent })), canRefresh: false }));
+    return [claude, ...others];
   }
 
   /** Claude Code is told to make no network calls it can do without, which fetching usage is. Asked again each time: the settings file can change. */
@@ -413,9 +421,31 @@ export class Controller implements vscode.Disposable {
 
   private pollUsage(): void {
     if (this.disposed || !this.usageCache) return;
+    this.pollAgentUsage();
     this.consider(this.usageCache.readWithReason());
     const now = Date.now();
     if (this.canRefreshUsage && wantsRefresh(this.usageMode, this.usageRead.snapshot, now) && now >= this.nextRefreshAt(false)) void this.refreshUsage();
+  }
+
+  /**
+   * The limits of the other agents, as their providers read them from their
+   * records. The UI hears of new numbers and of numbers that turned stale;
+   * new numbers are checked against the alert thresholds.
+   */
+  private pollAgentUsage(): void {
+    const now = Date.now();
+    const next = new Map<string, UsageSnapshot>();
+    for (const provider of this.providers) {
+      const snapshot = provider.usage?.(now);
+      if (snapshot) next.set(provider.id, snapshot);
+    }
+    const changed = JSON.stringify([...next]) !== JSON.stringify([...this.agentUsage]);
+    this.agentUsage = next;
+    const shown = JSON.stringify([...next].map(([agent, snapshot]) => [agent, snapshot.fetchedAt, isStale(snapshot, now)]));
+    if (!changed && shown === this.agentUsageShown) return;
+    this.agentUsageShown = shown;
+    if (changed) this.announceThresholds();
+    this.usageChanged.fire(this.usage);
   }
 
   /** Takes a read of the cache: newer numbers, or word that there are none to show; never older numbers. */
@@ -441,13 +471,17 @@ export class Controller implements vscode.Disposable {
 
   /** The thresholds the numbers shown reach in windows still running; none from numbers too old to go by. */
   private currentAlerts(): UsageAlert[] {
+    if (!this.usageAlerts) return [];
     const usage = this.usage;
-    if (!this.usageAlerts || !usage || usage.stale) return [];
     const now = Date.now();
-    return reachedThresholds(
-      usage.meters.filter((meter) => meter.resetsAt === undefined || meter.resetsAt > now),
-      this.scope,
-    );
+    const running = (meter: { resetsAt?: number }) => meter.resetsAt === undefined || meter.resetsAt > now;
+    const alerts = usage && !usage.stale ? reachedThresholds(usage.meters.filter(running), this.scope) : [];
+    // Each other agent's windows, named for that agent: each threshold of each window is announced once.
+    for (const [agent, snapshot] of this.agentUsage) {
+      if (isStale(snapshot, now)) continue;
+      alerts.push(...reachedThresholds(snapshot.meters.filter(running).map((meter) => ({ ...meter, agent })), agent));
+    }
+    return alerts;
   }
 
   /**

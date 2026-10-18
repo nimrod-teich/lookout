@@ -70,7 +70,7 @@ export const AGENTS: readonly AgentInfo[] = [
     colors: { dark: "#7ae8df", light: "#14a093" },
     // A cutter: one mast, a mainsail aft and a headsail forward.
     glyph: { icon: "lookout-cutter", path: `${HULL}M6.4 1h1.1v10.2H6.4zM6 2.2v8.1H1.6zM7.9 3l6 7.3h-6z`, lamp: [6.95, 1.4] },
-    capabilities: { jumpTerminal: true, jumpPanel: false, rename: false, resume: true, search: true, usage: false },
+    capabilities: { jumpTerminal: true, jumpPanel: false, rename: false, resume: true, search: true, usage: true },
     resumesIn: "terminal",
   },
   {
