@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UsageMeter } from "../../src/core/usage";
-import { barMeter, groupHeading, pickBar, sortGroups, type UsageGroup } from "../../src/core/usageGroups";
+import { barMeter, chosenGroup, groupHeading, peakMeter, pickBar, sortGroups, type UsageGroup } from "../../src/core/usageGroups";
 
 const HOUR = 3_600_000;
 
@@ -54,5 +54,29 @@ describe("usage groups", () => {
     expect(sortGroups([{ agent: "codex" }, {}]).map((g) => g.agent)).toEqual([undefined, "codex"]);
     expect(groupHeading("claude-code")).toBe("Claude usage");
     expect(groupHeading("codex")).toBe("Codex usage");
+  });
+});
+
+describe("peakMeter", () => {
+  it("is the limit with the highest share used, the first of equals, and none without limits", () => {
+    expect(peakMeter([meter("session", 3), meter("weekly", 61), meter("weekly-fable", 81)])?.key).toBe("weekly-fable");
+    expect(peakMeter([meter("five", 40), meter("weekly", 40)])?.key).toBe("five");
+    expect(peakMeter([])).toBeUndefined();
+  });
+});
+
+describe("chosenGroup", () => {
+  const groups = [group("claude-code", [meter("session", 3)]), group("codex", [meter("five", 0)])];
+
+  it("is the group picked last, else the status bar's, else the first", () => {
+    expect(chosenGroup(groups, "codex", "claude-code")?.agent).toBe("codex");
+    expect(chosenGroup(groups, undefined, "codex")?.agent).toBe("codex");
+    expect(chosenGroup(groups)?.agent).toBe("claude-code");
+  });
+
+  it("passes over a pick whose agent shows no usage now", () => {
+    expect(chosenGroup(groups, "copilot", "codex")?.agent).toBe("codex");
+    expect(chosenGroup(groups, "copilot")?.agent).toBe("claude-code");
+    expect(chosenGroup([], "codex")).toBeUndefined();
   });
 });

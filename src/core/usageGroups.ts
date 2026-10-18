@@ -60,6 +60,16 @@ export function sortGroups<T extends { agent?: string }>(groups: readonly T[]): 
   return [...groups].sort((a, b) => order(a.agent ?? AGENTS[0]!.id) - order(b.agent ?? AGENTS[0]!.id));
 }
 
+/** The limit closest to running out: the highest share used, the first of equals. */
+export function peakMeter(meters: readonly UsageMeter[]): UsageMeter | undefined {
+  return meters.reduce<UsageMeter | undefined>((peak, meter) => (peak === undefined || meter.percent > peak.percent ? meter : peak), undefined);
+}
+
+/** The group whose limits the board lists: the one picked last, else the one the status bar's bar shows, else the first. */
+export function chosenGroup<T extends { agent: string }>(groups: readonly T[], picked?: string, bar?: string): T | undefined {
+  return groups.find((group) => group.agent === picked) ?? groups.find((group) => group.agent === bar) ?? groups[0];
+}
+
 /** "Claude usage". */
 export function groupHeading(agent: string): string {
   return `${agentInfo(agent).label} usage`;
