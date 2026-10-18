@@ -309,7 +309,7 @@ describe("ClaudeProvider", () => {
     expect(provider.history(old)?.map((m) => m.role)).toEqual(["you", "agent"]);
     expect(provider.history(archived)).toBeUndefined();
     // Gone from the list, gone from memory.
-    expect(provider.past({ folders: ["/work/app"], all: false, limit: 500 }, new Set([live, archived, old]))).toEqual({ sessions: [], capped: false, incomplete: false });
+    expect(provider.past({ folders: ["/work/app"], all: false, limit: 500 }, new Set([live, archived, old]))).toEqual({ sessions: [], capped: false, incomplete: false, also: [] });
     expect(provider.history(old)).toBeUndefined();
   });
 

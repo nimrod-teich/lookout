@@ -154,6 +154,8 @@ export function activate(context: vscode.ExtensionContext): void {
     past: () => controller.past,
     earlier: () => controller.earlier,
     setEarlierScope: (scope) => controller.setEarlierScope(scope),
+    favourites: () => controller.favourites,
+    toggleFavourite: (id) => controller.toggleFavourite(id),
     resume: (id) => void resume(id),
     usage: () => {
       const usage = controller.usage;

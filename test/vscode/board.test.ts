@@ -7,11 +7,13 @@ import { createWebviewView, stub } from "./stub-vscode";
 
 const PAST: PastView[] = [{ id: "00000000-0000-4000-8000-000000000009", agent: "claude-code", title: "Old one", project: "app", cwd: "/work/app", resumable: true, modifiedAt: 1 }];
 const EARLIER: EarlierInfo = { scope: "folders", limit: 500, capped: false };
+const STARRED: PastView = { id: "00000000-0000-4000-8000-00000000000f", agent: "claude-code", title: "Starred elsewhere", project: "svc", cwd: "/work/svc", resumable: false, modifiedAt: 2 };
+const FAVOURITES = { ids: [STARRED.id, "00000000-0000-4000-8000-000000000001"], past: [STARRED] };
 
 function setup(sessions: SessionView[] = [], usage?: BoardUsage) {
   const actions = { sessions: () => sessions, usage: () => usage, jump: vi.fn(() => Promise.resolve()), rename: vi.fn(() => Promise.resolve()), markSeen: vi.fn(), markAllSeen: vi.fn(),
     dismiss: vi.fn(), refreshUsage: vi.fn(), search: vi.fn((query: string) => ({ results: query === "cache" ? [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }] : [], pending: 0 })), openHit: vi.fn(), openSearch: vi.fn(), past: () => PAST, resume: vi.fn(),
-    earlier: () => EARLIER, setEarlierScope: vi.fn() };
+    earlier: () => EARLIER, setEarlierScope: vi.fn(), favourites: () => FAVOURITES, toggleFavourite: vi.fn() };
   const board = new Board({ fsPath: "/ext" } as never, actions);
   const webviewView = createWebviewView();
   board.resolveWebviewView(webviewView as never);
@@ -144,6 +146,19 @@ describe("Board", () => {
     expect(actions.openHit).toHaveBeenCalledTimes(2);
     expect(actions.openHit).toHaveBeenNthCalledWith(1, "cache", "00000000-0000-4000-8000-000000000001", 4);
     expect(actions.openHit).toHaveBeenNthCalledWith(2, "cache", "00000000-0000-4000-8000-000000000001", undefined);
+  });
+
+  it("sends the stars, stars only sessions it showed or starred, and resumes a starred earlier session", () => {
+    const { actions, webviewView } = setup([view({ id: "00000000-0000-4000-8000-000000000001" })]);
+    expect(webviewView.posted[0]).toMatchObject({ type: "sessions", favourites: FAVOURITES });
+    webviewView.receive({ type: "favourite", id: "00000000-0000-4000-8000-000000000001" });
+    webviewView.receive({ type: "favourite", id: PAST[0]!.id });
+    webviewView.receive({ type: "favourite", id: STARRED.id });
+    webviewView.receive({ type: "favourite", id: "00000000-0000-4000-8000-0000000000ee" });
+    webviewView.receive({ type: "favourite", id: 7 });
+    expect(actions.toggleFavourite.mock.calls).toEqual([["00000000-0000-4000-8000-000000000001"], [PAST[0]!.id], [STARRED.id]]);
+    webviewView.receive({ type: "resume", id: STARRED.id });
+    expect(actions.resume).toHaveBeenCalledWith(STARRED.id);
   });
 
   it("relays a request to read a search on the search page", () => {

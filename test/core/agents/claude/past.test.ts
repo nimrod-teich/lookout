@@ -124,6 +124,20 @@ describe("PastTranscripts", () => {
     );
   });
 
+  it("lists the sessions asked for by id besides, wherever they ran", () => {
+    const dir = tempConfigDir();
+    appendEntries(transcriptPath(dir, "/work/app", sessionId(1)), [{ type: "user", cwd: "/work/app", message: { content: "Here" } }]);
+    appendEntries(transcriptPath(dir, "/work/svc", sessionId(2)), [{ type: "user", cwd: "/work/svc", message: { content: "Elsewhere" } }]);
+    appendEntries(transcriptPath(dir, "/work/svc", sessionId(3)), [{ type: "user", cwd: "/work/svc", message: { content: "Archived" } }]);
+    const past = new PastTranscripts(dir);
+    const ids = [sessionId(1), sessionId(2), sessionId(3), sessionId(9)];
+    const list = past.list({ folders: ["/work/app"], all: false, limit: 10, also: ids }, new Set([sessionId(3)]));
+    // One already listed is not listed twice; an excluded one or one that is gone is left out.
+    expect(list.transcripts.map((p) => p.id)).toEqual([sessionId(1)]);
+    expect(list.also.map((p) => [p.id, p.title, p.cwd, p.resumable])).toEqual([[sessionId(2), "Elsewhere", "/work/svc", false]]);
+    expect(past.list({ folders: ["/work/app"], all: true, limit: 10, also: ids }, new Set()).also).toEqual([]);
+  });
+
   it("shows where a session started when two folders share a project directory", () => {
     const dir = tempConfigDir();
     // "/work/my.app" and "/work/my-app" are both kept in "-work-my-app".

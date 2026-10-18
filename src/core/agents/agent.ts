@@ -80,6 +80,8 @@ export interface PastScope {
   /** Every project's sessions, not only the folders'. */
   all: boolean;
   limit: number;
+  /** Sessions to list besides, by id, wherever they ran: the ones the user starred. */
+  also?: readonly string[];
 }
 
 /** Past sessions; `capped` when the scope holds older ones beyond the limit, left out. */
@@ -88,6 +90,8 @@ export interface PastList {
   capped: boolean;
   /** Some transcripts were left for the next list, to keep this one quick: list again soon. */
   incomplete: boolean;
+  /** The sessions of `scope.also` that `sessions` does not hold. */
+  also: PastSession[];
 }
 
 /** A search's outcome: the sessions with matches, and how many were not read within the time given. */
