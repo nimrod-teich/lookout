@@ -5,7 +5,7 @@ import { notifyFinished, notifyWaiting } from "../../src/vscode/notifications";
 import { Terminals } from "../../src/vscode/terminals";
 import { isWatched } from "../../src/vscode/watch";
 import { fakeLog, settle, view } from "./helpers";
-import { stub } from "./stub-vscode";
+import { stub, TabInputTerminal } from "./stub-vscode";
 
 const CLAUDE_OPEN = "claude-vscode.editor.open";
 const LAST_MESSAGE = "claude-vscode.focusLastMessage";
@@ -223,6 +223,55 @@ describe("isWatched", () => {
     stub.activeTerminal = terminal;
     expect(isWatched(v, t)).toBe(true);
     expect(isWatched(view({ host: "elsewhere" }), t)).toBe(false);
+  });
+
+  it("stops counting a terminal session as watched once the user goes to a tab or an editor, until they are back in its terminal", async () => {
+    const terminal = stub.addTerminal("claude", 71);
+    const other = stub.addTerminal("bash", 72);
+    const group = stub.addClaudeGroup(["Wire the cache", "Other"]);
+    stub.activate(group.tabs[0]!);
+    const t = await terminals();
+    const v = view({ host: "terminal", terminalPid: 71 });
+    stub.activeTerminal = terminal;
+    stub.activeTerminalChange.fire(terminal);
+    expect(isWatched(v, t)).toBe(true);
+
+    // Another tab comes to the front: the terminal stays VS Code's active one, but the user is not in it.
+    stub.activate(group.tabs[1]!);
+    stub.focusChange.fire();
+    expect(isWatched(v, t)).toBe(false);
+    // Back in the terminal; a change of tabs that leaves the same tab in front, as a new title, says nothing.
+    stub.activeTerminalChange.fire(terminal);
+    stub.focusChange.fire();
+    expect(isWatched(v, t)).toBe(true);
+
+    // Typing or clicking in an editor; a selection an extension sets does not count.
+    stub.selectionChange.fire({ kind: undefined });
+    expect(isWatched(v, t)).toBe(true);
+    stub.selectionChange.fire({ kind: 2 });
+    expect(isWatched(v, t)).toBe(false);
+
+    // A prompt sent in its terminal puts the user there; one sent elsewhere, or earlier than the last sighting, does not.
+    t.sawPrompt(71, Date.now());
+    expect(isWatched(v, t)).toBe(true);
+    t.sawPrompt("elsewhere", Date.now());
+    expect(isWatched(v, t)).toBe(false);
+    t.sawPrompt(71, Date.now() - 60_000);
+    expect(isWatched(v, t)).toBe(false);
+
+    // Lookout's jump shows the terminal; another terminal coming forward takes the user away.
+    expect(t.show(71)).toBe(true);
+    expect(isWatched(v, t)).toBe(true);
+    stub.activeTerminal = other;
+    stub.activeTerminalChange.fire(other);
+    expect(isWatched(v, t)).toBe(false);
+
+    // A terminal moved into the editor area: its tab coming forward puts the user in it.
+    stub.activeTerminal = terminal;
+    group.tabs.push({ label: "claude", input: new TabInputTerminal(), group });
+    stub.activate(group.tabs[2]!);
+    stub.focusChange.fire();
+    expect(isWatched(v, t)).toBe(true);
   });
 });
 

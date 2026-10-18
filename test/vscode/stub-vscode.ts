@@ -59,8 +59,12 @@ export const stub = {
   notificationAnswer: undefined as string | undefined,
   openTerminal: new EventEmitter<StubTerminal>(),
   closeTerminal: new EventEmitter<StubTerminal>(),
-  /** Fired for any change of the front tab, the active terminal, or window focus. */
+  /** Fired for any change of the front tab, or window focus. */
   focusChange: new EventEmitter<void>(),
+  /** Fired by tests after they change `activeTerminal`. */
+  activeTerminalChange: new EventEmitter<StubTerminal | undefined>(),
+  /** Fired by tests for a change of selection in a text editor. */
+  selectionChange: new EventEmitter<{ kind: number | undefined }>(),
   /** Fired by tests after they change `config`. */
   configChange: new EventEmitter<{ affectsConfiguration(section: string): boolean }>(),
   reset(): void {
@@ -81,6 +85,8 @@ export const stub = {
     this.openTerminal.dispose();
     this.closeTerminal.dispose();
     this.focusChange.dispose();
+    this.activeTerminalChange.dispose();
+    this.selectionChange.dispose();
     this.configChange.dispose();
   },
   /** Adds an editor group whose tabs are Claude Code panels with these labels. */
@@ -178,6 +184,10 @@ export class ThemeColor {
 export class TabInputWebview {
   constructor(public viewType: string) {}
 }
+
+export class TabInputTerminal {}
+
+export const TextEditorSelectionChangeKind = { Keyboard: 1, Mouse: 2, Command: 3 };
 
 export const StatusBarAlignment = { Left: 1, Right: 2 };
 
@@ -325,7 +335,8 @@ export const window = {
   },
   onDidOpenTerminal: stub.openTerminal.event,
   onDidCloseTerminal: stub.closeTerminal.event,
-  onDidChangeActiveTerminal: stub.focusChange.event,
+  onDidChangeActiveTerminal: stub.activeTerminalChange.event,
+  onDidChangeTextEditorSelection: stub.selectionChange.event,
   onDidChangeWindowState: stub.focusChange.event,
   createWebviewPanel,
   registerWebviewViewProvider: (id: string, provider: unknown) => {

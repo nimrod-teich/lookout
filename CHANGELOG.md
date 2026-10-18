@@ -13,6 +13,7 @@
 - **Favourites.** A small star on every card stars the session; starred sessions are gathered at the top of the board, running or not and whatever project they belong to, and a click jumps to them, resumes them, or opens their conversation. Stars are kept for the machine, so every window shows them.
 - **Tabs restored after a reload.** The agent restores its tabs after a window reload but starts a session only once its tab is opened; until then the board keeps the session, idle, on a card that says "Tab open · not started", and a click opens the tab. A tab or terminal with nothing sent is left off the board while it is idle.
 - **A jump lands on the newest message.** A jump to a session in the agent's panel, from a card, the jump list or a notification, brings its tab to the front at the newest message, or at the prompt it waits on, through Claude Code's own "Focus last message"; it no longer opens where the tab was last scrolled.
+- **Finished turns of terminal sessions.** A session in a terminal that finished a turn while you were in a tab or an editor was never marked finished, and a mark it did get cleared at the next change of tabs or window focus: VS Code keeps a terminal its active one while you work elsewhere. Lookout now goes by where you were last: the terminal you brought forward or prompted a session in, or a tab, an editor or a panel session.
 
 ## 0.1.0
 
