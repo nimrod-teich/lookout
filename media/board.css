@@ -1408,3 +1408,8 @@ body.vscode-high-contrast-light .card {
 .card:focus-within .actions .action {
   opacity: 1;
 }
+
+/* A finished turn already seen: it stays under Finished, quieter. */
+.card.seen {
+  opacity: 0.7;
+}
