@@ -351,6 +351,10 @@ export const commands = {
   },
 };
 
+export const env = {
+  remoteName: undefined as string | undefined,
+};
+
 export const extensions = {
   getExtension: () => stub.extension,
 };

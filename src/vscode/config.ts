@@ -8,6 +8,11 @@ export interface Config {
   usageRefresh: RefreshMode;
   notifyWaiting: boolean;
   notifyDone: boolean;
+  /** Also notify on the desktop while VS Code is not in front. */
+  notifyOs: boolean;
+  notifySound: boolean;
+  /** Desktop notifications per session and event come at most this often. */
+  notifyCooldownMs: number;
   /** An idle session whose last message asks the user something counts as needing them. */
   typedQuestions: boolean;
   /** The Claude Code config directory to read sessions and transcripts from. */
@@ -39,6 +44,9 @@ export function readConfig(): Config {
     usageRefresh: refreshMode(lookout.get<string>("usage.refresh")),
     notifyWaiting: lookout.get<boolean>("notifications.waiting", true),
     notifyDone: lookout.get<boolean>("notifications.done", false),
+    notifyOs: lookout.get<boolean>("notifications.os", true),
+    notifySound: lookout.get<boolean>("notifications.sound", false),
+    notifyCooldownMs: Math.max(0, lookout.get<number>("notifications.cooldownSeconds", 30)) * 1000,
     typedQuestions: lookout.get<boolean>("state.typedQuestions", true),
     claudeConfigDir: resolveConfigDir({
       setting: lookout.get<string>("claudeConfigDir"),

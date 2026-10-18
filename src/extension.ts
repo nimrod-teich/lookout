@@ -1,6 +1,10 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { noticeBody } from "./core/format";
 import { nextAttention } from "./core/model";
+import { NotifyGate, type NoticeKind } from "./core/notifyGate";
+import { desktopOf, jumpKeyLabel } from "./core/osNotify";
 import type { SessionView } from "./core/types";
 import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
@@ -11,6 +15,7 @@ import { Controller } from "./vscode/controller";
 import { jumpToSession, renameSession, revealed } from "./vscode/jump";
 import { createLog } from "./vscode/log";
 import { notifyFinished, notifyWaiting } from "./vscode/notifications";
+import { OsNotifier } from "./vscode/osNotifier";
 import { pickSession } from "./vscode/quickPick";
 import { StatusBar } from "./vscode/statusBar";
 import { Terminals } from "./vscode/terminals";
@@ -20,6 +25,15 @@ const JUMP_NEXT_ATTENTION = "lookout.jumpNextAttention";
 const MARK_ALL_SEEN = "lookout.markAllSeen";
 const SHOW_BOARD = "lookout.showBoard";
 const REFRESH_USAGE = "lookout.refreshUsage";
+
+/** WSL reports itself as Linux; its kernel says otherwise. */
+function insideWsl(): boolean {
+  try {
+    return /microsoft/i.test(fs.readFileSync("/proc/version", "utf8"));
+  } catch {
+    return false;
+  }
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   const log = createLog();
@@ -39,6 +53,16 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   const statusBar = new StatusBar(JUMP);
   let config = readConfig();
+  const desktop = desktopOf(process.platform, vscode.env.remoteName, process.platform === "linux" && insideWsl());
+  const osNotifier = new OsNotifier(desktop, log);
+  const gate = new NotifyGate(config.notifyCooldownMs);
+  /** A desktop notification too, while VS Code is not the window in front. */
+  const notifyDesktop = (view: SessionView, kind: NoticeKind) => {
+    if (!config.notifyOs || vscode.window.state.focused) return;
+    const needYou = controller.sessions.filter((v) => v.state === "waiting").map((v) => v.title);
+    const message = gate.decide({ id: view.id, kind, title: view.title, body: noticeBody(view, kind === "finished") }, needYou, `Lookout · ${jumpKeyLabel(desktop)} in VS Code jumps to the next one that needs you`, Date.now());
+    if (message) osNotifier.send(message, config.notifySound);
+  };
   /** The session the last "next" jump went to, so repeated presses cycle through them. */
   let lastJump: string | undefined;
 
@@ -106,11 +130,14 @@ export function activate(context: vscode.ExtensionContext): void {
     controller.onDidChange(() => findings.refresh()),
     controller.onDidStartWaiting(async (view) => {
       // A turn that ends on a question is a finished turn too.
-      const wanted = config.notifyWaiting || (view.reason?.kind === "typed" && config.notifyDone);
-      if (wanted && (await notifyWaiting(view))) await jump(view);
+      if (!config.notifyWaiting && !(view.reason?.kind === "typed" && config.notifyDone)) return;
+      notifyDesktop(view, "waiting");
+      if (await notifyWaiting(view)) await jump(view);
     }),
     controller.onDidFinish(async (view) => {
-      if (config.notifyDone && (await notifyFinished(view))) await jump(view);
+      if (!config.notifyDone) return;
+      notifyDesktop(view, "finished");
+      if (await notifyFinished(view)) await jump(view);
     }),
     terminals.onDidChange(() => controller.poll()),
     vscode.window.tabGroups.onDidChangeTabs(noticeFocus),
@@ -123,6 +150,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const next = readConfig();
       const moved = next.claudeConfigDir !== config.claudeConfigDir;
       config = next;
+      gate.setCooldown(config.notifyCooldownMs);
       if (moved) controller.start(config);
       else controller.configure(config);
       render();

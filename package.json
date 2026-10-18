@@ -106,6 +106,22 @@
           "default": false,
           "description": "Notify when a session of this window finishes a turn and you are not looking at it."
         },
+        "lookout.notifications.os": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "While VS Code is not the window in front, also show a notification on the desktop for what `#lookout.notifications.waiting#` and `#lookout.notifications.done#` announce. Uses the desktop's own tools (notify-send, osascript, Windows PowerShell, also from WSL); on SSH and container remotes there is no desktop to reach, and only the notification in the window shows."
+        },
+        "lookout.notifications.sound": {
+          "type": "boolean",
+          "default": false,
+          "description": "Play a short system sound with each desktop notification."
+        },
+        "lookout.notifications.cooldownSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "Desktop notifications for the same session and the same event come at most this often. While three or more sessions need you, one notification sums them up instead."
+        },
         "lookout.state.typedQuestions": {
           "type": "boolean",
           "default": true,

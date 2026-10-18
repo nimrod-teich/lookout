@@ -59,11 +59,11 @@ Running several AI coding agents at once means clicking through tabs to find out
   </tr>
   <tr>
     <td><b>Notify</b></td>
-    <td>A notification with a Jump button when a session starts to wait for you, saying why and quoting the ask, and optionally when one finishes. Neither fires for the session you are looking at.</td>
+    <td>A notification with a Jump button when a session starts to wait for you, saying why and quoting the ask, and optionally when one finishes. Neither fires for the session you are looking at. While VS Code is not the window in front, the same notification also shows on your desktop, with a sound if you want one; it cannot jump, so it names <code>Ctrl+Alt+Shift+J</code>. A session gets at most one desktop notification per event every 30 seconds, and while three or more sessions need you, one notification sums them up.</td>
   </tr>
   <tr>
     <td><b>No&nbsp;setup</b></td>
-    <td>Lookout reads the state the agent already records on disk. It installs no hooks, reads no credentials, and sends nothing off the machine. The only program it starts is Claude Code's own binary, to refresh the usage numbers when you ask.</td>
+    <td>Lookout reads the state the agent already records on disk. It installs no hooks, reads no credentials, and sends nothing off the machine. The programs it starts are Claude Code's own binary, to refresh the usage numbers, and your desktop's own notifier for desktop notifications.</td>
   </tr>
 </table>
 
@@ -112,6 +112,8 @@ Updating an installed copy restarts the extension host, which ends the agent ses
 - The extension runs where the agent runs: Linux, macOS or Windows, including WSL and remote hosts (SSH, containers), since it lives on the remote side there.
 - A recent version of a [supported agent](#supported-agents).
 
+On SSH and container remotes Lookout runs on the remote machine, where none of your desktop is, so desktop notifications are off there; the notification inside the VS Code window still comes. Under WSL they reach the Windows desktop.
+
 Windows and macOS support is new. The process handling is tested on both in CI; neither has been run against a live agent session yet.
 
 ## Commands and settings
@@ -131,6 +133,9 @@ Windows and macOS support is new. The process handling is tested on both in CI; 
 | `lookout.usage.refresh` | `auto` | `auto`: fetch when the numbers are older than 10 minutes, at most every 5 minutes. `manual`: fetch only on `Lookout: Refresh Usage`. `off`: never start the Claude Code binary; show only what it cached. |
 | `lookout.notifications.waiting` | `true` | Notify when a session of this window starts to wait for you and you are not looking at it. |
 | `lookout.notifications.done` | `false` | Notify when a session of this window finishes a turn and you are not looking at it. |
+| `lookout.notifications.os` | `true` | While VS Code is not in front, also show those notifications on the desktop. |
+| `lookout.notifications.sound` | `false` | Play a short system sound with each desktop notification. |
+| `lookout.notifications.cooldownSeconds` | `30` | A session gets at most one desktop notification per event in this time. While three or more sessions need you, one notification sums them up. |
 | `lookout.state.typedQuestions` | `true` | Count an idle session as needing you when its last reply asks you something. Off: such sessions are Finished or Idle like any other. |
 | `lookout.claudeConfigDir` | `""` | Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`. |
 
@@ -142,6 +147,7 @@ Windows and macOS support is new. The process handling is tested on both in CI; 
 | Where a session runs | A panel session descends from the window's extension host. A terminal session descends from the shell of one of the window's terminals. A session that descends from another window's extension host is named after that window: every window with Lookout records itself in a shared folder under the extension's global storage. |
 | When to look again | The agent's session folder is watched for changes, with a poll every 5 s as a backstop. |
 | Finished turns | Lookout sees a session go from working to idle while its tab or terminal is not the one in front. |
+| Desktop notifications | The desktop's own tools, run without a shell and stopped if they take longer than 2 seconds (Windows PowerShell, which starts slower, 5): `notify-send` on Linux (sound with `paplay` or `canberra-gtk-play`), `osascript`'s `display notification` on macOS (sound with `afplay`), and a Windows toast shown by Windows PowerShell on Windows and from WSL (the toast says it comes from Windows PowerShell). Which of them are there is checked once. Nothing is sent from SSH or container remotes. |
 
 With Claude Code:
 
