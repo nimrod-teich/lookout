@@ -200,3 +200,10 @@ function elapsed(ms: number): string {
   const h = Math.floor(m / 60);
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
 }
+
+/** One page of a list: the page shown (the last one when `page` is past it), how many there are, and the range of its items. */
+export function pageOf(total: number, page: number, size: number): { page: number; pages: number; first: number; end: number } {
+  const pages = Math.max(1, Math.ceil(total / size));
+  const shown = Math.min(Math.max(0, page), pages - 1);
+  return { page: shown, pages, first: shown * size, end: Math.min(total, (shown + 1) * size) };
+}

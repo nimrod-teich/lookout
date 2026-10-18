@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardLine, contextLevel, contextPercent, groupSessions, HARBOUR, hostChip, layoutBoats, pulseBars, secondLine, waterline } from "../../src/webview/model";
+import { cardLine, contextLevel, contextPercent, groupSessions, HARBOUR, hostChip, layoutBoats, pageOf, pulseBars, secondLine, waterline } from "../../src/webview/model";
 import { view } from "../vscode/helpers";
 
 describe("groupSessions", () => {
@@ -147,5 +147,17 @@ describe("card telemetry", () => {
 
   it("turns the context ring amber from 75% and red from 90%", () => {
     expect([0, 74, 75, 89, 90, 100].map(contextLevel)).toEqual(["ok", "ok", "high", "high", "full", "full"]);
+  });
+});
+
+describe("pageOf", () => {
+  it("cuts a list into pages and keeps the page shown inside it", () => {
+    expect(pageOf(57, 0, 20)).toEqual({ page: 0, pages: 3, first: 0, end: 20 });
+    expect(pageOf(57, 2, 20)).toEqual({ page: 2, pages: 3, first: 40, end: 57 });
+    // The list shrank under the last page, or a search left fewer: the last page that is left.
+    expect(pageOf(25, 2, 20)).toEqual({ page: 1, pages: 2, first: 20, end: 25 });
+    expect(pageOf(20, 1, 20)).toEqual({ page: 0, pages: 1, first: 0, end: 20 });
+    expect(pageOf(0, 3, 20)).toEqual({ page: 0, pages: 1, first: 0, end: 0 });
+    expect(pageOf(5, -1, 20)).toEqual({ page: 0, pages: 1, first: 0, end: 5 });
   });
 });

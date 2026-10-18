@@ -6,7 +6,7 @@ import type { PastView, SessionView } from "../core/types";
 import { barMeter, groupHeading, pickBar, sortGroups } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
 import { Harbour } from "./harbour";
-import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type Chip, type GroupKey } from "./model";
+import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isGroupKey, pageOf, pulseBars, secondLine, type Chip, type GroupKey } from "./model";
 import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "./protocol";
 
 interface BoardState {
@@ -75,6 +75,10 @@ function setStar(card: HTMLElement, id: string): void {
 }
 /** The user opened the Earlier group; kept across reloads. */
 let earlierOpen = vscode.getState()?.earlier === true;
+/** Earlier sessions on one page. */
+const PAGE_SIZE = 20;
+/** The page of earlier sessions shown, from 0: the newest first. Back to the first when the search or the scope changes. */
+let earlierPage = 0;
 
 function saveState(): void {
   vscode.setState({ hidden: [...hidden], earlier: earlierOpen, agents: [...hiddenAgents] });
@@ -256,6 +260,7 @@ function runSearch(): void {
   }
   query = next;
   hits = new Map();
+  earlierPage = 0;
   search.classList.toggle("active", query !== "");
   if (query === "") {
     search.classList.remove("searching");
@@ -910,6 +915,7 @@ function renderEarlier(after: HTMLElement): void {
         event.stopPropagation();
         if (earlier.scope === option.scope) return;
         earlier = { ...earlier, scope: option.scope };
+        earlierPage = 0;
         vscode.postMessage({ type: "earlierScope", scope: option.scope });
         render();
       });
@@ -921,7 +927,7 @@ function renderEarlier(after: HTMLElement): void {
       saveState();
       render();
     });
-    earlierEl.append(heading, el("p", "note hidden"), el("div", "cards"));
+    earlierEl.append(heading, el("p", "note hidden"), el("div", "cards"), pager());
   }
   earlierEl.classList.toggle("open", open);
   for (const button of earlierEl.querySelectorAll<HTMLElement>(".scope")) button.setAttribute("aria-pressed", String(button.dataset.scope === earlier.scope));
@@ -935,10 +941,18 @@ function renderEarlier(after: HTMLElement): void {
   if (earlierEl.previousElementSibling !== after) root.insertBefore(earlierEl, after.nextSibling);
   const list = earlierEl.querySelector(".cards")!;
   list.classList.toggle("hidden", !open);
+  const { page: at, pages, first, end } = pageOf(shown.length, earlierPage, PAGE_SIZE);
+  earlierPage = at;
+  const page = shown.slice(first, end);
+  const nav = earlierEl.querySelector<HTMLElement>(".pager")!;
+  nav.classList.toggle("hidden", !open || pages === 1);
+  nav.querySelector(".range")!.textContent = `${first + 1}–${end} of ${shown.length}`;
+  nav.querySelector<HTMLButtonElement>(".newer")!.disabled = earlierPage === 0;
+  nav.querySelector<HTMLButtonElement>(".older")!.disabled = earlierPage === pages - 1;
   const seen = new Set<string>();
   let previousCard: HTMLElement | undefined;
   if (open) {
-    for (const view of shown) {
+    for (const view of page) {
       seen.add(view.id);
       let card = pastCards.get(view.id);
       if (!card) {
@@ -956,6 +970,28 @@ function renderEarlier(after: HTMLElement): void {
     card.remove();
     pastCards.delete(id);
   }
+}
+
+/** Under the earlier sessions: the newer page, which ones show, the older page. */
+function pager(): HTMLElement {
+  const nav = el("nav", "pager hidden");
+  nav.setAttribute("aria-label", "Pages of earlier sessions");
+  const turn = (step: number) => {
+    earlierPage += step;
+    render();
+    // Read the new page from its top.
+    earlierEl?.querySelector(".heading")?.scrollIntoView({ block: "nearest" });
+  };
+  const newer = el("button", "newer", "‹ Newer");
+  newer.type = "button";
+  newer.title = "The newer earlier sessions";
+  newer.addEventListener("click", () => turn(-1));
+  const older = el("button", "older", "Older ›");
+  older.type = "button";
+  older.title = "The older earlier sessions";
+  older.addEventListener("click", () => turn(1));
+  nav.append(newer, el("span", "range"), older);
+  return nav;
 }
 
 function render(): void {

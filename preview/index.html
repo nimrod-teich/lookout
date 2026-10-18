@@ -78,6 +78,13 @@
     const onBoard = [...fixture.sessions, ...(fixture.past ?? []), ...(Array.isArray(usage) ? usage : usage ? [usage] : []).filter((g) => g.meters.length > 0)];
     const markers = markersSetting === "always" || (markersSetting === "auto" && new Set(onBoard.map((s) => s.agent ?? "claude-code")).size >= 2);
     for (const p of fixture.past ?? []) if (p.modifiedAt < 1e12) p.modifiedAt = now - p.modifiedAt;
+    // &many=57: that many earlier sessions, copies of the fixture's an hour apart, to page through.
+    const many = Number(params.get("many") ?? 0);
+    const base = fixture.past ?? [];
+    for (let i = 0; base.length && fixture.past.length < many; i++) {
+      const from = base[i % base.length];
+      fixture.past.push({ ...from, id: `${from.id}-${i}`, title: `${from.title} (${i + 1})`, modifiedAt: from.modifiedAt - (i + 1) * 3600_000 });
+    }
     const earlier = { scope: "folders", limit: 500, capped: false, ...fixture.earlier };
     if (params.get("scope")) earlier.scope = params.get("scope");
     if (params.get("capped") === "1") earlier.capped = true;

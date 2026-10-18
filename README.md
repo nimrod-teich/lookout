@@ -39,7 +39,7 @@ Running several AI coding agents at once means clicking through tabs and termina
   </tr>
   <tr>
     <td><b>Earlier</b></td>
-    <td>Under the live sessions, a collapsed group holds the sessions that are not running and that the agent has not archived, newest first: those of this window's folders, or those of every project on the machine, as the toggle on its heading says (<b>This window's folders</b> or <b>All projects</b>, kept per workspace). Each shows its project and the git branch it last worked on. The group lists the newest 500 and says so when there are more; older ones are not listed or searched. Click the heading to open it. Click a session of this window's folders to resume it in the agent's panel; a session of another project opens its conversation instead, because the agent resumes a session only in a window open on its folder.</td>
+    <td>Under the live sessions, a collapsed group holds the sessions that are not running and that the agent has not archived, newest first: those of this window's folders, or those of every project on the machine, as the toggle on its heading says (<b>This window's folders</b> or <b>All projects</b>, kept per workspace). Each shows its project and the git branch it last worked on. The group lists the newest 500 and says so when there are more; older ones are not listed or searched. It shows 20 at a time: <b>‹ Newer</b> and <b>Older ›</b> under them turn the page, and a search or a change of scope starts again from the newest. Click the heading to open it. Click a session of this window's folders to resume it in the agent's panel; a session of another project opens its conversation instead, because the agent resumes a session only in a window open on its folder.</td>
   </tr>
   <tr>
     <td><b>Search</b></td>
@@ -244,7 +244,7 @@ npm test
 npm run build   # bundle to dist/
 ```
 
-`src/core` has no dependency on the VS Code API and is tested against temporary directories. `src/vscode` is tested against a stub of the `vscode` module (`test/vscode/stub-vscode.ts`). `src/webview` is the board's page. Press F5 in VS Code to run the extension in an Extension Development Host, or open `preview/index.html` in a browser after `npm run build` to see the board with fixture sessions (`?theme=light`, `?fixture=empty`, `?fixture=reasons` for every kind of wait, `?earlier=1&scope=all` for every project's earlier sessions, `&capped=1` for the note past 500, `?fixture=agents` for three agents side by side, `&hideAgents=codex` with an agent hidden from the legend, `&markers=always` or `never` as the setting).
+`src/core` has no dependency on the VS Code API and is tested against temporary directories. `src/vscode` is tested against a stub of the `vscode` module (`test/vscode/stub-vscode.ts`). `src/webview` is the board's page. Press F5 in VS Code to run the extension in an Extension Development Host, or open `preview/index.html` in a browser after `npm run build` to see the board with fixture sessions (`?theme=light`, `?fixture=empty`, `?fixture=reasons` for every kind of wait, `?earlier=1&scope=all` for every project's earlier sessions, `&many=57` for that many to page through, `&capped=1` for the note past 500, `?fixture=agents` for three agents side by side, `&hideAgents=codex` with an agent hidden from the legend, `&markers=always` or `never` as the setting).
 
 ### Adding an agent
 
