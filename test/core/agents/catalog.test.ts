@@ -71,9 +71,13 @@ describe("the agent catalog", () => {
   it("shows in the README's Supported agents table exactly what the catalog lets each agent do", () => {
     const readme = read("README.md");
     const section = readme.slice(readme.indexOf("## Supported agents"), readme.indexOf("## Install"));
-    const rows = section
-      .split("\n")
-      .filter((line) => line.startsWith("|") && !line.startsWith("| ---"))
+    // The section's first table; the tables after it say where each agent runs and what it lacks.
+    const lines = section.split("\n");
+    const start = lines.findIndex((line) => line.startsWith("|"));
+    const end = lines.findIndex((line, i) => i > start && !line.startsWith("|"));
+    const rows = lines
+      .slice(start, end)
+      .filter((line) => !line.startsWith("| ---"))
       .map((line) => line.split("|").slice(1, -1).map((cell) => cell.trim()));
     const [header, ...body] = rows;
     expect(header).toEqual(["Agent", "Live sessions", "Jump to terminal", "Jump to tab", "Rename", "Resume", "Search", "Usage"]);
