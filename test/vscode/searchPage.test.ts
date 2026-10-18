@@ -23,6 +23,7 @@ function setup() {
     titleOf: (id: string) => ({ [OLD]: "Old deploy", [NEW]: "New deploy", [PICKED]: "Picked" })[id] ?? id,
     whereOf: (id: string) => (id === NEW ? "api · ⎇ fix-login" : undefined),
     isLive: (id: string) => id === NEW,
+    spanOf: (id: string) => (id === NEW ? { started: 1_000, lastActive: 5_000 } : {}),
     open: vi.fn(),
   };
   const page = new SearchPage({ fsPath: "/ext" } as never, actions);
@@ -51,7 +52,7 @@ describe("SearchPage", () => {
       query: "deploy since:today",
       pending: 2,
       sessions: [
-        { id: NEW, title: "New deploy", where: "api · ⎇ fix-login", live: true, count: 30, hits: [hit(9, 5_000), hit(7, 4_000)] },
+        { id: NEW, title: "New deploy", where: "api · ⎇ fix-login", live: true, started: 1_000, lastActive: 5_000, count: 30, hits: [hit(9, 5_000), hit(7, 4_000)] },
         { id: OLD, title: "Old deploy", where: undefined, live: false, count: 1, hits: [hit(4, 1_000)] },
         { id: PICKED, title: "Picked", where: undefined, live: false, count: 0, hits: [] },
       ],

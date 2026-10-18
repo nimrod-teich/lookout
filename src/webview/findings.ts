@@ -1,4 +1,5 @@
 /// <reference lib="dom" />
+import { describeSpan } from "../core/format";
 import { parseMarkdown, type Block, type Inline } from "../core/markdown";
 import { inRange, matchesAll, matchRanges, parseQuery, type TimeRange } from "../core/terms";
 import type { FindingsMessage, FromFindings, ToFindings } from "./findingsProtocol";
@@ -249,7 +250,9 @@ window.addEventListener("message", (event: MessageEvent<ToFindings>) => {
   titleEl.textContent = message.session.title;
   whereEl.textContent = message.session.where ?? "";
   whereEl.title = message.session.where ? "Project and git branch" : "";
-  countEl.textContent = `${message.messages.length} ${message.messages.length === 1 ? "message" : "messages"}`;
+  const times = message.messages.map((m) => m.at).filter((at): at is number => at !== undefined);
+  const span = times.length ? describeSpan(Math.min(...times), Math.max(...times)) : "";
+  countEl.textContent = `${message.messages.length} ${message.messages.length === 1 ? "message" : "messages"}${span ? ` · ${span}` : ""}`;
   if (same) {
     // The conversation grew: keep the search and the place.
     const index = matches[current];
