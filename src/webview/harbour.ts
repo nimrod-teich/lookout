@@ -128,11 +128,16 @@ export class Harbour {
       this.dress(entry.node, boat.agent, markers);
       entry.node.setAttribute("class", `boat state-${boat.state}${markers ? " marked" : ""}${this.jumpable(boat.id) ? "" : " nojump"}${entry.node.classList.contains("hover") ? " hover" : ""}`);
       entry.node.setAttribute("transform", `translate(${boat.x} ${boat.y})`);
-      const label = entry.node.querySelector(".label")!;
+      const label = entry.node.querySelector(".label") as SVGTextElement;
       label.textContent = boat.label ?? "";
-      // A label that would run off the right edge sits on the left of the boat instead.
-      const flip = boat.label !== undefined && boat.x > HARBOUR.width * 0.55;
-      label.setAttribute("x", flip ? "-9" : "9");
+      // The label reads from the boat's right; from its left when that would run off the right
+      // edge and the left has more room; and it slides along the boat when neither side has enough.
+      const length = boat.label === undefined ? 0 : textLength(label);
+      const roomRight = HARBOUR.width - boat.x - 9;
+      const roomLeft = boat.x - 9 - ROCK_WIDTH;
+      const flip = length > roomRight && roomLeft > roomRight;
+      const x = flip ? -9 + Math.max(0, length - roomLeft + 2) : 9 - Math.max(0, length - roomRight + 2);
+      label.setAttribute("x", String(Math.round(x * 10) / 10));
       label.setAttribute("text-anchor", flip ? "end" : "start");
     }
     for (const [id, entry] of this.boats) {
@@ -241,5 +246,17 @@ export class Harbour {
 
   dispose(): void {
     if (this.timer) clearInterval(this.timer);
+  }
+}
+
+/** How far the headland under the lighthouse reaches into the harbour: a label behind it cannot be read. */
+const ROCK_WIDTH = 58;
+
+/** The rendered width of an SVG text, or 0 where the DOM cannot measure (tests). */
+function textLength(text: SVGTextElement): number {
+  try {
+    return text.getComputedTextLength();
+  } catch {
+    return 0;
   }
 }
