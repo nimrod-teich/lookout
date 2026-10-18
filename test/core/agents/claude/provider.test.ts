@@ -366,6 +366,19 @@ describe("ClaudeProvider", () => {
     expect(provider.search(parseQuery("deploy since:2026-08-01", now), 3, 1_000).results.map((r) => r.id)).toEqual([stale]);
   });
 
+  it("counts the shell commands an idle session left running in the background, not its other children", () => {
+    const { configDir, proc, provider } = setup();
+    writeSession(configDir, proc, { pid: 11, sessionId: sessionId(1), status: "idle" });
+    proc.kids.set(11, [
+      { pid: 21, args: "/bin/bash -c source /home/u/.claude/shell-snapshots/snapshot-bash-1-x.sh && eval 'make backfill'", startedMs: 5_000 },
+      { pid: 22, args: "/bin/bash -c source /home/u/.claude/shell-snapshots/snapshot-bash-1-x.sh && eval 'sleep 9'", startedMs: 3_000 },
+      { pid: 23, args: "node /usr/lib/node_modules/@playwright/mcp/cli.js", startedMs: 1_000 },
+    ]);
+    expect(provider.poll(10_000)[0]?.background).toEqual({ count: 2, since: 3_000 });
+    proc.kids.set(11, [{ pid: 23, args: "node mcp-server.js" }]);
+    expect(provider.poll(11_000)[0]?.background).toBeUndefined();
+  });
+
   it("drops a session when its process exits", () => {
     const { configDir, proc, provider } = setup();
     writeSession(configDir, proc, { pid: 11, sessionId: sessionId(1) });

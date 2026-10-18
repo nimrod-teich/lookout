@@ -68,8 +68,13 @@ export function cardLine(view: SessionView, now: number): CardLine {
       return quiet === undefined ? {} : { label: `quiet ${formatElapsed(quiet)}` };
     }
     case "done":
-    case "idle":
-      return {};
+    case "idle": {
+      // Its turn is over, but commands it started still run.
+      const job = view.background;
+      if (!job) return {};
+      const count = job.count === 1 ? "1 background job" : `${job.count} background jobs`;
+      return { label: job.since === undefined ? count : `${count} · ${formatElapsed(now - job.since)}` };
+    }
     case "unknown":
       return { text: view.evidence?.note };
   }

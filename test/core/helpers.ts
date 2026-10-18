@@ -23,7 +23,12 @@ export const DOMAIN = "linux:feedfacefeedfacefeedfacefeedface:pid:[4026531836]";
 
 export class FakeProc implements ProcessTable {
   readonly procs = new Map<number, ProcessInfo>();
+  readonly kids = new Map<number, { pid: number; args: string; startedMs?: number }[]>();
   domain: string | undefined = DOMAIN;
+
+  children(pid: number): { pid: number; args: string; startedMs?: number }[] {
+    return this.kids.get(pid) ?? [];
+  }
 
   get(pid: number): ProcessInfo | null {
     return this.procs.get(pid) ?? null;
