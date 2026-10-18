@@ -4,7 +4,6 @@ import type { UsageGroup } from "../../src/core/usageGroups";
 import { Board } from "../../src/vscode/board";
 import { toItem } from "../../src/vscode/quickPick";
 import { StatusBar, type StatusBarInput } from "../../src/vscode/statusBar";
-import type { SessionView } from "../../src/core/types";
 import { view } from "./helpers";
 import { createWebviewView, stub } from "./stub-vscode";
 
@@ -35,8 +34,8 @@ const codex: UsageGroup = {
   ],
 };
 
-function input(views: SessionView[], overrides: Partial<StatusBarInput> = {}): StatusBarInput {
-  return { views, usage: undefined, enabled: true, showUsage: true, showReset: false, canRefreshUsage: true, ...overrides };
+function input(overrides: Partial<StatusBarInput> = {}): StatusBarInput {
+  return { usage: undefined, enabled: true, showUsage: true, showReset: false, canRefreshUsage: true, ...overrides };
 }
 
 describe("the status bar with more than one agent", () => {
@@ -45,7 +44,7 @@ describe("the status bar with more than one agent", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     stub.reset();
-    bar = new StatusBar("lookout.jump");
+    bar = new StatusBar("lookout.showBoard");
   });
 
   afterEach(() => {
@@ -54,37 +53,34 @@ describe("the status bar with more than one agent", () => {
   });
 
   it("shows the window under the most pressure, with its agent's boat before the bar, and every group in the hover", () => {
-    bar.render(input([view({ state: "working" })], { usageGroups: [claude, codex] }), 0);
-    expect(lastSet("text")).toMatch(/ {3}\$\(lookout-cutter\) ▰▰▰▰▰▰▱▱▱▱ 64%$/);
+    bar.render(input({ usageGroups: [claude, codex] }), 0);
+    expect(lastSet("text")).toBe("$(lookout-lighthouse) $(lookout-cutter) ▰▰▰▰▰▰▱▱▱▱ 64%");
     expect(lastSet("color")).toMatchObject({ id: "charts.yellow" });
     const tip = (lastSet("tooltip") as { value: string }).value;
     expect(tip).toContain("$(lookout-sloop)</span> **Claude usage**");
     expect(tip).toContain("$(lookout-cutter)</span> **Codex usage**");
     expect(tip.indexOf("Claude usage")).toBeLessThan(tip.indexOf("Codex usage"));
     expect(tip).toContain("5h limit: 64%");
-    expect((lastSet("accessibilityInformation") as { label: string }).label).toMatch(/Usage Codex 5h limit 64%$/);
+    expect((lastSet("accessibilityInformation") as { label: string }).label).toBe("Lookout: usage Codex 5h limit 64%");
   });
 
   it("shows the agent the setting pins, and leaves the bar to auto while that agent reports nothing", () => {
-    bar.render(input([], { usageGroups: [claude, codex], usageAgent: "claude" }), 0);
+    bar.render(input({ usageGroups: [claude, codex], usageAgent: "claude" }), 0);
     expect(lastSet("text")).toMatch(/\$\(lookout-sloop\) ▰▰▱▱▱▱▱▱▱▱ 18%$/);
-    bar.render(input([], { usageGroups: [claude, { ...codex, meters: [] }], usageAgent: "codex" }), 0);
+    bar.render(input({ usageGroups: [claude, { ...codex, meters: [] }], usageAgent: "codex" }), 0);
     // Claude alone reports numbers: no mark, as with Claude alone.
     expect(lastSet("text")).toBe("$(lookout-lighthouse) ▰▰▱▱▱▱▱▱▱▱ 18%");
   });
 
-  it("names each session's agent in the hover while the markers show, and not otherwise", () => {
-    const views = [view({ id: "a", title: "Fix the build" }), view({ id: "b", agent: "codex", title: "Bump pg", host: "terminal" })];
-    bar.render(input(views, { usageGroups: [claude], markers: true }), 0);
+  it("marks the usage with the agent's boat while the markers show, and not otherwise", () => {
+    bar.render(input({ usageGroups: [claude], markers: true }), 0);
     let tip = (lastSet("tooltip") as { value: string }).value;
-    expect(tip).toContain("$(lookout-cutter)</span> $(circle-outline) **Bump pg**");
-    expect(tip).toContain("Codex · app · Idle");
     expect(tip).toContain("$(lookout-sloop)</span> **Claude usage**");
-    expect(lastSet("text")).toMatch(/\$\(lookout-sloop\) ▰▰▱▱▱▱▱▱▱▱ 18%$/);
-    bar.render(input(views, { usageGroups: [claude], markers: false }), 0);
+    expect(lastSet("text")).toBe("$(lookout-lighthouse) $(lookout-sloop) ▰▰▱▱▱▱▱▱▱▱ 18%");
+    bar.render(input({ usageGroups: [claude], markers: false }), 0);
     tip = (lastSet("tooltip") as { value: string }).value;
-    expect(tip).not.toContain("lookout-cutter");
-    expect(tip).toContain("---\n\n**Claude usage**");
+    expect(tip).not.toContain("lookout-sloop");
+    expect(tip.startsWith("**Claude usage**")).toBe(true);
   });
 });
 

@@ -98,7 +98,7 @@
         "lookout.statusBar.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Show the session counts in the status bar."
+          "description": "Show Lookout's item in the status bar: the usage, and a click to open the board."
         },
         "lookout.statusBar.showUsage": {
           "type": "boolean",

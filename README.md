@@ -20,7 +20,7 @@
   <a href="#how-it-works">How it works</a>
 </p>
 
-Running several AI coding agents at once means clicking through tabs and terminals to find out which one finished and which one is stuck on a question. Lookout keeps that answer in the status bar, takes you to the right tab or terminal with one keystroke, and finds any conversation, running or not, by a word you remember from it. Claude Code in its VS Code panel or a terminal, Codex and Copilot CLI in terminals: one board, one jump key, one search, each agent with its own colour and boat once more than one is on the board. It reads only what the agents already write on disk.
+Running several AI coding agents at once means clicking through tabs and terminals to find out which one finished and which one is stuck on a question. Lookout keeps that answer on one board in the side bar, takes you to the right tab or terminal with one keystroke, and finds any conversation, running or not, by a word you remember from it. Claude Code in its VS Code panel or a terminal, Codex and Copilot CLI in terminals: one board, one jump key, one search, each agent with its own colour and boat once more than one is on the board. It reads only what the agents already write on disk.
 
 ## What it does
 
@@ -62,8 +62,8 @@ Running several AI coding agents at once means clicking through tabs and termina
     <td>Every limit of the account on the board and in the status bar's hover, as Claude Code's own panel shows them: <b>Session (5hr)</b>, <b>Weekly (7 day)</b> and the per-model weekly limits such as <b>Weekly Fable</b>, each with its share used and when it resets ("Resets in 3h"). The session limit also shows as a coloured bar in the status bar item, with the time to its reset: <code>32% · 1h12m</code>. The bars turn amber from half and red from 80%; a card's context ring turns amber from 75% and red from 90%. Lookout says once per window when the 5-hour window reaches 70% and 90% and the week 90%, in the VS Code window in front when there is one. Numbers more than 30 minutes old, or from before a reset, turn grey. Claude Code fetches the numbers again when they are older than 10 minutes or a window has reset, with its own credentials: at most once every 3 minutes on the machine, and less often while fetches fail. <code>Lookout: Refresh Usage</code> fetches at once, unless a fetch started in the last 3 minutes. When more than one agent reports usage, each has its own group, its limits named as that agent names them, and the status bar's bar shows the window under the most pressure, after that agent's boat (<code>lookout.statusBar.usageAgent</code> pins one agent). Codex's group shows its <b>5h limit</b> and <b>Weekly limit</b> as Codex's own <code>/status</code> names them, from what Codex records with each reply, so its numbers are as fresh as its last reply and turn grey after 30 minutes like Claude's; Lookout cannot fetch them anew. The same alerts go out for Codex's windows, named for Codex.</td>
   </tr>
   <tr>
-    <td><b>Watch</b></td>
-    <td>One status bar item shows how many sessions are working (a clock for those gone quiet), how many wait for you, how many finished since you last looked, and your 5-hour usage as a ten-cell bar coloured by consumption, with the time to its reset. Its background lights up while any session waits on a prompt the agent reports. Hover for every session's title, project, worktree and state, what each waiting one asks, and every usage limit.</td>
+    <td><b>Status bar</b></td>
+    <td>One status bar item, the lighthouse, shows your usage and nothing else: the 5-hour window as a ten-cell bar coloured by consumption, with the time to its reset, its background red when a limit is nearly used up. With no usage reported it is the lighthouse alone. Hover for every agent's limits; click it to open the board.</td>
   </tr>
   <tr>
     <td><b>Jump</b></td>
@@ -141,16 +141,16 @@ Windows and macOS support is new. The process handling is tested on both in CI; 
 
 | Command | Key | What it does |
 | --- | --- | --- |
-| `Lookout: Jump to Session` | `Ctrl+Alt+J` | Lists the sessions and brings the chosen one's tab or terminal to the front. Clicking the status bar item runs it too. |
+| `Lookout: Jump to Session` | `Ctrl+Alt+J` | Lists the sessions and brings the chosen one's tab or terminal to the front. |
 | `Lookout: Jump to Next Session That Needs You` | `Ctrl+Alt+Shift+J` | Jumps to the session that has waited longest for you, then to the finished ones. Each press moves to the next. |
 | `Lookout: Mark All Sessions as Seen` | | Clears every "finished" mark. |
-| `Lookout: Show Sessions` | | Opens the board. |
+| `Lookout: Show Sessions` | | Opens the board. Clicking the status bar item runs it too. |
 | `Lookout: Refresh Usage` | | Has Claude Code fetch the account's usage again. |
 | `Lookout: Search All Sessions` | | Opens the search page: every conversation's matches in an editor tab. |
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `lookout.statusBar.enabled` | `true` | Show the session counts in the status bar. |
+| `lookout.statusBar.enabled` | `true` | Show Lookout's item in the status bar: the usage, and a click to open the board. |
 | `lookout.statusBar.showUsage` | `true` | Show the 5-hour usage as a coloured bar in the status bar item; the hover lists every limit. |
 | `lookout.statusBar.usageReset` | `true` | After the usage bar, the time until the 5-hour window resets: `32% · 1h12m`. |
 | `lookout.usage.refresh` | `auto` | `auto`: fetch when the numbers are older than 10 minutes or a window has reset; at most once every 3 minutes on the machine, and after a fetch that brought no new numbers the wait doubles each time, up to 30 minutes. `manual`: fetch only on `Lookout: Refresh Usage`. `off`: never start the Claude Code binary; show only what it cached. While `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set for Claude Code, Lookout does not fetch either. |
@@ -254,7 +254,7 @@ npm run build   # bundle to dist/
 
 ### Adding an agent
 
-An agent is an `AgentProvider` (`src/core/agents/agent.ts`): it reports the agent's live sessions with a status, a title and a current directory. Location, ordering, finished marks, the status bar, the jump list and notifications work on those reports and need no change. `src/core/agents/claude` is the reference provider; the controller (`src/vscode/controller.ts`) lists the providers it polls. An agent that hosts sessions in its own editor panel also gets a `PanelAdapter` (`src/vscode/agents`) to bring a session's tab to the front.
+An agent is an `AgentProvider` (`src/core/agents/agent.ts`): it reports the agent's live sessions with a status, a title and a current directory. Location, ordering, finished marks, the jump list and notifications work on those reports and need no change. `src/core/agents/claude` is the reference provider; the controller (`src/vscode/controller.ts`) lists the providers it polls. An agent that hosts sessions in its own editor panel also gets a `PanelAdapter` (`src/vscode/agents`) to bring a session's tab to the front.
 
 Every agent also has a row in the catalog, `src/core/agents/catalog.ts`: its id, its name, its colour (a CSS variable, defined in `media/board.css` for dark and light themes and in `media/search.css` and `media/findings.css`), its boat (an SVG path in a 16-unit box, also in `icons/` for the icon font: `npm run icons`) and its capabilities. Nothing else names, colours or draws an agent, and the UI offers only what the capabilities allow. A test holds the colours, the icon files, the settings and the Supported agents table to the catalog. `?fixture=agents` in the board's preview shows three agents side by side.
 

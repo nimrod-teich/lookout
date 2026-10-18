@@ -59,6 +59,21 @@ function statusText(): string | undefined {
   return stub.ops.filter(([target, action]) => target === "statusBar:lookout.status" && action === "set:text").at(-1)?.[2] as string | undefined;
 }
 
+/** A board opened for `boardStates`, once per test. */
+let statesBoard: ReturnType<typeof createWebviewView> | undefined;
+
+/** What the board shows of the sessions, by state, e.g. "working 1" or "waiting 1, done 2"; empty with none. Opens the board on first use. */
+function boardStates(view?: ReturnType<typeof createWebviewView>): string {
+  if (!view && !statesBoard) {
+    statesBoard = createWebviewView();
+    (stub.webviewProviders.get("lookout.board") as { resolveWebviewView(view: unknown): void }).resolveWebviewView(statesBoard);
+  }
+  const last = (view ?? statesBoard)!.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions: { state: string }[] } | undefined;
+  const counts = new Map<string, number>();
+  for (const session of last?.sessions ?? []) counts.set(session.state, (counts.get(session.state) ?? 0) + 1);
+  return ["waiting", "done", "working", "idle", "unknown"].filter((state) => counts.get(state)).map((state) => `${state} ${counts.get(state)}`).join(", ");
+}
+
 /**
  * Waits until the session is placed in this window's panel: on platforms that
  * list processes in the background, that takes until the list arrives.
@@ -85,6 +100,7 @@ beforeEach(() => {
   subscriptions = [];
   saved = {};
   savedGlobal = {};
+  statesBoard = undefined;
 });
 
 afterEach(() => {
@@ -100,7 +116,7 @@ describe("the extension", () => {
     activate(context());
     const registry = path.join(configDir, "global-storage", "windows", `${process.pid}.json`);
     expect(JSON.parse(fs.readFileSync(registry, "utf8"))).toEqual({ pid: process.pid, label: "stub-workspace", terminals: [] });
-    await vi.waitFor(() => expect(statusText()).toMatch(/^\$\(lookout-lighthouse\) [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("working 1"), WAIT);
 
     // Jump: the picker offers the session; choosing it calls the Claude command with its id.
     // On platforms that list processes in the background, the session is placed once the list arrives.
@@ -113,15 +129,15 @@ describe("the extension", () => {
 
     // The session asks for permission while its tab is not in front: one notification.
     writeSession({ status: "waiting", waitingFor: "permission prompt", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(bell-dot) 1"), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("waiting 1"), WAIT);
     // No tool call in the transcript to name: announced after two seconds' grace, with the agent's own word.
     await vi.waitFor(() => expect(infoMessages().filter((m) => m.includes("needs you"))).toEqual(['"Empty tab" needs you: Permission prompt']), WAIT);
 
     // It works again, then finishes unwatched: marked finished, no notification by default.
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("working 1"), WAIT);
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1"), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
     expect(infoMessages().some((m) => m.includes("finished"))).toBe(false);
     expect(saved["lookout.done"]).toEqual([SESSION]);
 
@@ -129,19 +145,19 @@ describe("the extension", () => {
     stub.ops.length = 0;
     await stub.commands.get("lookout.jumpNextAttention")!();
     expect(stub.ops.some(([target, command]) => target === "commands" && command === CLAUDE_OPEN)).toBe(true);
-    expect(statusText()).toBe("$(lookout-lighthouse) 1 idle");
+    expect(boardStates()).toBe("idle 1");
     expect(saved["lookout.done"]).toEqual([]);
 
     // Finish again, then clear with the command.
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("working 1"), WAIT);
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1"), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
     await stub.commands.get("lookout.markAllSeen")!();
-    expect(statusText()).toBe("$(lookout-lighthouse) 1 idle");
+    expect(boardStates()).toBe("idle 1");
 
     child.kill();
-    await vi.waitFor(() => expect(stub.ops.some(([target, action]) => target === "statusBar:lookout.status" && action === "hide")).toBe(true), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe(""), WAIT);
 
     for (const subscription of subscriptions.splice(0)) subscription.dispose();
     expect(fs.existsSync(registry)).toBe(false);
@@ -155,9 +171,10 @@ describe("the extension", () => {
     board.resolveWebviewView(boardView);
     const sessions = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions?: { id: string }[] } | undefined)?.sessions;
     await vi.waitFor(() => expect(sessions()).toEqual([]), WAIT);
-    expect(stub.ops.some(([target, action]) => target === "statusBar:lookout.status" && action === "show")).toBe(false);
+    // The status bar says nothing of sessions: the lighthouse alone, with no usage cached.
+    expect(statusText()).toBe("$(lookout-lighthouse)");
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await vi.waitFor(() => expect(boardStates(boardView)).toBe("working 1"), WAIT);
     expect(sessions()?.map((v) => v.id)).toEqual([SESSION]);
   }, 60_000);
 
@@ -191,13 +208,13 @@ describe("the extension", () => {
       const group = stub.addClaudeGroup(["Other"]);
       stub.activate(group.tabs[0]!);
       activate(context());
-      await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) 1 idle"), WAIT);
+      await vi.waitFor(() => expect(boardStates()).toBe("idle 1"), WAIT);
 
       // The user sends the prompt in its terminal, then goes to a tab while it works.
       stub.activeTerminal = terminal;
       stub.activeTerminalChange.fire(terminal);
       record("busy");
-      await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+      await vi.waitFor(() => expect(boardStates()).toBe("working 1"), WAIT);
       stub.activate(group.tabs[0]!);
       group.tabs.push({ label: "Notes", input: new TabInputWebview("mainThreadWebview-markdown"), group });
       stub.activate(group.tabs[1]!);
@@ -206,15 +223,15 @@ describe("the extension", () => {
       // Its terminal is still VS Code's active one: the finished turn is marked all the same, and stays marked
       // through changes of tabs and window focus.
       record("idle");
-      await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1"), WAIT);
+      await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
       stub.focusChange.fire();
       stub.focusChange.fire();
       await new Promise((resolve) => setTimeout(resolve, 1_500));
-      expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1");
+      expect(boardStates()).toBe("done 1");
 
       // Its terminal comes forward: seen.
       stub.activeTerminalChange.fire(terminal);
-      await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) 1 idle"), WAIT);
+      await vi.waitFor(() => expect(boardStates()).toBe("idle 1"), WAIT);
       process.kill(sessionPid);
     } finally {
       shell.kill();
@@ -228,7 +245,7 @@ describe("the extension", () => {
     append({ type: "user", cwd: "/work/app", message: { content: "run the tests" } });
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
     activate(context());
-    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("working 1"), WAIT);
     await placed();
 
     // Claude Code records the wait first; the tool call reaches the transcript a moment later.
@@ -242,17 +259,17 @@ describe("the extension", () => {
       { type: "assistant", cwd: "/work/app", timestamp: "2026-10-16T10:00:00.000Z", message: { id: "m2", content: [{ type: "text", text: "Tests pass. Want me to open the PR?" }] } },
     );
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("working 1"), WAIT);
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });
     await vi.waitFor(() => expect(infoMessages()).toContain('"Empty tab" asked you a question: Tests pass. Want me to open the PR?'), WAIT);
-    expect(statusText()).toBe("$(lookout-lighthouse) $(bell-dot) 1");
+    expect(boardStates()).toBe("waiting 1");
 
     // Dismissed from its card: idle, and remembered for a reload.
     const board = stub.webviewProviders.get("lookout.board") as { resolveWebviewView(view: unknown): void };
     const boardView = createWebviewView();
     board.resolveWebviewView(boardView);
     boardView.receive({ type: "dismiss", id: SESSION });
-    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) 1 idle"), WAIT);
+    await vi.waitFor(() => expect(boardStates(boardView)).toBe("idle 1"), WAIT);
     expect(saved["lookout.dismissed"]).toEqual({ [SESSION]: String(Date.parse("2026-10-16T10:00:00.000Z")) });
   }, 90_000);
 
@@ -265,7 +282,7 @@ describe("the extension", () => {
     append({ type: "user", cwd: "/work/app", message: { content: "update the changelog" } });
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
     activate(context());
-    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("working 1"), WAIT);
     await placed();
 
     append({ type: "assistant", cwd: "/work/app", message: { id: "m1", content: [{ type: "text", text: "Done. The changelog lists the fix." }] } });
@@ -275,17 +292,17 @@ describe("the extension", () => {
     // A turn that ends on a question is a finished turn too: announced although waiting notifications are off.
     append({ type: "user", cwd: "/work/app", message: { content: "and the release notes" } });
     writeSession({ status: "busy", statusUpdatedAt: Date.now() });
-    await vi.waitFor(() => expect(statusText()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1$/), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("working 1"), WAIT);
     append({ type: "assistant", cwd: "/work/app", timestamp: "2026-10-16T11:00:00.000Z", message: { id: "m2", content: [{ type: "text", text: "Written. Want me to open the PR?" }] } });
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });
     await vi.waitFor(() => expect(infoMessages()).toContain('"Empty tab" asked you a question: Written. Want me to open the PR?'), WAIT);
     expect(infoMessages().filter((m) => m.endsWith("finished."))).toHaveLength(1);
-    expect(statusText()).toBe("$(lookout-lighthouse) $(bell-dot) 1");
+    expect(boardStates()).toBe("waiting 1");
 
     // Typed questions off: the same turn is simply finished.
     stub.config["lookout.state.typedQuestions"] = false;
     stub.configChange.fire({ affectsConfiguration: () => true });
-    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1"), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
   }, 90_000);
 
   it("shows the usage Claude Code cached", async () => {
@@ -626,8 +643,8 @@ describe("the extension", () => {
       await vi.waitFor(() => expect(sessions()?.map((v) => [v.id, v.state, v.restored])).toEqual([[HERE, "idle", true]]), WAIT);
       // Not listed under Earlier as well; another project's tab opens blank, so it is not shown.
       expect(listed()?.past).toEqual([]);
-      // Not counted as running.
-      expect(stub.ops.some(([target, action]) => target === "statusBar:lookout.status" && action === "show")).toBe(false);
+      // The status bar says nothing of it.
+      expect(statusText()).toBe("$(lookout-lighthouse)");
       // A click opens its tab, which starts it.
       stub.commands.set(CLAUDE_OPEN, () => undefined);
       boardView.receive({ type: "jump", id: HERE });
@@ -656,6 +673,6 @@ describe("the extension", () => {
     saved["lookout.done"] = [SESSION];
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });
     activate(context());
-    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) $(check) 1"), WAIT);
+    await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
   }, 60_000);
 });
