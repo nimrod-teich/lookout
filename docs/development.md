@@ -20,3 +20,5 @@ Every agent also has a row in the catalog, `src/core/agents/catalog.ts`: its id,
 ## Releasing
 
 Set the version in `package.json`, add its section to `CHANGELOG.md`, and push a tag `v<version>`. The release workflow publishes a GitHub Release with the `.vsix` attached.
+
+The same workflow then publishes the `.vsix` to the Visual Studio Marketplace and to Open VSX when the repository holds the secrets `VSCE_PAT` (a Marketplace-scoped Azure DevOps token for publisher `nimrod-teich`) and `OVSX_PAT` (an Open VSX access token for the same namespace); a missing secret skips that registry, and the `.vsix` on the Release can be uploaded by hand instead.
