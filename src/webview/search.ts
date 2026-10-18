@@ -1,4 +1,5 @@
 /// <reference lib="dom" />
+import { describeSpan } from "../core/format";
 import type { SearchHit } from "../core/history";
 import type { FromSearch, SearchPageSession, ToSearch } from "./searchProtocol";
 
@@ -112,6 +113,8 @@ function sessionBlock(session: SearchPageSession): HTMLElement {
   head.title = "Open this conversation at its newest match";
   head.append(el("span", "session-title", session.title));
   if (session.where) head.append(el("span", "where", session.where));
+  const span = describeSpan(session.started, session.lastActive);
+  if (span) head.append(el("span", "where", span));
   head.append(el("span", "tag", session.live ? "running" : "earlier"));
   if (session.count > 0) head.append(el("span", "matches", `${session.count} ${session.count === 1 ? "match" : "matches"}`));
   head.addEventListener("click", () => open(session.id));

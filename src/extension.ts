@@ -147,6 +147,10 @@ export function activate(context: vscode.ExtensionContext): void {
     titleOf: (id) => controller.titleOf(id) ?? id,
     whereOf: (id) => controller.whereOf(id),
     isLive: (id) => controller.sessions.some((view) => view.id === id),
+    spanOf: (id) => {
+      const times = (controller.history(id) ?? []).map((message) => message.at).filter((at): at is number => at !== undefined);
+      return times.length ? { started: Math.min(...times), lastActive: Math.max(...times) } : {};
+    },
     open: openHit,
   });
   const board = new Board(context.extensionUri, {

@@ -164,3 +164,12 @@ export function formatUsd(usd: number): string {
   if (usd < 1000) return `$${Math.round(usd)}`;
   return `$${(usd / 1000).toFixed(1)}k`;
 }
+
+/** "started Oct 4, 11:46 · last active Oct 6, 09:12": when a conversation began and when it last moved. */
+export function describeSpan(started: number | undefined, last: number | undefined): string {
+  const at = (ms: number) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const parts: string[] = [];
+  if (started !== undefined) parts.push(`started ${at(started)}`);
+  if (last !== undefined && last !== started) parts.push(`last active ${at(last)}`);
+  return parts.join(" · ");
+}

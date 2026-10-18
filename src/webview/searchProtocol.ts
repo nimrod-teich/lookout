@@ -8,6 +8,9 @@ export interface SearchPageSession {
   where?: string;
   /** Running now, as opposed to earlier. */
   live: boolean;
+  /** Epoch ms of its first and its last message. */
+  started?: number;
+  lastActive?: number;
   /** How many of its messages match; operators alone pick sessions without words to match. */
   count: number;
   /** The newest matches, cut wide. */

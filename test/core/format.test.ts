@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockTime, countStates, describeAlert, describeEvidence, describeLocation, describeReason, describeState, formatCountdown, formatElapsed, formatResetIn, formatTokens, formatUntil, formatUsd, noticeBody, quietFor, shortModel, windowName } from "../../src/core/format";
+import { clockTime, countStates, describeAlert, describeEvidence, describeLocation, describeReason, describeSpan, describeState, formatCountdown, formatElapsed, formatResetIn, formatTokens, formatUntil, formatUsd, noticeBody, quietFor, shortModel, windowName } from "../../src/core/format";
 import { view } from "../vscode/helpers";
 
 describe("format", () => {
@@ -78,6 +78,14 @@ describe("format", () => {
     expect(windowName({ key: "weekly_all", label: "Week", percent: 1 })).toBe("weekly limit");
     expect(windowName({ key: "weekly_scoped:Fable", label: "Week · Fable", percent: 1 })).toBe("weekly Fable limit");
     expect(windowName({ key: "other", label: "other", percent: 1 })).toBe("other limit");
+  });
+
+  it("says when a conversation started and when it was last active", () => {
+    const a = new Date(2026, 9, 4, 11, 46).getTime();
+    const b = new Date(2026, 9, 6, 9, 12).getTime();
+    expect(describeSpan(a, b)).toMatch(/^started .*4.*11:46.* · last active .*6.*09:12/);
+    expect(describeSpan(a, a)).toMatch(/^started [^·]+$/);
+    expect(describeSpan(undefined, undefined)).toBe("");
   });
 
   it("says when a limit resets as Claude Code's panel says it", () => {

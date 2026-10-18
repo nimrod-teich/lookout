@@ -14,6 +14,8 @@ export interface SearchPageActions {
   titleOf(id: string): string;
   /** Its project, worktree and git branch. */
   whereOf(id: string): string | undefined;
+  /** When its conversation began and last moved: its first and last message. */
+  spanOf(id: string): { started?: number; lastActive?: number };
   /** It is running now. */
   isLive(id: string): boolean;
   /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
@@ -50,6 +52,7 @@ export class SearchPage implements vscode.Disposable {
       title: this.actions.titleOf(result.id),
       where: this.actions.whereOf(result.id),
       live: this.actions.isLive(result.id),
+      ...this.actions.spanOf(result.id),
       count: result.count,
       hits: result.hits,
     }));
