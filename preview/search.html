@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the search page outside VS Code: npm run build, then open this file (?q= sets the query). -->
+<!-- Dev preview of the search page outside VS Code: npm run build, then open this file (?q= sets the query, ?markers=1 tells the agents apart). -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -13,9 +13,9 @@
   const ago = (minutes) => Date.now() - minutes * 60_000;
   // Made-up sessions; the words of the query are planted in each snippet.
   const sessions = [
-    { id: "1", title: "Retry failed billing webhooks", where: "api · ⎇ fix/webhook-retries", live: true, count: 7, said: [["you", 12, "The billing webhook gives up after one failure. Add retries with backoff, and keep a dead-letter log of the ones that still fail so support can replay them."], ["agent", 9, "Added three retries with exponential backoff (1 s, 4 s, 16 s). The webhook handler now records each attempt, and anything still failing lands in the dead-letter log with its payload."], ["agent", 4, "The webhook retry test passes: a 500 from the receiver is retried twice and then logged."]] },
-    { id: "2", title: "Document the webhook retries", where: "docs · ⎇ main", live: false, count: 3, said: [["you", 26 * 60, "Document how webhook retries work for the integrations page: the backoff, the limits, and how to replay from the dead-letter log."], ["agent", 26 * 60 - 3, "Wrote the retries section with the backoff table and a replay example; the webhook signature check is unchanged and says so."]] },
-    { id: "3", title: "Alert on webhook retry storms", where: "infra · ⎇ feat/alerts", live: false, count: 1, said: [["you", 5 * 24 * 60, "Alert when webhook retries spike: more than 50 a minute for five minutes pages the on-call."]] },
+    { id: "1", agent: "claude-code", title: "Retry failed billing webhooks", where: "api · ⎇ fix/webhook-retries", live: true, count: 7, said: [["you", 12, "The billing webhook gives up after one failure. Add retries with backoff, and keep a dead-letter log of the ones that still fail so support can replay them."], ["agent", 9, "Added three retries with exponential backoff (1 s, 4 s, 16 s). The webhook handler now records each attempt, and anything still failing lands in the dead-letter log with its payload."], ["agent", 4, "The webhook retry test passes: a 500 from the receiver is retried twice and then logged."]] },
+    { id: "2", agent: "codex", title: "Document the webhook retries", where: "docs · ⎇ main", live: false, count: 3, said: [["you", 26 * 60, "Document how webhook retries work for the integrations page: the backoff, the limits, and how to replay from the dead-letter log."], ["agent", 26 * 60 - 3, "Wrote the retries section with the backoff table and a replay example; the webhook signature check is unchanged and says so."]] },
+    { id: "3", agent: "copilot", title: "Alert on webhook retry storms", where: "infra · ⎇ feat/alerts", live: false, count: 1, said: [["you", 5 * 24 * 60, "Alert when webhook retries spike: more than 50 a minute for five minutes pages the on-call."]] },
   ];
   window.acquireVsCodeApi = () => ({
     getState: () => undefined,
@@ -25,13 +25,13 @@
       if (m.type !== "search") return;
       const word = m.query.split(/\s+/).find((w) => !w.includes(":")) ?? "";
       const results = sessions.map((s) => ({
-        id: s.id, title: s.title, where: s.where, live: s.live, count: s.count, started: ago(s.said.length ? Math.max(...s.said.map((x) => x[1])) + 40 : 0), lastActive: ago(Math.min(...s.said.map((x) => x[1]))),
+        id: s.id, agent: s.agent, title: s.title, where: s.where, live: s.live, count: s.count, started: ago(s.said.length ? Math.max(...s.said.map((x) => x[1])) + 40 : 0), lastActive: ago(Math.min(...s.said.map((x) => x[1]))),
         hits: s.said.map(([role, minutes, text], i) => {
           const at = text.toLowerCase().indexOf(word.toLowerCase());
           return { index: 10 - i, role, at: ago(minutes), snippet: text, ranges: at < 0 || !word ? [] : [[at, at + word.length]] };
         }),
       }));
-      setTimeout(() => window.postMessage({ type: "results", query: m.query, sessions: results, pending: 0 }, "*"), 80);
+      setTimeout(() => window.postMessage({ type: "results", query: m.query, sessions: results, pending: 0, markers: params.get("markers") === "1" }, "*"), 80);
     },
   });
 </script>

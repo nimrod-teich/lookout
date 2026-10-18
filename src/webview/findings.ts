@@ -1,8 +1,10 @@
 /// <reference lib="dom" />
+import { agentInfo } from "../core/agents/catalog";
 import { describeSpan, shortSpan } from "../core/format";
 import { parseMarkdown, type Block, type Inline } from "../core/markdown";
 import { inRange, matchesAll, matchRanges, parseQuery, type TimeRange } from "../core/terms";
 import type { FindingsMessage, FromFindings, ToFindings } from "./findingsProtocol";
+import { agentGlyph } from "./glyph";
 
 declare function acquireVsCodeApi(): { postMessage(message: FromFindings): void };
 
@@ -41,10 +43,12 @@ const top = el("header", "top");
 const heading = el("h1", "heading");
 const mark = el("span", "mark");
 mark.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M6.2 6.5h3.6L11.4 15H4.6z"/><path d="M5 6h6v1.2H5z"/><path d="M6.4 3.4h3.2V6H6.4z"/><path d="M6.6 3.4a1.4 1.4 0 0 1 2.8 0z"/><path d="M7.6 1.2h.8v1.3h-.8z"/><path d="M9.8 4.1L15.6 2.2v4.4z"/></svg>';
+/** The session's agent, while the markers show. */
+const agentEl = el("span", "agent");
 const titleEl = el("span", "title");
 const whereEl = el("span", "where");
 const countEl = el("span", "count");
-heading.append(mark, titleEl, whereEl, countEl);
+heading.append(mark, agentEl, titleEl, whereEl, countEl);
 const field = el("label", "field");
 field.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 10l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 const input = el("input", "");
@@ -248,8 +252,11 @@ window.addEventListener("message", (event: MessageEvent<ToFindings>) => {
   const scrollY = window.scrollY;
   conversation = message;
   titleEl.textContent = message.session.title;
-  whereEl.textContent = message.session.where ?? "";
-  whereEl.title = message.session.where ? "Project and git branch" : "";
+  const agent = message.markers && message.session.agent ? message.session.agent : undefined;
+  agentEl.replaceChildren(...(agent ? [agentGlyph(agent, 16)] : []));
+  const where = [agent ? agentInfo(agent).label : undefined, message.session.where].filter(Boolean).join(" · ");
+  whereEl.textContent = where;
+  whereEl.title = message.session.where ? `${agent ? "Agent, project" : "Project"} and git branch` : agent ? "Agent" : "";
   const times = message.messages.map((m) => m.at).filter((at): at is number => at !== undefined);
   const first = times.length ? Math.min(...times) : undefined;
   const last = times.length ? Math.max(...times) : undefined;

@@ -100,6 +100,23 @@
           "default": true,
           "markdownDescription": "Show how long until the 5-hour window resets after the usage bar, for example `32% · 1h12m`. Needs `#lookout.statusBar.showUsage#`."
         },
+        "lookout.statusBar.usageAgent": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "claude",
+            "codex",
+            "copilot"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "The window under the most pressure: the highest share used among the agents' bars, fresh numbers first.",
+            "Claude's 5-hour window.",
+            "Codex's shortest window.",
+            "Copilot's, when it reports usage."
+          ],
+          "markdownDescription": "Whose usage the bar in the status bar item shows when more than one agent reports usage. A pinned agent that reports none leaves the bar to `auto`. With two or more agents, the agent's mark stands before the bar; the hover lists every agent's limits."
+        },
         "lookout.usage.refresh": {
           "type": "string",
           "enum": [
@@ -152,6 +169,21 @@
           "default": true,
           "markdownDescription": "Count an idle session as needing you when its last message asks you something: it ends with a question mark, or asks for a choice or a yes/no. Lookout reads this from the reply rather than from the agent, so the card marks it as less certain; dismiss it with the card's ✓."
         },
+        "lookout.agentMarkers": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Once sessions of two or more agents are running.",
+            "Always, even with one agent.",
+            "Never: every session looks alike."
+          ],
+          "markdownDescription": "When to tell agents apart: each agent's colour and boat on its sessions' cards and boats, in the legend, the jump list, the status bar's hover, the usage groups, the search page and the conversation tab, with the agent's name in hovers and lists."
+        },
         "lookout.claudeConfigDir": {
           "type": "string",
           "default": "",
@@ -186,6 +218,27 @@
         "default": {
           "fontPath": "media/lookout-icons.woff",
           "fontCharacter": "\\E900"
+        }
+      },
+      "lookout-sloop": {
+        "description": "A sloop, Claude's mark",
+        "default": {
+          "fontPath": "media/lookout-icons.woff",
+          "fontCharacter": "\\E901"
+        }
+      },
+      "lookout-cutter": {
+        "description": "A cutter, Codex's mark",
+        "default": {
+          "fontPath": "media/lookout-icons.woff",
+          "fontCharacter": "\\E902"
+        }
+      },
+      "lookout-ferry": {
+        "description": "A ferry, Copilot's mark",
+        "default": {
+          "fontPath": "media/lookout-icons.woff",
+          "fontCharacter": "\\E903"
         }
       }
     }

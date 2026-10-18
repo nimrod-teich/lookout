@@ -148,6 +148,8 @@ export function waterline(usagePercent: number | undefined): number {
 
 export interface Boat {
   id: string;
+  /** Id of the agent the session belongs to. */
+  agent: string;
   x: number;
   y: number;
   state: State;
@@ -178,6 +180,7 @@ export function layoutBoats(views: readonly SessionView[], now: number, water: n
       const label = group.key === "waiting" && i < 2 ? `${view.title} · ${view.since === undefined ? "" : elapsed(now - view.since)}`.replace(/ · $/, "") : undefined;
       boats.push({
         id: view.id,
+        agent: view.agent,
         x: Math.round(x * 10) / 10,
         y: Math.round(y * 10) / 10,
         state: view.state,

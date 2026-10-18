@@ -1,4 +1,9 @@
 :root {
+  /* Each agent's accent (src/core/agents/catalog.ts lists the same values): coral, teal, violet. */
+  --agent-claude: #f7906c;
+  --agent-codex: #7ae8df;
+  --agent-copilot: #9373ea;
+  --agent-other: #9fb0c0;
   --working: var(--vscode-progressBar-background);
   --waiting: var(--vscode-editorWarning-foreground);
   --done: var(--vscode-testing-iconPassed);
@@ -6,6 +11,14 @@
   --lamp: #ffb000;
   --ink: var(--vscode-foreground);
   --muted: var(--vscode-descriptionForeground);
+}
+
+body.vscode-light,
+body.vscode-high-contrast-light {
+  --agent-claude: #c2502a;
+  --agent-codex: #14a093;
+  --agent-copilot: #5a35c8;
+  --agent-other: #717171;
 }
 
 body {
@@ -103,6 +116,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.hover-title .glyph {
+  margin-right: 5px;
+  vertical-align: -1px;
 }
 
 .hover-status {
@@ -639,7 +657,7 @@ body.vscode-reduce-motion .hover-card {
 }
 
 /* Numbers too old to go by: grey bars. */
-.meters.stale .fill {
+.usage-group.stale .fill {
   background: var(--idle);
   opacity: 0.45;
 }
@@ -1420,4 +1438,90 @@ body.vscode-high-contrast-light .card {
 
 .line.stuck .text {
   color: var(--waiting);
+}
+
+/* Agents ------------------------------------------------------------------ */
+
+/* Shown only while the markers are on: a thin edge in the agent's hue, its silhouette before the title. */
+.card .edge {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--hue, var(--agent-other));
+}
+
+.card.marked .edge {
+  display: block;
+}
+
+.card.marked .rail {
+  left: 3px;
+}
+
+.card .row .glyph {
+  display: none;
+  flex: none;
+  align-self: center;
+  margin-right: -4px;
+}
+
+.card.marked .row .glyph {
+  display: block;
+}
+
+/* The agent does not let Lookout bring this session forward: the card and its boat are not links. */
+.card.nojump {
+  cursor: default;
+}
+
+.harbour .boat.nojump {
+  cursor: default;
+}
+
+.harbour .boat .craft {
+  opacity: 0.9;
+}
+
+/* With the boat under it, the lantern is a masthead light: smaller, and still in the state's colour. */
+.harbour .boat.marked .lamp {
+  r: 2.2;
+}
+
+.harbour .boat.marked.state-waiting .lamp,
+.harbour .boat.marked.lit .lamp {
+  r: 2.8;
+}
+
+.harbour .boat.marked.hover .lamp {
+  r: 3.2;
+}
+
+.harbour .boat.marked.state-idle .craft,
+.harbour .boat.marked.state-unknown .craft {
+  opacity: 0.55;
+}
+
+.legend-item.agent .glyph {
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
+/* An agent's group of bars: a box only to the DOM, its rows sit in the meters' column. */
+.usage-group {
+  display: contents;
+}
+
+.usage-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.usage-head.hidden {
+  display: none;
 }

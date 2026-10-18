@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { agentByKey, markerSetting, type MarkerSetting } from "../core/agents/catalog";
 import { resolveConfigDir } from "../core/agents/claude/paths";
 import { envFlag, NONESSENTIAL_TRAFFIC, type RefreshMode } from "../core/usage";
 
@@ -23,6 +24,10 @@ export interface Config {
   typedQuestions: boolean;
   /** The Claude Code config directory to read sessions and transcripts from. */
   claudeConfigDir: string;
+  /** When to tell agents apart by hue and silhouette. */
+  agentMarkers: MarkerSetting;
+  /** Whose usage the status bar's bar shows: `auto` or an agent's key. */
+  usageAgent: string;
 }
 
 interface EnvVar {
@@ -41,6 +46,11 @@ function claudeExtensionEnv(name: string): string | undefined {
 /** Set for Claude Code in this process's environment or in the Claude Code extension's settings; its own settings file is asked before each refresh. */
 function nonessentialTrafficDisabled(): boolean {
   return envFlag(process.env[NONESSENTIAL_TRAFFIC]) || envFlag(claudeExtensionEnv(NONESSENTIAL_TRAFFIC));
+}
+
+/** `auto`, or the key of an agent the catalog lists. */
+function usageAgent(value: string | undefined): string {
+  return value !== undefined && agentByKey(value) ? value : "auto";
 }
 
 function refreshMode(value: string | undefined): RefreshMode {
@@ -67,5 +77,7 @@ export function readConfig(): Config {
     notifyCooldownMs: Math.max(0, lookout.get<number>("notifications.cooldownSeconds", 30)) * 1000,
     typedQuestions: lookout.get<boolean>("state.typedQuestions", true),
     claudeConfigDir,
+    agentMarkers: markerSetting(lookout.get<string>("agentMarkers")),
+    usageAgent: usageAgent(lookout.get<string>("statusBar.usageAgent")),
   };
 }

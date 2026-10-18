@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { AgentProvider, SearchOutcome } from "../core/agents/agent";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
-import { ClaudeProvider } from "../core/agents/claude/provider";
+import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import type { HistoryMessage, SnippetSize } from "../core/history";
 import { Attention } from "../core/attention";
 import { buildPastView, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
@@ -14,6 +14,7 @@ import { RefreshLedger } from "../core/refreshLedger";
 import { hasFilters, parseQuery } from "../core/terms";
 import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
 import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../core/usageAlerts";
+import type { UsageGroup } from "../core/usageGroups";
 import { refreshEnv, refreshUsage } from "../core/usageRefresh";
 import { WindowRegistry } from "../core/windows";
 import type { Config } from "./config";
@@ -243,6 +244,16 @@ export class Controller implements vscode.Disposable {
     const snapshot = this.usageRead.snapshot;
     if (!snapshot) return undefined;
     return { ...snapshot, stale: isStale(snapshot, Date.now()) };
+  }
+
+  /**
+   * Every agent's usage, one group each, every meter tagged with its agent.
+   * Claude's group is there without numbers too, to say there are none and
+   * whether a refresh can fetch them.
+   */
+  get usageGroups(): UsageGroup[] {
+    const usage = this.usage;
+    return [{ agent: CLAUDE_CODE, fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: (usage?.meters ?? []).map((meter) => ({ ...meter, agent: CLAUDE_CODE })), canRefresh: this.canRefreshUsage }];
   }
 
   /** Claude Code is told to make no network calls it can do without, which fetching usage is. Asked again each time: the settings file can change. */

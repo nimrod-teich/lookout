@@ -12,6 +12,10 @@ export interface SearchPageActions {
   search(query: string, zone: number | undefined): SearchOutcome;
   /** The title of a live or a past session. */
   titleOf(id: string): string;
+  /** The agent of a live or a past session. */
+  agentOf?(id: string): string | undefined;
+  /** Tell the agents apart. */
+  markers?(): boolean;
   /** Its project, worktree and git branch. */
   whereOf(id: string): string | undefined;
   /** When its conversation began and last moved: its first and last message. */
@@ -50,6 +54,7 @@ export class SearchPage implements vscode.Disposable {
     const sessions: SearchPageSession[] = outcome.results.map((result) => ({
       id: result.id,
       title: this.actions.titleOf(result.id),
+      agent: this.actions.agentOf?.(result.id),
       where: this.actions.whereOf(result.id),
       live: this.actions.isLive(result.id),
       ...this.actions.spanOf(result.id),
@@ -58,7 +63,7 @@ export class SearchPage implements vscode.Disposable {
     }));
     const newest = (session: SearchPageSession) => session.hits[0]?.at ?? -Infinity;
     sessions.sort((a, b) => newest(b) - newest(a));
-    return { type: "results", query, sessions, pending: outcome.pending };
+    return { type: "results", query, sessions, pending: outcome.pending, markers: this.actions.markers?.() };
   }
 
   private post(message: ToSearch): void {

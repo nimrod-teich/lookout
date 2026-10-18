@@ -1,6 +1,8 @@
 /// <reference lib="dom" />
+import { agentInfo } from "../core/agents/catalog";
 import { describeSpan, shortSpan } from "../core/format";
 import type { SearchHit } from "../core/history";
+import { agentGlyph } from "./glyph";
 import type { FromSearch, SearchPageSession, ToSearch } from "./searchProtocol";
 
 declare function acquireVsCodeApi(): {
@@ -23,6 +25,8 @@ const OPERATORS = "since:3d, before:yesterday, since:2026-10-01, project:api, br
 
 /** The query whose results are on show, or asked for. */
 let query = "";
+/** Tell the agents apart: each session's mark and its agent's name. */
+let markers = false;
 
 // The top: what this is, how much it found, and the box.
 
@@ -113,10 +117,12 @@ function sessionBlock(session: SearchPageSession): HTMLElement {
   head.title = "Open this conversation at its newest match";
   // Line one: what it is, whether it runs, how much matched.
   const top = el("span", "head-top");
+  if (markers && session.agent) top.append(agentGlyph(session.agent, 13));
   top.append(el("span", "session-title", session.title), el("span", "tag", session.live ? "running" : "earlier"));
   if (session.count > 0) top.append(el("span", "matches", `${session.count} ${session.count === 1 ? "match" : "matches"}`));
   // Line two: where it worked, and when.
   const meta = el("span", "head-meta");
+  if (markers && session.agent) meta.append(el("span", "agent", agentInfo(session.agent).label));
   for (const part of (session.where ?? "").split(" · ").filter(Boolean)) meta.append(el("span", "chip", part));
   const when = shortSpan(session.started, session.lastActive, Date.now());
   if (when) {
@@ -152,6 +158,7 @@ function sessionBlock(session: SearchPageSession): HTMLElement {
 function receive(message: Extract<ToSearch, { type: "results" }>): void {
   // An answer to an older query is of no use.
   if (message.query !== query) return;
+  markers = message.markers === true;
   const matches = message.sessions.reduce((sum, session) => sum + session.count, 0);
   const sessions = `${message.sessions.length} ${message.sessions.length === 1 ? "session" : "sessions"}`;
   const found = message.sessions.length === 0 ? "no matches" : matches === 0 ? sessions : `${matches} ${matches === 1 ? "match" : "matches"} in ${sessions}`;

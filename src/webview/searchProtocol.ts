@@ -4,6 +4,8 @@ import type { SearchHit } from "../core/history";
 export interface SearchPageSession {
   id: string;
   title: string;
+  /** Id of its agent. */
+  agent?: string;
   /** Its project, worktree and git branch, e.g. "api · ⎇ fix-login". */
   where?: string;
   /** Running now, as opposed to earlier. */
@@ -22,7 +24,8 @@ export type ToSearch =
   /** Put this query in the box and run it. */
   | { type: "query"; query: string }
   /** `pending` conversations were not read yet; the page asks again. */
-  | { type: "results"; query: string; sessions: SearchPageSession[]; pending: number };
+  /** `markers`: tell the agents apart. */
+  | { type: "results"; query: string; sessions: SearchPageSession[]; pending: number; markers?: boolean };
 
 /** Search page → extension. */
 export type FromSearch =

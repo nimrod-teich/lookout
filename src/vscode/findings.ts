@@ -8,6 +8,10 @@ export const FINDINGS_VIEW_TYPE = "lookout.findings";
 export interface FindingsActions {
   /** The title of a live or a past session. */
   titleOf(id: string): string;
+  /** The agent of a live or a past session. */
+  agentOf?(id: string): string | undefined;
+  /** Tell the agents apart. */
+  markers?(): boolean;
   /** Its project, worktree and git branch, for the tab's heading. */
   whereOf(id: string): string | undefined;
   /** The conversation of a live or a past session, oldest first. */
@@ -54,7 +58,14 @@ export class Findings implements vscode.Disposable {
   private conversation(id: string, query: string, target: number | undefined): ToFindings | undefined {
     const messages = this.actions.history(id);
     if (!messages) return undefined;
-    return { type: "conversation", session: { id, title: this.actions.titleOf(id), where: this.actions.whereOf(id) }, messages: messages.map((message, index) => ({ index, ...message })), query, target };
+    return {
+      type: "conversation",
+      session: { id, title: this.actions.titleOf(id), where: this.actions.whereOf(id), agent: this.actions.agentOf?.(id) },
+      messages: messages.map((message, index) => ({ index, ...message })),
+      query,
+      target,
+      markers: this.actions.markers?.(),
+    };
   }
 
   private send(message: ToFindings): void {

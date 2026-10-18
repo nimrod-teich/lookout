@@ -1,9 +1,11 @@
 import * as vscode from "vscode";
+import { AGENTS, agentInfo } from "../core/agents/catalog";
 import { countStates, describeLocation, describeState, formatCountdown, formatResetIn, quietFor, type Counts } from "../core/format";
 import type { SessionView } from "../core/types";
 import type { UsageMeter } from "../core/usage";
+import { groupHeading, pickBar, sortGroups, type UsageGroup } from "../core/usageGroups";
 import type { Usage } from "./controller";
-import { BRAND_ICON, iconFor, STATE_ICON } from "./icons";
+import { agentIcon, BRAND_ICON, iconFor, STATE_ICON } from "./icons";
 
 /** Braille spinner frames for the "working" count. */
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -24,7 +26,14 @@ const STALE_COLOR = "disabledForeground";
 
 export interface StatusBarInput {
   views: readonly SessionView[];
+  /** Claude's usage, when `usageGroups` is not given. */
   usage: Usage | undefined;
+  /** Every agent's usage, one group each. */
+  usageGroups?: readonly UsageGroup[];
+  /** Whose bar the item shows: `auto`, or an agent's key. */
+  usageAgent?: string;
+  /** Tell the agents apart: their marks in the hover, and before the bar. */
+  markers?: boolean;
   enabled: boolean;
   showUsage: boolean;
   /** The time until the 5-hour window resets, after the bar. */
@@ -46,9 +55,30 @@ function sessionsText(counts: Counts, quiet: number, frame: number): string {
   return parts.join("  ");
 }
 
-/** The meter the status bar shows: the 5-hour window, the one that runs out first; the hover has the rest. */
-function sessionMeter(usage: Usage | undefined): UsageMeter | undefined {
-  return usage?.meters.find((m) => m.key === "session") ?? usage?.meters[0];
+/** Every agent's usage, in catalog order; from Claude's alone when the input has no groups. */
+function groupsOf(input: StatusBarInput): UsageGroup[] {
+  if (input.usageGroups) return sortGroups(input.usageGroups);
+  const usage = input.usage;
+  return [{ agent: AGENTS[0]!.id, fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: usage?.meters ?? [], canRefresh: input.canRefreshUsage }];
+}
+
+/**
+ * The bar the item shows: one agent's window, the 5-hour one for Claude; by
+ * default the one under the most pressure. The hover has the rest.
+ */
+interface Bar {
+  group: UsageGroup;
+  meter: UsageMeter;
+  /** Its agent's mark goes before it: more than one agent reports usage, or the markers are on. */
+  marked: boolean;
+}
+
+function barOf(input: StatusBarInput): Bar | undefined {
+  const groups = groupsOf(input);
+  const picked = pickBar(groups, input.usageAgent);
+  if (!picked) return undefined;
+  const reporting = groups.filter((group) => group.meters.length > 0).length;
+  return { ...picked, marked: input.markers === true || reporting > 1 };
 }
 
 /** A bar of ten cells for a percentage, e.g. ▰▰▱▱▱▱▱▱▱▱ for 18%. */
@@ -61,25 +91,26 @@ function usageLevel(percent: number): keyof typeof BAR_COLORS {
   return percent >= 80 ? "high" : percent >= 50 ? "mid" : "low";
 }
 
-function usageText(usage: Usage | undefined, showReset: boolean, now: number): string {
-  const meter = sessionMeter(usage);
-  if (!meter) return "";
+function usageText(bar: Bar | undefined, showReset: boolean, now: number): string {
+  if (!bar) return "";
+  const { meter } = bar;
   const reset = showReset && meter.resetsAt !== undefined && meter.resetsAt > now ? ` · ${formatCountdown(meter.resetsAt - now)}` : "";
-  return `${usageBar(meter.percent)} ${meter.percent}%${reset}`;
+  const mark = bar.marked ? `${agentIcon(bar.group.agent)} ` : "";
+  return `${mark}${usageBar(meter.percent)} ${meter.percent}%${reset}`;
 }
 
 /** Grey when stale, else by consumption. */
-function usageColor(usage: Usage | undefined): string {
-  const meter = sessionMeter(usage);
-  if (!usage || !meter) return "";
-  if (usage.stale) return STALE_COLOR;
-  return BAR_COLORS[usageLevel(meter.percent)];
+function usageColor(bar: Bar | undefined): string {
+  if (!bar) return "";
+  if (bar.group.stale) return STALE_COLOR;
+  return BAR_COLORS[usageLevel(bar.meter.percent)];
 }
 
-function spokenText(counts: Counts, quiet: number, usage: Usage | undefined): string {
+function spokenText(counts: Counts, quiet: number, bar: Bar | undefined): string {
   const sessions = `Lookout: ${counts.working} working${quiet ? ` (${quiet} quiet)` : ""}, ${counts.waiting} waiting for you, ${counts.done} finished, ${counts.idle + counts.unknown} idle`;
-  const meter = sessionMeter(usage);
-  return meter ? `${sessions}. Usage ${meter.label} ${meter.percent}%` : sessions;
+  if (!bar) return sessions;
+  const whose = bar.marked ? `${agentInfo(bar.group.agent).label} ` : "";
+  return `${sessions}. Usage ${whose}${bar.meter.label} ${bar.meter.percent}%`;
 }
 
 /** " · resets in 3h", as Claude Code's panel says it. */
@@ -88,31 +119,46 @@ function resetText(resetsAt: number | undefined, now: number): string {
   return ` · resets ${formatResetIn(resetsAt - now)}`;
 }
 
+/** The agent's mark in its hue, for the hover, where only an inline style can colour it. */
+function hoverMark(agent: string): string {
+  const info = agentInfo(agent);
+  const light = (vscode.window.activeColorTheme as vscode.ColorTheme | undefined)?.kind;
+  // ColorThemeKind.Light and HighContrastLight.
+  const color = light === 1 || light === 4 ? info.colors.light : info.colors.dark;
+  return `<span style="color:${color};">${agentIcon(agent)}</span>`;
+}
+
 function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
   const md = new vscode.MarkdownString("", true);
   // For the coloured usage bars; VS Code keeps only colour styles.
   md.supportHtml = true;
+  const markers = input.markers === true;
   for (const view of input.views) {
-    md.appendMarkdown(`${iconFor(view, now)} **`);
+    md.appendMarkdown(`${markers ? `${hoverMark(view.agent)} ` : ""}${iconFor(view, now)} **`);
     md.appendText(view.title);
     md.appendMarkdown("**  \n");
-    md.appendText(`${describeLocation(view)} · ${describeState(view, now)}`);
+    md.appendText(`${markers ? `${agentInfo(view.agent).label} · ` : ""}${describeLocation(view)} · ${describeState(view, now)}`);
     md.appendMarkdown("\n\n");
   }
   if (input.views.length === 0) md.appendMarkdown("No agent sessions running.\n\n");
   if (input.showUsage) {
-    md.appendMarkdown("---\n\n**Claude usage**  \n");
-    if (input.usage) {
-      for (const meter of input.usage.meters) {
-        const color = HOVER_COLORS[input.usage.stale ? "stale" : usageLevel(meter.percent)];
-        md.appendMarkdown(`<span style="color:${color};">${usageBar(meter.percent)}</span> `);
-        md.appendText(`${meter.label}: ${Math.floor(meter.percent)}%${resetText(meter.resetsAt, now)}`);
-        md.appendMarkdown("  \n");
+    const groups = groupsOf(input);
+    const marked = markers || groups.filter((group) => group.meters.length > 0).length > 1;
+    md.appendMarkdown("---\n\n");
+    for (const group of groups) {
+      md.appendMarkdown(`${marked ? `${hoverMark(group.agent)} ` : ""}**${groupHeading(group.agent)}**  \n`);
+      if (group.meters.length > 0) {
+        for (const meter of group.meters) {
+          const color = HOVER_COLORS[group.stale ? "stale" : usageLevel(meter.percent)];
+          md.appendMarkdown(`<span style="color:${color};">${usageBar(meter.percent)}</span> `);
+          md.appendText(`${meter.label}: ${Math.floor(meter.percent)}%${resetText(meter.resetsAt, now)}`);
+          md.appendMarkdown("  \n");
+        }
+      } else {
+        md.appendText(`No usage reported${group.canRefresh ? "; run Lookout: Refresh Usage" : ""}`);
       }
-    } else {
-      md.appendText(`No usage reported${input.canRefreshUsage ? "; run Lookout: Refresh Usage" : ""}`);
+      md.appendMarkdown("\n\n");
     }
-    md.appendMarkdown("\n\n");
   }
   md.appendMarkdown("Click to jump to a session");
   return md;
@@ -149,7 +195,7 @@ export class StatusBar implements vscode.Disposable {
     this.input = input;
     this.counts = countStates(input.views);
     this.quiet = input.views.filter((view) => quietFor(view, now) !== undefined).length;
-    const visible = input.enabled && (input.views.length > 0 || (input.showUsage && input.usage !== undefined));
+    const visible = input.enabled && (input.views.length > 0 || (input.showUsage && barOf(input) !== undefined));
     this.spin(visible && this.counts.working > this.quiet);
     this.tick(visible);
     this.countDown(visible, now);
@@ -159,21 +205,21 @@ export class StatusBar implements vscode.Disposable {
       return;
     }
     this.writeText(now);
-    const spoken = spokenText(this.counts, this.quiet, input.showUsage ? input.usage : undefined);
+    const bar = input.showUsage ? barOf(input) : undefined;
+    const spoken = spokenText(this.counts, this.quiet, bar);
     if (spoken !== this.shown.spoken) {
       this.item.accessibilityInformation = { label: spoken };
       this.shown.spoken = spoken;
     }
     this.writeTooltip(now);
-    const meter = input.showUsage ? sessionMeter(input.usage) : undefined;
-    const color = input.showUsage ? usageColor(input.usage) : "";
+    const color = usageColor(bar);
     if (color !== this.shown.color) {
       this.item.color = color ? new vscode.ThemeColor(color) : undefined;
       this.shown.color = color;
     }
     // A question Lookout read in a reply counts, but only a prompt the agent reports lights the background.
     const blocked = input.views.some((view) => view.state === "waiting" && view.reason?.kind !== "typed");
-    const background = blocked ? "warning" : meter && !input.usage?.stale && meter.percent >= USAGE_ERROR_AT ? "error" : "";
+    const background = blocked ? "warning" : bar && !bar.group.stale && bar.meter.percent >= USAGE_ERROR_AT ? "error" : "";
     if (background !== this.shown.background) {
       this.item.backgroundColor = background === "warning" ? this.warning : background === "error" ? this.error : undefined;
       this.shown.background = background;
@@ -183,7 +229,7 @@ export class StatusBar implements vscode.Disposable {
   }
 
   private writeText(now: number = Date.now()): void {
-    const usage = this.input.showUsage ? usageText(this.input.usage, this.input.showReset, now) : "";
+    const usage = this.input.showUsage ? usageText(barOf(this.input), this.input.showReset, now) : "";
     const sessions = this.input.views.length > 0 ? sessionsText(this.counts, this.quiet, this.frame) : "";
     const text = `${BRAND_ICON} ${[sessions, usage].filter(Boolean).join("   ")}`;
     if (text !== this.shown.text) this.item.text = this.shown.text = text;
@@ -222,7 +268,7 @@ export class StatusBar implements vscode.Disposable {
   private countDown(on: boolean, now: number): void {
     clearTimeout(this.countdown);
     this.countdown = undefined;
-    const resetsAt = on && this.input.showUsage && this.input.showReset ? sessionMeter(this.input.usage)?.resetsAt : undefined;
+    const resetsAt = on && this.input.showUsage && this.input.showReset ? barOf(this.input)?.meter.resetsAt : undefined;
     if (resetsAt === undefined || resetsAt <= now) return;
     const turns = (resetsAt - now) % 60_000 || 60_000;
     this.countdown = setTimeout(() => {

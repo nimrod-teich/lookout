@@ -1,15 +1,25 @@
 /// <reference lib="dom" />
+import { AGENTS, agentInfo, canJump, canRename, canResume } from "../core/agents/catalog";
 import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
+import { barMeter, groupHeading, pickBar, sortGroups } from "../core/usageGroups";
+import { agentGlyph } from "./glyph";
 import { Harbour } from "./harbour";
 import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isGroupKey, pulseBars, secondLine, type Chip, type GroupKey } from "./model";
 import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "./protocol";
 
+interface BoardState {
+  hidden?: string[];
+  earlier?: boolean;
+  /** Agents the user hid through the legend. */
+  agents?: string[];
+}
+
 declare function acquireVsCodeApi(): {
   postMessage(message: FromBoard): void;
-  getState(): { hidden?: string[]; earlier?: boolean } | undefined;
-  setState(state: { hidden?: string[]; earlier?: boolean }): void;
+  getState(): BoardState | undefined;
+  setState(state: BoardState): void;
 };
 
 const vscode = acquireVsCodeApi();
@@ -21,7 +31,14 @@ let allSessions: SessionView[] = [];
 let sessions: SessionView[] = [];
 /** State groups the user hid through the legend; kept across reloads. */
 const hidden = new Set<GroupKey>((vscode.getState()?.hidden ?? []).filter(isGroupKey));
-let usage: BoardUsage | undefined;
+/** Agents the user hid through the legend; kept across reloads, applied while the markers show. */
+const hiddenAgents = new Set<string>((vscode.getState()?.agents ?? []).filter((id) => typeof id === "string"));
+/** Each agent's usage, in catalog order; empty when there is none to show. */
+let usageGroups: BoardUsage[] = [];
+/** The agent whose bar the status bar shows: the tide follows it. */
+let usageBar: string | undefined;
+/** Tell the agents apart: their hue and silhouette, their name in hovers. */
+let markers = false;
 /** The search the user typed, trimmed; empty when the box is empty. */
 let query = "";
 /** The results for `query`, by session id; sessions absent here are hidden while a query is active. */
@@ -58,6 +75,10 @@ function setStar(card: HTMLElement, id: string): void {
 }
 /** The user opened the Earlier group; kept across reloads. */
 let earlierOpen = vscode.getState()?.earlier === true;
+
+function saveState(): void {
+  vscode.setState({ hidden: [...hidden], earlier: earlierOpen, agents: [...hiddenAgents] });
+}
 const pastCards = new Map<string, HTMLElement>();
 let earlierEl: HTMLElement | undefined;
 /** The extension's clock minus ours, so elapsed times agree with the status bar. */
@@ -130,6 +151,11 @@ const hover = el("div", "hover-card");
 const harbour = new Harbour(
   (id) => vscode.postMessage({ type: "jump", id }),
   (boat) => showHover(boat?.id),
+  // The agent may not let Lookout bring the session forward: nothing to swing the beam to.
+  (id) => {
+    const view = allSessions.find((s) => s.id === id);
+    return view === undefined || canJump(view);
+  },
 );
 beam.append(harbour.element, hover);
 
@@ -149,7 +175,9 @@ function showHover(id: string | undefined): void {
   linkedCard?.classList.add("linked");
   hover.textContent = "";
   hover.className = `hover-card tone-${view.state}`;
-  hover.append(el("div", "hover-title", view.title));
+  const heading = el("div", "hover-title", view.title);
+  if (markers) heading.prepend(agentGlyph(view.agent, 11));
+  hover.append(heading);
   const status = el("div", "hover-status");
   const elapsed = elapsedText(view);
   status.append(el("i", "dot"), el("span", "", `${stateTitle(view)}${elapsed ? ` · ${elapsed}` : ""}`));
@@ -160,12 +188,13 @@ function showHover(id: string | undefined): void {
   const evidence = describeEvidence(view.evidence, now());
   if (evidence) hover.append(el("div", "hover-evidence", evidence));
   const meta = chips(view).map((chip) => chip.text);
+  if (markers) meta.unshift(agentInfo(view.agent).label);
   if (view.spend) {
     const tokens = view.spend.input + view.spend.output + view.spend.cacheRead + view.spend.cacheWrite;
     meta.push(`${formatTokens(tokens)} tokens${typeof view.spend.costUsd !== "number" ? "" : ` · ${view.spend.estimated ? "~" : ""}${formatUsd(view.spend.costUsd)}`}`);
   }
   hover.append(el("div", "hover-meta", meta.join(" · ")));
-  hover.append(el("div", "hover-hint", "Click to jump"));
+  if (canJump(view)) hover.append(el("div", "hover-hint", "Click to jump"));
   const boat = harbour.boatFor(view.id);
   if (!boat) return;
   const { x, y, width } = harbour.position(boat);
@@ -278,20 +307,40 @@ function receiveSearch(message: { query: string; results: SearchResult[]; pendin
 }
 
 function applyFilters(): void {
-  sessions = allSessions.filter((view) => !hidden.has(groupSessions([view])[0]!.key) && (query === "" || hits.has(view.id)));
+  sessions = allSessions.filter((view) => !hidden.has(groupSessions([view])[0]!.key) && !(markers && hiddenAgents.has(view.agent)) && (query === "" || hits.has(view.id)));
+}
+
+function toggleAgent(agent: string): void {
+  if (hiddenAgents.has(agent)) hiddenAgents.delete(agent);
+  else hiddenAgents.add(agent);
+  saveState();
+  applyFilters();
+  render();
+}
+
+/** The agents with sessions on the board, in catalog order, each with how many. */
+function liveAgents(): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const view of allSessions) counts.set(view.agent, (counts.get(view.agent) ?? 0) + 1);
+  return [...counts].sort((a, b) => order(a[0]) - order(b[0]));
+}
+
+function order(agent: string): number {
+  const index = AGENTS.findIndex((info) => info.id === agent);
+  return index < 0 ? AGENTS.length : index;
 }
 
 function toggleGroup(key: GroupKey): void {
   if (hidden.has(key)) hidden.delete(key);
   else hidden.add(key);
-  vscode.setState({ hidden: [...hidden], earlier: earlierOpen });
+  saveState();
   applyFilters();
   render();
 }
 
 /** The legend counts every session; a click hides that group from the board. */
 function renderBeam(): void {
-  harbour.update(sessions, usage?.meters.find((m) => m.key === "session")?.percent, now());
+  harbour.update(sessions, tidePercent(), now(), markers);
   const counts = { waiting: 0, done: 0, working: 0, idle: 0 };
   for (const group of groupSessions(allSessions)) counts[group.key] = group.views.length;
   legend.textContent = "";
@@ -310,11 +359,35 @@ function renderBeam(): void {
     item.addEventListener("click", () => toggleGroup(key));
     legend.append(item);
   }
+  if (!markers) return;
+  // One chip per agent with sessions, next to the states: a click hides that agent's sessions.
+  for (const [agent, count] of liveAgents()) {
+    const info = agentInfo(agent);
+    const off = hiddenAgents.has(agent);
+    const item = el("button", `legend-item agent${off ? " off" : ""}`);
+    item.type = "button";
+    item.title = off ? `Show ${info.label}'s sessions` : `Hide ${info.label}'s sessions`;
+    item.setAttribute("aria-pressed", String(!off));
+    item.append(agentGlyph(agent, 10), el("b", "", String(count)), el("span", "", ` ${info.label}`));
+    item.addEventListener("click", () => toggleAgent(agent));
+    legend.append(item);
+  }
+}
+
+/** The tide rises with the window the status bar shows: Claude's 5 hours while it is the one agent with usage. */
+function tidePercent(): number | undefined {
+  const groups = usageGroups.map((group) => ({ ...group, agent: group.agent ?? AGENTS[0]!.id }));
+  const pinned = groups.find((group) => group.agent === usageBar);
+  if (pinned) return barMeter(pinned.meters)?.percent;
+  return pickBar(groups)?.meter.percent;
 }
 
 // Usage meters: one bar per limit, under the beam.
 
 const meters = el("div", "meters");
+/** Each agent's group of bars, by agent id. */
+const meterGroups = new Map<string, HTMLElement>();
+/** The bars, by agent id and limit. */
 const meterRows = new Map<string, HTMLElement>();
 
 /** "Resets in 3h", as Claude Code's panel says it. */
@@ -328,48 +401,91 @@ function meterLevel(percent: number): "low" | "mid" | "high" {
   return percent >= 80 ? "high" : percent >= 50 ? "mid" : "low";
 }
 
+/**
+ * One group per agent, in catalog order, each its bars and a foot with what
+ * is missing and its refresh link. A group is a box only to the DOM: its rows
+ * sit in the meters' own column. With one agent and no markers there is no
+ * heading, as before agents had groups.
+ */
 function renderMeters(): void {
-  meters.classList.toggle("hidden", usage === undefined);
-  meters.classList.toggle("stale", usage?.stale === true);
-  if (!usage) return;
-  const seen = new Set<string>();
-  let previous: HTMLElement | undefined;
-  for (const meter of usage.meters) {
-    seen.add(meter.key);
-    let row = meterRows.get(meter.key);
-    if (!row) {
-      row = el("div", "meter");
-      const bar = el("span", "bar");
-      bar.append(el("span", "fill"));
-      row.append(el("span", "label"), el("span", "percent"), bar, el("span", "reset"));
-      meterRows.set(meter.key, row);
+  meters.classList.toggle("hidden", usageGroups.length === 0);
+  const headed = markers || usageGroups.length > 1;
+  const seenGroups = new Set<string>();
+  let previousGroup: HTMLElement | undefined;
+  for (const usage of usageGroups) {
+    const agent = usage.agent ?? AGENTS[0]!.id;
+    seenGroups.add(agent);
+    let group = meterGroups.get(agent);
+    if (!group) {
+      group = el("div", "usage-group");
+      group.dataset.agent = agent;
+      const head = el("div", "usage-head");
+      head.append(agentGlyph(agent, 11), el("span", "", groupHeading(agent)));
+      const foot = el("div", "foot");
+      const refresh = el("button", "link", "refresh");
+      refresh.type = "button";
+      refresh.title = "Fetch the usage again now";
+      refresh.addEventListener("click", () => vscode.postMessage({ type: "refreshUsage", agent }));
+      foot.append(el("span", "age"), refresh);
+      group.append(head, foot);
+      meterGroups.set(agent, group);
     }
-    row.className = `meter ${meterLevel(meter.percent)}`;
-    row.querySelector(".label")!.textContent = meter.label;
-    (row.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
-    row.querySelector(".percent")!.textContent = `${Math.floor(meter.percent)}%`;
-    row.querySelector(".reset")!.textContent = resetText(meter.resetsAt);
-    if (row.previousElementSibling !== (previous ?? null) || row.parentElement !== meters) meters.insertBefore(row, previous ? previous.nextSibling : meters.firstChild);
-    previous = row;
+    group.classList.toggle("stale", usage.stale);
+    group.querySelector(".usage-head")!.classList.toggle("hidden", !headed);
+    if (group.previousElementSibling !== (previousGroup ?? null) || group.parentElement !== meters) meters.insertBefore(group, previousGroup ? previousGroup.nextSibling : meters.firstChild);
+    previousGroup = group;
+    const foot = group.querySelector<HTMLElement>(".foot")!;
+    const seen = new Set<string>();
+    let previous: HTMLElement = group.querySelector<HTMLElement>(".usage-head")!;
+    for (const meter of usage.meters) {
+      const id = `${agent}:${meter.key}`;
+      seen.add(id);
+      let row = meterRows.get(id);
+      if (!row) {
+        row = el("div", "meter");
+        const bar = el("span", "bar");
+        bar.append(el("span", "fill"));
+        row.append(el("span", "label"), el("span", "percent"), bar, el("span", "reset"));
+        meterRows.set(id, row);
+      }
+      row.className = `meter ${meterLevel(meter.percent)}`;
+      row.querySelector(".label")!.textContent = meter.label;
+      (row.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
+      row.querySelector(".percent")!.textContent = `${Math.floor(meter.percent)}%`;
+      row.querySelector(".reset")!.textContent = resetText(meter.resetsAt);
+      if (row.previousElementSibling !== previous || row.parentElement !== group) group.insertBefore(row, previous.nextSibling);
+      previous = row;
+    }
+    for (const [id, row] of meterRows) {
+      if (!id.startsWith(`${agent}:`) || seen.has(id)) continue;
+      row.remove();
+      meterRows.delete(id);
+    }
+    group.append(foot);
+    foot.querySelector(".age")!.textContent = usage.fetchedAt === undefined ? "No usage reported" : "";
+    foot.querySelector(".link")!.classList.toggle("hidden", !usage.canRefresh);
   }
-  for (const [key, row] of meterRows) {
-    if (seen.has(key)) continue;
-    row.remove();
-    meterRows.delete(key);
+  for (const [agent, group] of meterGroups) {
+    if (seenGroups.has(agent)) continue;
+    group.remove();
+    meterGroups.delete(agent);
+    for (const id of [...meterRows.keys()]) if (id.startsWith(`${agent}:`)) meterRows.delete(id);
   }
-  let foot = meters.querySelector<HTMLElement>(".foot");
-  if (!foot) {
-    foot = el("div", "foot");
-    const refresh = el("button", "link", "refresh");
-    refresh.type = "button";
-    refresh.title = "Fetch the usage again now";
-    refresh.addEventListener("click", () => vscode.postMessage({ type: "refreshUsage" }));
-    foot.append(el("span", "age"), refresh);
-    meters.append(foot);
-  }
-  meters.append(foot);
-  foot.querySelector(".age")!.textContent = usage.fetchedAt === undefined ? "No usage reported" : "";
-  foot.querySelector(".link")!.classList.toggle("hidden", !usage.canRefresh);
+}
+
+/**
+ * The agent's marks on a card: a thin edge in its hue and its silhouette
+ * before the title. Both are always there and show only with the markers.
+ */
+function markCard(card: HTMLElement, row: HTMLElement, agent: string): void {
+  card.style.setProperty("--hue", `var(${agentInfo(agent).hue})`);
+  card.prepend(el("span", "edge"));
+  row.prepend(agentGlyph(agent, 12));
+}
+
+/** Who the session belongs to, at the head of a hover, while the markers show. */
+function agentPrefix(agent: string): string {
+  return markers ? `${agentInfo(agent).label} · ` : "";
 }
 
 function createCard(view: SessionView): HTMLElement {
@@ -379,13 +495,15 @@ function createCard(view: SessionView): HTMLElement {
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  // A click on the title renames the session through the agent; anywhere else on the card jumps to it.
-  const title = el("span", "title rename");
-  title.title = "Rename session";
-  title.addEventListener("click", (event) => {
-    event.stopPropagation();
-    vscode.postMessage({ type: "rename", id: view.id });
-  });
+  // A click on the title renames the session through the agent, when it can; anywhere else on the card jumps to it.
+  const title = el("span", canRename(view) ? "title rename" : "title");
+  if (canRename(view)) {
+    title.title = "Rename session";
+    title.addEventListener("click", (event) => {
+      event.stopPropagation();
+      vscode.postMessage({ type: "rename", id: view.id });
+    });
+  }
   row.append(title, el("span", "elapsed"));
   const line = el("span", "line");
   line.append(el("span", "mark"), el("span", "kind"), el("span", "text"));
@@ -414,6 +532,7 @@ function createCard(view: SessionView): HTMLElement {
   actions.append(seen, starButton(view.id));
   // In the title row, after the time: the same place as the star on earlier cards.
   row.append(actions);
+  markCard(card, row, view.agent);
   card.addEventListener("click", () => harbour.jump(view.id));
   card.addEventListener("mouseenter", () => harbour.highlight(view.id, true));
   card.addEventListener("mouseleave", () => harbour.highlight(view.id, false));
@@ -424,7 +543,7 @@ const MARKS = { waiting: "?", working: "›", done: "✓", idle: "", unknown: ""
 
 /** The card's hover: state, what it asks, and where the state comes from. */
 function cardTitle(view: SessionView): string {
-  const lines = [`${stateTitle(view)} · ${view.title}`];
+  const lines = [`${agentPrefix(view.agent)}${stateTitle(view)} · ${view.title}`];
   if (view.state === "waiting") lines.push(describeReason(view.reason));
   const quiet = quietFor(view, now());
   if (quiet !== undefined) lines.push(`Nothing written to its transcript for ${formatElapsed(quiet)}.`);
@@ -456,7 +575,7 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   const typed = view.reason?.kind === "typed";
   const quiet = quietFor(view, now()) !== undefined;
   const prose = view.state === "waiting" && view.reason !== undefined && view.reason.kind !== "permission";
-  card.className = `card state-${view.state} host-${view.host}${typed ? " typed" : ""}${quiet ? " quiet" : ""}${prose ? " prose" : ""}`;
+  card.className = `card state-${view.state} host-${view.host}${typed ? " typed" : ""}${quiet ? " quiet" : ""}${prose ? " prose" : ""}${markers ? " marked" : ""}${canJump(view) ? "" : " nojump"}`;
   card.classList.toggle("seen", (view as { seen?: boolean }).seen === true);
   card.title = cardTitle(view);
   card.querySelector(".title")!.textContent = view.title;
@@ -577,6 +696,7 @@ function createPastCard(view: PastView): HTMLElement {
   row.append(el("span", "title"), el("span", "elapsed"), starButton(view.id));
   main.append(row, el("span", "chips"), el("span", "hits hidden"));
   card.append(main);
+  markCard(card, row, view.agent);
   card.addEventListener("click", () => {
     // The agent resumes only the sessions of this window's folders; another project's opens its conversation.
     if (card.dataset.resumable === "true") vscode.postMessage({ type: "resume", id: view.id });
@@ -589,11 +709,19 @@ function pastElapsed(view: PastView): string {
   return `${formatElapsed(now() - view.modifiedAt)} ago`;
 }
 
+/** What a click on an earlier session does, and why. */
+function pastTitle(view: PastView, resumable: boolean): string {
+  const written = `Not running · last written ${pastElapsed(view)}`;
+  if (resumable) return `${written} · click to resume it in the agent's panel`;
+  if (view.resumable) return `${written} · click to read its conversation; Lookout cannot resume ${agentInfo(view.agent).label}'s sessions`;
+  return `${written} · from ${view.cwd || "another project"}, not one of this window's folders: click to read its conversation; the agent resumes it from a window open on that folder`;
+}
+
 function updatePastCard(card: HTMLElement, view: PastView): void {
-  card.dataset.resumable = String(view.resumable);
-  card.title = view.resumable
-    ? `Not running · last written ${pastElapsed(view)} · click to resume it in the agent's panel`
-    : `Not running · last written ${pastElapsed(view)} · from ${view.cwd || "another project"}, not one of this window's folders: click to read its conversation; the agent resumes it from a window open on that folder`;
+  const resumable = canResume(view);
+  card.dataset.resumable = String(resumable);
+  card.classList.toggle("marked", markers);
+  card.title = `${agentPrefix(view.agent)}${pastTitle(view, resumable)}`;
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   setStar(card, view.id);
@@ -613,7 +741,7 @@ function favouriteOf(id: string): { live?: SessionView; past?: PastView } {
   return view ? { past: view } : {};
 }
 
-function createFavouriteCard(id: string): HTMLElement {
+function createFavouriteCard(id: string, agent: string): HTMLElement {
   const card = el("button", "card fav");
   card.type = "button";
   card.dataset.id = id;
@@ -623,11 +751,12 @@ function createFavouriteCard(id: string): HTMLElement {
   row.append(el("span", "title"), el("span", "elapsed"), starButton(id));
   main.append(row, el("span", "chips"));
   card.append(main);
+  markCard(card, row, agent);
   card.addEventListener("click", () => {
     const { live, past: view } = favouriteOf(id);
     if (live) harbour.jump(id);
     // The agent resumes only the sessions of this window's folders; another project's opens its conversation.
-    else if (view?.resumable) vscode.postMessage({ type: "resume", id });
+    else if (view && canResume(view)) vscode.postMessage({ type: "resume", id });
     else if (view) vscode.postMessage({ type: "openHit", query, id });
   });
   return card;
@@ -635,8 +764,15 @@ function createFavouriteCard(id: string): HTMLElement {
 
 function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, view: PastView | undefined): void {
   const shown = (live ?? view)!;
-  card.className = live ? `card fav state-${live.state}` : "card fav past";
-  card.title = live ? `${stateTitle(live)} · click to jump to it` : view!.resumable ? "Not running · click to resume it in the agent's panel" : `Not running · from ${view!.cwd || "another project"}: click to read its conversation`;
+  card.className = `${live ? `card fav state-${live.state}${canJump(live) ? "" : " nojump"}` : "card fav past"}${markers ? " marked" : ""}`;
+  const title = live
+    ? `${stateTitle(live)}${canJump(live) ? " · click to jump to it" : ""}`
+    : canResume(view!)
+      ? "Not running · click to resume it in the agent's panel"
+      : view!.resumable
+        ? `Not running · click to read its conversation; Lookout cannot resume ${agentInfo(view!.agent).label}'s sessions`
+        : `Not running · from ${view!.cwd || "another project"}: click to read its conversation`;
+  card.title = `${agentPrefix(shown.agent)}${title}`;
   card.querySelector(".title")!.textContent = shown.title;
   card.querySelector(".elapsed")!.textContent = live ? `${stateTitle(live)}${elapsedText(live) ? ` · ${elapsedText(live)}` : ""}` : pastElapsed(view!);
   setStar(card, shown.id);
@@ -675,7 +811,7 @@ function renderFavourites(after: HTMLElement): HTMLElement {
   for (const f of shown) {
     let card = favouriteCards.get(f.id);
     if (!card) {
-      card = createFavouriteCard(f.id);
+      card = createFavouriteCard(f.id, (f.live ?? f.past)!.agent);
       favouriteCards.set(f.id, card);
     }
     updateFavouriteCard(card, f.live, f.past);
@@ -731,7 +867,7 @@ function renderEarlier(after: HTMLElement): void {
     heading.append(scopes);
     heading.addEventListener("click", () => {
       earlierOpen = !earlierOpen;
-      vscode.setState({ hidden: [...hidden], earlier: earlierOpen });
+      saveState();
       render();
     });
     earlierEl.append(heading, el("p", "note hidden"), el("div", "cards"));
@@ -785,7 +921,7 @@ function render(): void {
     cards.clear();
     const empty = el("div", "nothing");
     if (query !== "") empty.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message; since:, before:, project:, branch: and file: narrow the search. Esc clears it."));
-    else if (allSessions.length > 0) empty.append(el("p", "big", "Everything is hidden"), el("p", "small", "Click a state in the legend to show it again."));
+    else if (allSessions.length > 0) empty.append(el("p", "big", "Everything is hidden"), el("p", "small", markers && hiddenAgents.size > 0 ? "Click a state or an agent in the legend to show it again." : "Click a state in the legend to show it again."));
     else empty.append(el("p", "big", "Nothing on the horizon"), el("p", "small", "Sessions appear here as soon as an agent starts."));
     root.append(empty);
     renderFavourites(beam);
@@ -865,7 +1001,7 @@ function tick(): void {
     if (card) card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   }
   renderBeam();
-  if (usage) renderMeters();
+  if (usageGroups.length) renderMeters();
 }
 
 window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
@@ -879,7 +1015,10 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   past = message.past ?? [];
   if (message.earlier) earlier = message.earlier;
   favourites = message.favourites ?? { ids: [], past: [] };
-  usage = message.usage;
+  // One group, from an extension that knew only Claude's usage, or one per agent.
+  usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);
+  usageBar = message.usageBar;
+  markers = message.markers === true;
   clockOffset = message.now - Date.now();
   applyFilters();
   render();

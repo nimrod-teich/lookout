@@ -1,8 +1,14 @@
+import { agentInfo } from "../core/agents/catalog";
 import { quietFor } from "../core/format";
 import type { SessionView, State } from "../core/types";
 
 /** The lighthouse, from the icon font the extension contributes (`contributes.icons`). */
 export const BRAND_ICON = "$(lookout-lighthouse)";
+
+/** An agent's mark from the same font: its boat. */
+export function agentIcon(agent: string): string {
+  return `$(${agentInfo(agent).glyph.icon})`;
+}
 
 /** Codicon for each session state; `~spin` animates in the VS Code UI. */
 export const STATE_ICON: Record<State, string> = {

@@ -12,6 +12,11 @@
   --mark: rgba(255, 176, 0, 0.32);
   --mark-strong: rgba(255, 176, 0, 0.62);
   --mono: var(--vscode-editor-font-family, ui-monospace, Menlo, Consolas, monospace);
+  /* Each agent's accent on the night palette (src/core/agents/catalog.ts lists the same values). */
+  --agent-claude: #f7906c;
+  --agent-codex: #7ae8df;
+  --agent-copilot: #9373ea;
+  --agent-other: #9fb0c0;
 }
 
 body {
@@ -89,6 +94,17 @@ body {
 }
 
 .heading .where:empty {
+  display: none;
+}
+
+/* The session's agent, while the markers show. */
+.heading .agent {
+  flex: none;
+  align-self: center;
+  display: flex;
+}
+
+.heading .agent:empty {
   display: none;
 }
 

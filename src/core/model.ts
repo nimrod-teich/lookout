@@ -1,4 +1,5 @@
 import type { AgentSession, PastSession } from "./agents/agent";
+import { canJump } from "./agents/catalog";
 import type { Host, PastView, SessionView, State } from "./types";
 import type { OtherWindow } from "./windows";
 
@@ -63,12 +64,13 @@ export function isHere(view: SessionView): boolean {
 }
 
 /**
- * The session to jump to after `lastId` among those that need attention here:
+ * The session to jump to after `lastId` among those that need attention here
+ * and that their agent lets Lookout bring forward:
  * the next one in attention order, wrapping around, or the first when `lastId`
  * is not among them any more.
  */
 export function nextAttention(views: readonly SessionView[], lastId: string | undefined): SessionView | undefined {
-  const candidates = views.filter((view) => (view.state === "waiting" || view.state === "done") && isHere(view));
+  const candidates = views.filter((view) => (view.state === "waiting" || view.state === "done") && isHere(view) && canJump(view));
   if (candidates.length === 0) return undefined;
   const index = candidates.findIndex((view) => view.id === lastId);
   return candidates[(index + 1) % candidates.length];

@@ -21,7 +21,12 @@ export interface BoardActions {
   toggleFavourite(id: string): void;
   /** Resumes a past session in the agent's panel. */
   resume(id: string): void;
-  usage(): BoardUsage | undefined;
+  /** One agent's usage, or each agent's. */
+  usage(): BoardUsage | BoardUsage[] | undefined;
+  /** The agent whose bar the status bar shows. */
+  usageBar?(): string | undefined;
+  /** Tell the agents apart. */
+  markers?(): boolean;
   refreshUsage(): void;
   jump(view: SessionView): Promise<void>;
   rename(view: SessionView): Promise<void>;
@@ -72,7 +77,17 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
     if (this.view) {
       this.view.badge = attention > 0 ? { value: attention, tooltip: `${counts.waiting} need you, ${counts.done} finished` } : undefined;
       if (this.view.visible) {
-        const message: ToBoard = { type: "sessions", sessions: [...sessions], past: [...this.actions.past()], now: Date.now(), usage: this.actions.usage(), earlier: this.actions.earlier(), favourites: this.actions.favourites() };
+        const message: ToBoard = {
+          type: "sessions",
+          sessions: [...sessions],
+          past: [...this.actions.past()],
+          now: Date.now(),
+          usage: this.actions.usage(),
+          usageBar: this.actions.usageBar?.(),
+          markers: this.actions.markers?.(),
+          earlier: this.actions.earlier(),
+          favourites: this.actions.favourites(),
+        };
         void this.view.webview.postMessage(message);
       }
     }

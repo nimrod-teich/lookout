@@ -2,6 +2,7 @@
 // The harbour: a night scene with the lighthouse, its beam, and the sessions
 // as boats on the water. The beam sweeps on its own, lights the boats it
 // passes, and swings to a boat before a jump.
+import { agentInfo } from "../core/agents/catalog";
 import type { SessionView } from "../core/types";
 import { HARBOUR, layoutBoats, waterline, type Boat } from "./model";
 
@@ -14,6 +15,8 @@ const SWEEP_TO = 27;
 const SWEEP_PERIOD_MS = 9000;
 const SWING_MS = 380;
 const FRAME_MS = 33;
+/** The agent's boat in the harbour: its silhouette at this scale, the lantern on its deck. */
+const CRAFT_SCALE = 0.95;
 const STARS: [number, number, number][] = [[62, 14, 0.6], [118, 28, 0.45], [151, 10, 0.7], [196, 22, 0.5], [233, 38, 0.3], [262, 12, 0.6], [286, 30, 0.4], [94, 46, 0.3], [176, 44, 0.35], [222, 7, 0.4]];
 
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}, className?: string): SVGElementTagNameMap[K] {
@@ -40,6 +43,8 @@ export class Harbour {
     private readonly onJump: (id: string) => void,
     /** Called with the boat under the pointer, in SVG units, and with nothing when it leaves. */
     private readonly onHover: (boat: Boat | undefined) => void = () => {},
+    /** Lookout can bring the session forward; a boat it cannot is not a link. */
+    private readonly jumpable: (id: string) => boolean = () => true,
   ) {
     this.reduceMotion = document.body.classList.contains("vscode-reduce-motion");
     const root = svg("svg", { viewBox: `0 0 ${HARBOUR.width} ${HARBOUR.height}`, preserveAspectRatio: "xMidYMax slice" }, "harbour");
@@ -91,8 +96,8 @@ export class Harbour {
     return g;
   }
 
-  /** Updates the boats and the tide. */
-  update(views: readonly SessionView[], usagePercent: number | undefined, now: number): void {
+  /** Updates the boats and the tide; with `markers`, each boat wears its agent's silhouette and hue. */
+  update(views: readonly SessionView[], usagePercent: number | undefined, now: number, markers = false): void {
     const water = waterline(usagePercent);
     this.setWater(water, usagePercent);
     const seen = new Set<string>();
@@ -120,7 +125,8 @@ export class Harbour {
         this.boats.set(boat.id, entry);
       }
       entry.boat = boat;
-      entry.node.setAttribute("class", `boat state-${boat.state}${entry.node.classList.contains("hover") ? " hover" : ""}`);
+      this.dress(entry.node, boat.agent, markers);
+      entry.node.setAttribute("class", `boat state-${boat.state}${markers ? " marked" : ""}${this.jumpable(boat.id) ? "" : " nojump"}${entry.node.classList.contains("hover") ? " hover" : ""}`);
       entry.node.setAttribute("transform", `translate(${boat.x} ${boat.y})`);
       const label = entry.node.querySelector(".label")!;
       label.textContent = boat.label ?? "";
@@ -136,6 +142,30 @@ export class Harbour {
       this.boats.delete(id);
     }
     this.light();
+  }
+
+  /**
+   * Puts the agent's silhouette under the boat's lantern, or takes it away:
+   * the lantern keeps its place and its state colour at the masthead, the
+   * hull and sails take the agent's hue.
+   */
+  private dress(node: SVGGElement, agent: string, markers: boolean): void {
+    let craft = node.querySelector<SVGPathElement>(".craft");
+    if (!markers) {
+      craft?.remove();
+      return;
+    }
+    const { glyph, colors } = agentInfo(agent);
+    if (!craft) {
+      craft = svg("path", {}, "craft");
+      node.insertBefore(craft, node.querySelector(".halo"));
+    }
+    // The scene is a night one whatever the theme: the hue for dark backgrounds.
+    craft.style.fill = colors.dark;
+    if (craft.getAttribute("d") !== glyph.path) {
+      craft.setAttribute("d", glyph.path);
+      craft.setAttribute("transform", `scale(${CRAFT_SCALE}) translate(${-glyph.lamp[0]} ${-glyph.lamp[1]})`);
+    }
   }
 
   /** Lights a boat from outside, for the card the pointer is on. */
@@ -166,6 +196,7 @@ export class Harbour {
 
   /** Swings the beam to the boat, then jumps; without the boat, or under reduced motion, jumps at once. */
   jump(id: string): void {
+    if (!this.jumpable(id)) return;
     const entry = this.boats.get(id);
     if (!entry || this.reduceMotion) {
       this.onJump(id);
