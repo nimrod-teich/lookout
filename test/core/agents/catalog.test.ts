@@ -129,7 +129,9 @@ describe("capabilities", () => {
     expect(canRename({ agent: "codex" })).toBe(false);
     expect(canResume({ agent: "claude-code", resumable: true })).toBe(true);
     expect(canResume({ agent: "claude-code", resumable: false })).toBe(false);
-    expect(canResume({ agent: "codex", resumable: true })).toBe(true);
-    expect(canResume({ agent: "copilot", resumable: true })).toBe(false);
+    for (const agent of AGENTS) {
+      expect(canResume({ agent: agent.id, resumable: true }), agent.key).toBe(agent.capabilities.resume);
+      expect(canRename({ agent: agent.id }), agent.key).toBe(agent.capabilities.rename);
+    }
   });
 });

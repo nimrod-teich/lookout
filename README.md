@@ -71,7 +71,7 @@ Running several AI coding agents at once means clicking through tabs to find out
   </tr>
   <tr>
     <td><b>No&nbsp;setup</b></td>
-    <td>Lookout reads the state the agent already records on disk. It installs no hooks, reads no credentials, and sends nothing off the machine. The programs it starts are Claude Code's own binary, to refresh the usage numbers, and your desktop's own notifier for desktop notifications.</td>
+    <td>Lookout reads the state the agent already records on disk. It installs no hooks, reads no credentials, and sends nothing off the machine. The programs it starts are Claude Code's own binary, to refresh the usage numbers, your desktop's own notifier for desktop notifications, and, on macOS and Windows, the system's process list (`ps` and `lsof`, Windows PowerShell) to find the agents' processes.</td>
   </tr>
 </table>
 
@@ -92,10 +92,13 @@ Running several AI coding agents at once means clicking through tabs to find out
 | Agent | Live sessions | Jump to terminal | Jump to tab | Rename | Resume | Search | Usage |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | [Claude Code](https://claude.com/claude-code) | ✓ in the VS Code panel and in terminals | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| [Codex](https://github.com/openai/codex) | ✓ the `codex` program in terminals | ✓ | — | — | — | — | — |
 
 **Live sessions**: where Lookout finds the agent's running sessions. **Jump to terminal** and **Jump to tab**: Lookout brings a session in a VS Code terminal, or in the agent's own editor tab, to the front, in any VS Code window on the same machine. **Rename**: a click on a card's title renames the session through the agent (Claude: its own rename in the panel, `/rename` in a terminal). **Resume**: a click on an earlier session of this window's folders resumes it (Claude: in its panel). **Search**: the board's search, the search page and the conversation tab read the agent's conversations. **Usage**: the account's limits on the board and in the status bar. Where an agent lacks one, Lookout leaves that action out rather than offering one that fails.
 
-Each agent has its own colour and boat: Claude a coral sloop. Once the board shows two or more agents, running, among the earlier sessions or in the usage, they mark every place a session shows: the boat's hull and sails in the harbour (its lantern keeps the state's colour), a thin edge on the card and a small boat before its title, a chip per agent in the legend that hides that agent's sessions, usage and search matches, the jump list, the status bar's hover, the usage groups, the search page and the conversation tab, with the agent's name in hovers and lists. With one agent nothing changes (`lookout.agentMarkers` shows them always, or never). Red, amber and green stay the colours of states and usage; the agents' colours differ from them and from each other in lightness too, and a boat always stands next to the colour.
+Codex's own panel in VS Code (the Codex extension) is not watched: the extension serves all its threads from one process, and offers no command that brings a given thread forward. Its sessions in a terminal, `codex` and `codex resume`, are.
+
+Each agent has its own colour and boat: Claude a coral sloop, Codex a teal cutter. Once the board shows two or more agents, running, among the earlier sessions or in the usage, they mark every place a session shows: the boat's hull and sails in the harbour (its lantern keeps the state's colour), a thin edge on the card and a small boat before its title, a chip per agent in the legend that hides that agent's sessions, usage and search matches, the jump list, the status bar's hover, the usage groups, the search page and the conversation tab, with the agent's name in hovers and lists. With one agent nothing changes (`lookout.agentMarkers` shows them always, or never). Red, amber and green stay the colours of states and usage; the agents' colours differ from them and from each other in lightness too, and a boat always stands next to the colour.
 
 Sessions in another VS Code window are listed with that window's name, and a jump to one goes through that window. Windows see each other through a folder in the extension's global storage, so only windows whose extensions run on the same machine, in the same VS Code profile, see each other: a window connected over SSH or to a container sees the other windows connected to the same host, not your local ones. Sessions in a terminal outside VS Code are listed as such; they can be searched and read, not jumped to.
 
@@ -155,6 +158,8 @@ Windows and macOS support is new. The process handling is tested on both in CI; 
 | `lookout.state.typedQuestions` | `true` | Count an idle session as needing you when its last reply asks you something. Off: such sessions are Finished or Idle like any other. |
 | `lookout.statusBar.usageAgent` | `auto` | Whose usage the status bar's bar shows when more than one agent reports usage: `auto`, the window under the most pressure (the highest share used, fresh numbers first), or `claude`, `codex`, `copilot`. A pinned agent that reports none leaves the bar to `auto`. |
 | `lookout.agentMarkers` | `auto` | When to tell agents apart by colour and boat: `auto` once the board shows two or more agents (running, earlier or in the usage), `always`, or `never`. |
+| `lookout.agents.codex` | `true` | Watch Codex sessions: the `codex` program in a terminal. |
+| `lookout.codexHome` | `""` | Codex's home folder, where its `sessions` are. Empty uses `CODEX_HOME`, then `~/.codex`. |
 | `lookout.claudeConfigDir` | `""` | Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`. |
 
 ## How it works
@@ -188,6 +193,22 @@ With Claude Code:
 | Usage | `~/.claude.json`, where Claude Code caches the usage it last fetched (`cachedUsageUtilization`); with another config directory, `.claude.json` inside it. Numbers cached for another account than the signed-in one, or a cache that does not parse, show "No usage reported". A refresh starts the Claude Code binary bundled with the Claude Code extension, with `CLAUDE_CONFIG_DIR` set to the config directory Lookout reads, and sends it a `get_usage` request; it fetches with its own credentials, calls no model, and rewrites its cache. The numbers shown then come from that cache, not from the binary's answer; a refresh that leaves the cache as it was counts as failed. Lookout never reads your credentials. No refresh starts while `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set in VS Code's environment, in the Claude Code extension's `claudeCode.environmentVariables`, or in the `env` of Claude Code's `settings.json` (read before each refresh, never written); <code>Lookout: Refresh Usage</code> says so. |
 
 These files and that command are internal to Claude Code and can change between versions.
+
+With Codex (checked against Codex 0.163.0), which keeps no file per running session, so Lookout reads the state from what Codex appends to its rollouts and says so in the card's hover ("From the rollout tail"):
+
+| What | Where it comes from |
+| --- | --- |
+| Which sessions exist | The `codex` processes running interactively: `codex`, `codex "<prompt>"`, `codex resume`, `codex fork`, but not `codex app-server` (the Codex extension's server and Codex's own daemon), `codex exec` or the other commands. Linux: `/proc`, with each process's directory. macOS: `ps`, and each new process's directory once from `lsof`. Windows: the process list from PowerShell, which gives no directory. A session with nothing sent yet has no rollout and stays off the board while it is idle; so does one waiting on Codex's own start-up questions, such as whether to trust a folder, which Codex writes nowhere. |
+| Which rollout is whose | Codex writes each thread to `<home>/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`, its first line `session_meta` with the thread's id, directory (`cwd`) and who wrote it (`originator`, `codex-tui` for the terminal program). Codex neither names its thread anywhere a process can be tied to nor keeps the file open, so: `codex resume <id>` names its thread; otherwise a process takes a rollout of its own directory written while it ran, the newest process first, each preferring a thread created after it started, then the one written last (a thread switched to with `/new` or `/resume` counts), then, of two written in the same second, the one that moved since the last look. Threads the terminal program wrote go before those of other originators. Two sessions in one folder can trade places when one switches threads after the other started. |
+| State | The rollout's last records: `event_msg` `task_started` opens a turn (working), `task_complete` or `turn_aborted` ends it (idle); a turn read from its middle goes by the last record. A record Codex writes after an interrupt, when a command it left running in the background ends, does not reopen the turn. |
+| Why a session waits | A command Codex runs is a `response_item` `custom_tool_call` named `exec`, whose input calls `tools.exec_command({cmd, …})`; one that asks for `sandbox_permissions: "require_escalated"` and has no `custom_tool_call_output` yet is waiting for your approval: a **permission**, quoting the command, with Codex's justification kept as its own words. Codex writes no event for the approval prompt itself, and an approved command's result follows within a second while it runs on in the background, so a wait is read right after approval for that second at most. A `function_call` `request_user_input_async` with a question and its options is a **question**: Codex accepts it at once and ends the turn, and it stays open until your next message. A reply that ends on a question is read as for Claude. |
+| Title | Codex's own name for the thread, from `<home>/session_index.jsonl` (`thread_name`); before Codex names it, the first prompt, cut to 60 characters. |
+| Model, effort, context | `turn_context` (`model`, the collaboration mode's `reasoning_effort`); `event_msg` `token_count` (`last_token_usage.total_tokens` of `model_context_window`). |
+| Branch | Read from git itself in the session's directory: Codex's rollouts record none. |
+| Quiet, pulse, activity | When the rollout was last written; the times of its tool calls; the command of the last call without a result. |
+| When to look again | The sessions folder is watched, its date folders included, with the poll every 5 s as a backstop. |
+
+Codex's home is `lookout.codexHome`, else `CODEX_HOME`, else `~/.codex`; Codex has no setting that moves its sessions elsewhere, so its `config.toml` is never read. Lookout never reads Codex's `auth.json` and calls nothing of OpenAI's. These files are internal to Codex and can change between versions.
 
 ## Development
 
