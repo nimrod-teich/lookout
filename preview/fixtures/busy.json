@@ -25,7 +25,26 @@
         "resetsAt": 400000000,
         "windowMs": 604800000
       }
-    ]
+    ],
+    "pace": {
+      "session": {
+        "perHour": 9,
+        "fullAt": 32800000,
+        "runsOut": false,
+        "atReset": 38
+      },
+      "weekly_all": {
+        "perHour": 0.4,
+        "fullAt": 621000000,
+        "runsOut": false,
+        "atReset": 75
+      },
+      "weekly_scoped:Fable": {
+        "perHour": 0.6,
+        "fullAt": 96000000,
+        "runsOut": true
+      }
+    }
   },
   "sessions": [
     {

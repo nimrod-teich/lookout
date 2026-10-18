@@ -1,1 +1,9 @@
-{ "sessions": [] }
+{
+  "sessions": [],
+  "usage": {
+    "stale": false,
+    "canRefresh": true,
+    "meters": [],
+    "pace": {}
+  }
+}

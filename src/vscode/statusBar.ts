@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { countStates, describeLocation, describeState, formatElapsed, quietFor, type Counts } from "../core/format";
+import { countStates, describeLocation, describePace, describeState, formatCountdown, formatElapsed, formatUntil, quietFor, type Counts } from "../core/format";
 import type { SessionView } from "../core/types";
 import type { UsageMeter } from "../core/usage";
 import type { Usage } from "./controller";
@@ -10,17 +10,25 @@ const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "
 const FRAME_MS = 100;
 /** How often the elapsed times in the hover are refreshed. */
 const TOOLTIP_MS = 60_000;
+/** Lands the countdown's rewrite just past the turn of its minute. */
+const COUNTDOWN_SLACK_MS = 50;
 const USAGE_ERROR_AT = 95;
 /** Cells in the usage bar. */
 const BAR_CELLS = 10;
 /** The bar's colour by consumption, like the board's meters: calm below half, amber from half, red from 80%. */
 const BAR_COLORS = { low: "charts.green", mid: "charts.yellow", high: "charts.red" } as const;
+/** Numbers too old to go by. */
+const STALE_COLOR = "disabledForeground";
 
 export interface StatusBarInput {
   views: readonly SessionView[];
   usage: Usage | undefined;
+  /** Why the usage numbers are not kept fresh, when that needs saying. */
+  usageNote?: string;
   enabled: boolean;
   showUsage: boolean;
+  /** The time until the 5-hour window resets, after the bar. */
+  showReset: boolean;
   canRefreshUsage: boolean;
 }
 
@@ -53,9 +61,20 @@ function usageLevel(percent: number): keyof typeof BAR_COLORS {
   return percent >= 80 ? "high" : percent >= 50 ? "mid" : "low";
 }
 
-function usageText(usage: Usage | undefined): string {
+function usageText(usage: Usage | undefined, showReset: boolean, now: number): string {
   const meter = sessionMeter(usage);
-  return meter ? `${usageBar(meter.percent)} ${meter.percent}%` : "";
+  if (!meter) return "";
+  const reset = showReset && meter.resetsAt !== undefined && meter.resetsAt > now ? ` · ${formatCountdown(meter.resetsAt - now)}` : "";
+  return `${usageBar(meter.percent)} ${meter.percent}%${reset}`;
+}
+
+/** Grey when stale, red when the pace runs out before the reset, else by consumption. */
+function usageColor(usage: Usage | undefined): string {
+  const meter = sessionMeter(usage);
+  if (!usage || !meter) return "";
+  if (usage.stale) return STALE_COLOR;
+  if (usage.pace[meter.key]?.runsOut) return BAR_COLORS.high;
+  return BAR_COLORS[usageLevel(meter.percent)];
 }
 
 function spokenText(counts: Counts, quiet: number, usage: Usage | undefined): string {
@@ -66,7 +85,7 @@ function spokenText(counts: Counts, quiet: number, usage: Usage | undefined): st
 
 function resetText(resetsAt: number | undefined, now: number): string {
   if (resetsAt === undefined || resetsAt <= now) return "";
-  return ` · resets in ${formatElapsed(resetsAt - now)}`;
+  return ` · resets in ${formatUntil(resetsAt - now)}`;
 }
 
 function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
@@ -83,14 +102,19 @@ function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
     md.appendMarkdown("---\n\n**Claude usage**  \n");
     if (input.usage) {
       for (const meter of input.usage.meters) {
-        md.appendText(`${meter.label}: ${meter.percent}%${resetText(meter.resetsAt, now)}`);
+        const pace = describePace(input.usage.pace[meter.key], meter, now);
+        md.appendText(`${meter.label}: ${meter.percent}%${resetText(meter.resetsAt, now)}${pace ? ` · ${pace}` : ""}`);
         md.appendMarkdown("  \n");
       }
       md.appendText(`As of ${formatElapsed(now - input.usage.fetchedAt)} ago${input.usage.stale ? " (stale)" : ""}`);
-      md.appendMarkdown("\n\n");
     } else {
-      md.appendMarkdown(input.canRefreshUsage ? "No numbers yet; run Lookout: Refresh Usage.\n\n" : "No numbers.\n\n");
+      md.appendText(`No usage reported${input.canRefreshUsage && !input.usageNote ? "; run Lookout: Refresh Usage" : ""}`);
     }
+    if (input.usageNote) {
+      md.appendMarkdown("  \n");
+      md.appendText(`Usage ${input.usageNote}`);
+    }
+    md.appendMarkdown("\n\n");
   }
   md.appendMarkdown("Click to jump to a session");
   return md;
@@ -107,13 +131,15 @@ export class StatusBar implements vscode.Disposable {
   private readonly warning = new vscode.ThemeColor("statusBarItem.warningBackground");
   private readonly error = new vscode.ThemeColor("statusBarItem.errorBackground");
   private shown = { visible: false, text: "", spoken: "", tooltip: "", background: "", color: "" };
-  private input: StatusBarInput = { views: [], usage: undefined, enabled: true, showUsage: true, canRefreshUsage: false };
+  private input: StatusBarInput = { views: [], usage: undefined, enabled: true, showUsage: true, showReset: true, canRefreshUsage: false };
   private counts: Counts = countStates([]);
   /** Working sessions that have gone quiet. */
   private quiet = 0;
   private frame = 0;
   private spinner: ReturnType<typeof setInterval> | undefined;
   private ticker: ReturnType<typeof setInterval> | undefined;
+  /** Rewrites the text when the countdown's minute turns. */
+  private countdown: ReturnType<typeof setTimeout> | undefined;
 
   constructor(command: string) {
     this.item = vscode.window.createStatusBarItem("lookout.status", vscode.StatusBarAlignment.Left, 1000);
@@ -128,12 +154,13 @@ export class StatusBar implements vscode.Disposable {
     const visible = input.enabled && (input.views.length > 0 || (input.showUsage && input.usage !== undefined));
     this.spin(visible && this.counts.working > this.quiet);
     this.tick(visible);
+    this.countDown(visible, now);
     if (!visible) {
       if (this.shown.visible) this.item.hide();
       this.shown.visible = false;
       return;
     }
-    this.writeText();
+    this.writeText(now);
     const spoken = spokenText(this.counts, this.quiet, input.showUsage ? input.usage : undefined);
     if (spoken !== this.shown.spoken) {
       this.item.accessibilityInformation = { label: spoken };
@@ -141,7 +168,7 @@ export class StatusBar implements vscode.Disposable {
     }
     this.writeTooltip(now);
     const meter = input.showUsage ? sessionMeter(input.usage) : undefined;
-    const color = meter ? BAR_COLORS[usageLevel(meter.percent)] : "";
+    const color = input.showUsage ? usageColor(input.usage) : "";
     if (color !== this.shown.color) {
       this.item.color = color ? new vscode.ThemeColor(color) : undefined;
       this.shown.color = color;
@@ -157,8 +184,8 @@ export class StatusBar implements vscode.Disposable {
     this.shown.visible = true;
   }
 
-  private writeText(): void {
-    const usage = this.input.showUsage ? usageText(this.input.usage) : "";
+  private writeText(now: number = Date.now()): void {
+    const usage = this.input.showUsage ? usageText(this.input.usage, this.input.showReset, now) : "";
     const sessions = this.input.views.length > 0 ? sessionsText(this.counts, this.quiet, this.frame) : "";
     const text = `${BRAND_ICON} ${[sessions, usage].filter(Boolean).join("   ")}`;
     if (text !== this.shown.text) this.item.text = this.shown.text = text;
@@ -179,12 +206,32 @@ export class StatusBar implements vscode.Disposable {
         const now = Date.now();
         const quiet = this.input.views.filter((view) => quietFor(view, now) !== undefined).length;
         if (quiet !== this.quiet) this.render(this.input, now);
-        else this.writeTooltip(now);
+        else {
+          this.writeText(now);
+          this.writeTooltip(now);
+        }
       }, TOOLTIP_MS);
     } else if (!on && this.ticker) {
       clearInterval(this.ticker);
       this.ticker = undefined;
     }
+  }
+
+  /**
+   * Rewrites the text the moment the countdown's minute turns, rather than on
+   * the minute ticker, so it says the same as the board, which counts every second.
+   */
+  private countDown(on: boolean, now: number): void {
+    clearTimeout(this.countdown);
+    this.countdown = undefined;
+    const resetsAt = on && this.input.showUsage && this.input.showReset ? sessionMeter(this.input.usage)?.resetsAt : undefined;
+    if (resetsAt === undefined || resetsAt <= now) return;
+    const turns = (resetsAt - now) % 60_000 || 60_000;
+    this.countdown = setTimeout(() => {
+      const at = Date.now();
+      this.writeText(at);
+      this.countDown(true, at);
+    }, turns + COUNTDOWN_SLACK_MS);
   }
 
   private spin(on: boolean): void {
@@ -202,6 +249,7 @@ export class StatusBar implements vscode.Disposable {
   dispose(): void {
     this.spin(false);
     this.tick(false);
+    this.countDown(false, 0);
     this.item.dispose();
   }
 }

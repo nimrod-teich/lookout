@@ -624,22 +624,42 @@ body.vscode-reduce-motion .hover-card {
   font-size: calc(var(--vscode-font-size) - 3px);
 }
 
-.meter .reset:empty {
+.meter .reset.hidden {
   display: none;
 }
 
+/* Numbers too old to go by: grey bars. */
 .meters.stale .fill {
+  background: var(--idle);
   opacity: 0.45;
+}
+
+/* The pace runs out before the window resets. */
+.meter.runs-out .pace {
+  color: var(--vscode-errorForeground, #f14c4c);
 }
 
 .foot {
   grid-column: 1 / 4;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
   font-size: calc(var(--vscode-font-size) - 3px);
 }
 
+/* Wraps: the note says why the numbers may be old, and is the part that matters. */
+.foot .age {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.foot.none .age {
+  font-size: calc(var(--vscode-font-size) - 2px);
+}
+
 .foot .link {
+  flex: none;
   padding: 0;
   border: 0;
   background: none;

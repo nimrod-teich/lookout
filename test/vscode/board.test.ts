@@ -85,7 +85,7 @@ describe("Board", () => {
   });
 
   it("sends the usage along with the sessions and relays a refresh request", () => {
-    const usage: BoardUsage = { fetchedAt: 1, stale: false, canRefresh: true, meters: [{ key: "session", label: "5h", percent: 18 }] };
+    const usage: BoardUsage = { fetchedAt: 1, stale: false, canRefresh: true, meters: [{ key: "session", label: "5h", percent: 18 }], pace: {} };
     const { actions, webviewView } = setup([], usage);
     expect(webviewView.posted[0]).toMatchObject({ type: "sessions", usage });
     webviewView.receive({ type: "refreshUsage" });

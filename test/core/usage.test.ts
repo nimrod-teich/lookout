@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { isStale, metersOf, parseUsageCache, shouldAutoRefresh, UsageCache, usageCacheFile } from "../../src/core/usage";
+import { ClaudeSettingsEnv, envFlag, isStale, metersOf, NONESSENTIAL_TRAFFIC, parseUsageCache, readUsageCache, resetPassed, UsageCache, usageCacheFile, wantsRefresh } from "../../src/core/usage";
 import { tempConfigDir } from "./helpers";
 
 const LIMITS = {
@@ -32,6 +32,14 @@ describe("metersOf", () => {
     expect(metersOf(null)).toEqual([]);
     expect(metersOf({ limits: [] })).toEqual([]);
   });
+
+  it("reads the per-model weekly limits the cache carries next to the five-hour and seven-day ones", () => {
+    expect(metersOf({ five_hour: { utilization: 5 }, seven_day: { utilization: 9 }, seven_day_opus: { utilization: 40, resets_at: "2026-10-20T23:00:00Z" }, seven_day_sonnet: null, seven_day_oauth_apps: { utilization: 3 } })).toEqual([
+      { key: "session", label: "5h", percent: 5, resetsAt: undefined, windowMs: 5 * 3_600_000 },
+      { key: "weekly_all", label: "Week", percent: 9, resetsAt: undefined, windowMs: 7 * 24 * 3_600_000 },
+      { key: "weekly_scoped:Opus", label: "Week · Opus", percent: 40, resetsAt: Date.parse("2026-10-20T23:00:00Z"), windowMs: 7 * 24 * 3_600_000 },
+    ]);
+  });
 });
 
 describe("parseUsageCache", () => {
@@ -39,6 +47,12 @@ describe("parseUsageCache", () => {
     const config = { oauthAccount: { accountUuid: "acc-1" }, cachedUsageUtilization: { fetchedAtMs: 1_000, accountUuid: "acc-1", utilization: LIMITS } };
     expect(parseUsageCache(config)).toMatchObject({ fetchedAt: 1_000, meters: [{ key: "session" }, { key: "weekly_all" }, { key: "weekly_scoped:Fable" }] });
     expect(parseUsageCache({ cachedUsageUtilization: { fetchedAtMs: 1_000, utilization: LIMITS } })?.meters).toHaveLength(3);
+  });
+
+  it("says why there are no numbers to show", () => {
+    expect(readUsageCache({ oauthAccount: { accountUuid: "acc-2" }, cachedUsageUtilization: { fetchedAtMs: 1, accountUuid: "acc-1", utilization: LIMITS } })).toEqual({ snapshot: undefined, why: "other account" });
+    expect(readUsageCache({})).toEqual({ snapshot: undefined, why: "missing" });
+    expect(readUsageCache({ cachedUsageUtilization: { fetchedAtMs: 1, utilization: { nothing: 1 } } })).toEqual({ snapshot: undefined, why: "unreadable" });
   });
 
   it("ignores another account's numbers, and anything incomplete", () => {
@@ -51,22 +65,50 @@ describe("parseUsageCache", () => {
 });
 
 describe("staleness and refresh timing", () => {
-  it("calls numbers older than an hour stale", () => {
-    expect(isStale({ fetchedAt: 0, meters: [] }, 3_599_000)).toBe(false);
-    expect(isStale({ fetchedAt: 0, meters: [] }, 3_600_001)).toBe(true);
+  it("calls numbers stale when older than half an hour, or from before a window reset", () => {
+    expect(isStale({ fetchedAt: 0, meters: [] }, 30 * 60_000)).toBe(false);
+    expect(isStale({ fetchedAt: 0, meters: [] }, 30 * 60_000 + 1)).toBe(true);
+    const meters = [{ key: "session", label: "5h", percent: 92, resetsAt: 20 * 60_000 }];
+    expect(resetPassed({ fetchedAt: 0, meters }, 19 * 60_000)).toBe(false);
+    expect(isStale({ fetchedAt: 0, meters }, 20 * 60_000)).toBe(true);
+    // A reset already over when the numbers were fetched does not count.
+    expect(resetPassed({ fetchedAt: 30 * 60_000, meters }, 40 * 60_000)).toBe(false);
   });
 
-  it("refreshes automatically only in auto mode, when old, and not too often", () => {
-    const fresh = { fetchedAt: 100_000, meters: [] };
-    const old = { fetchedAt: 0, meters: [] };
+  it("wants an automatic refresh in auto mode only: no numbers, numbers older than 10 minutes, or from before a reset", () => {
     const now = 20 * 60_000;
-    expect(shouldAutoRefresh("auto", undefined, -Infinity, now)).toBe(true);
-    expect(shouldAutoRefresh("auto", old, -Infinity, now)).toBe(true);
-    expect(shouldAutoRefresh("auto", { fetchedAt: now - 60_000, meters: [] }, -Infinity, now)).toBe(false);
-    expect(shouldAutoRefresh("auto", old, now - 60_000, now)).toBe(false);
-    expect(shouldAutoRefresh("manual", old, -Infinity, now)).toBe(false);
-    expect(shouldAutoRefresh("off", undefined, -Infinity, now)).toBe(false);
-    expect(shouldAutoRefresh("auto", fresh, -Infinity, now)).toBe(true);
+    expect(wantsRefresh("auto", undefined, now)).toBe(true);
+    expect(wantsRefresh("auto", { fetchedAt: 0, meters: [] }, now)).toBe(true);
+    expect(wantsRefresh("auto", { fetchedAt: now - 60_000, meters: [] }, now)).toBe(false);
+    expect(wantsRefresh("auto", { fetchedAt: now - 60_000, meters: [{ key: "session", label: "5h", percent: 90, resetsAt: now - 1 }] }, now)).toBe(true);
+    expect(wantsRefresh("manual", { fetchedAt: 0, meters: [] }, now)).toBe(false);
+    expect(wantsRefresh("off", undefined, now)).toBe(false);
+  });
+});
+
+describe("the switch for nonessential traffic", () => {
+  it("counts a variable as set unless it is empty, 0, false, no or off", () => {
+    for (const on of ["1", "true", "yes", " TRUE ", 1, true]) expect(envFlag(on)).toBe(true);
+    for (const off of [undefined, null, "", "  ", "0", "false", "No", "OFF", 0, false, {}]) expect(envFlag(off)).toBe(false);
+  });
+
+  it("reads Claude Code's settings file, never writing it, and notices when it changes", () => {
+    const dir = tempConfigDir();
+    const file = path.join(dir, "settings.json");
+    const env = new ClaudeSettingsEnv(file);
+    expect(env.get(NONESSENTIAL_TRAFFIC)).toBeUndefined();
+    fs.writeFileSync(file, JSON.stringify({ env: { [NONESSENTIAL_TRAFFIC]: "1" } }));
+    expect(envFlag(env.get(NONESSENTIAL_TRAFFIC))).toBe(true);
+    // Rewritten with another size: read again.
+    fs.writeFileSync(file, JSON.stringify({ env: {}, model: "opus" }));
+    expect(env.get(NONESSENTIAL_TRAFFIC)).toBeUndefined();
+    fs.writeFileSync(file, "{ not json");
+    expect(env.get(NONESSENTIAL_TRAFFIC)).toBeUndefined();
+    fs.writeFileSync(file, JSON.stringify({ env: { [NONESSENTIAL_TRAFFIC]: "true" } }));
+    expect(env.get(NONESSENTIAL_TRAFFIC)).toBe("true");
+    fs.rmSync(file);
+    expect(env.get(NONESSENTIAL_TRAFFIC)).toBeUndefined();
+    expect(fs.readdirSync(dir).sort()).toEqual(["projects", "sessions"]);
   });
 });
 
@@ -92,6 +134,12 @@ describe("UsageCache", () => {
 
     fs.writeFileSync(file, JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: 3, utilization: { five_hour: { utilization: 30 } } } }));
     expect(cache.read()).toMatchObject({ fetchedAt: 3 });
+
+    // Still broken once it settled: nothing to show, rather than the last numbers.
+    fs.writeFileSync(file, "{ not json");
+    const settled = new Date(Date.now() - 10_000);
+    fs.utimesSync(file, settled, settled);
+    expect(cache.readWithReason()).toEqual({ snapshot: undefined, why: "unreadable" });
 
     fs.rmSync(file);
     expect(cache.read()).toBeUndefined();

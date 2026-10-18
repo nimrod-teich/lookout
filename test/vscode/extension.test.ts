@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { scopeOf } from "../../src/core/usageAlerts";
 import { activate } from "../../src/extension";
 import { createWebviewView, stub } from "./stub-vscode";
 
@@ -18,6 +19,7 @@ let configDir: string;
 let child: ChildProcess;
 let subscriptions: { dispose(): void }[];
 let saved: Record<string, unknown>;
+let savedGlobal: Record<string, unknown>;
 
 function context() {
   return {
@@ -28,6 +30,13 @@ function context() {
       get: (key: string, fallback: unknown) => saved[key] ?? fallback,
       update: (key: string, value: unknown) => {
         saved[key] = value;
+        return Promise.resolve();
+      },
+    },
+    globalState: {
+      get: (key: string, fallback: unknown) => savedGlobal[key] ?? fallback,
+      update: (key: string, value: unknown) => {
+        savedGlobal[key] = value;
         return Promise.resolve();
       },
     },
@@ -68,6 +77,7 @@ beforeEach(() => {
   child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
   subscriptions = [];
   saved = {};
+  savedGlobal = {};
 });
 
 afterEach(() => {
@@ -204,6 +214,149 @@ describe("the extension", () => {
     activate(context());
     await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▱▱▱▱▱▱▱▱ 18%"), WAIT);
   }, 60_000);
+
+  it("announces each usage threshold once per window, though every fetch reports the reset a fraction of a second apart", async () => {
+    const resets = Date.now() + 2 * 3_600_000;
+    const write = (percent: number, fraction: string) => {
+      const resetsAt = new Date(resets).toISOString().replace(/\.\d+Z$/, `.${fraction}+00:00`);
+      const utilization = { five_hour: { utilization: percent, resets_at: resetsAt }, seven_day: { utilization: 31 } };
+      fs.writeFileSync(path.join(configDir, ".claude.json"), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now(), utilization } }));
+    };
+    const warnings = () => stub.ops.filter(([target, action]) => target === "window" && action === "warning").map(([, , text]) => String(text));
+    write(72, "200799");
+    activate(context());
+    await vi.waitFor(() => expect(warnings()).toEqual([expect.stringMatching(/^Lookout: Your 5-hour limit is at 72%; it resets at (\w{3} )?\d\d:\d\d\.$/)]), WAIT);
+    write(75, "731412");
+    await vi.waitFor(() => expect(statusText()).toMatch(/ 75% · (1h59m|2h00m)$/), WAIT);
+    expect(warnings()).toHaveLength(1);
+    write(91, "112233");
+    await vi.waitFor(() => expect(warnings()).toHaveLength(2), WAIT);
+    expect(warnings()[1]).toMatch(/^Lookout: Your 5-hour limit is at 91%/);
+  }, 60_000);
+
+  it("leaves a usage alert for a moment to a window in front, then announces it itself", async () => {
+    stub.focused = false;
+    // Only the window's own warning: no desktop notification from a test.
+    stub.config["lookout.notifications.os"] = false;
+    const utilization = { five_hour: { utilization: 72, resets_at: new Date(Date.now() + 3_600_000).toISOString() } };
+    fs.writeFileSync(path.join(configDir, ".claude.json"), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now(), utilization } }));
+    const warnings = () => stub.ops.filter(([target, action]) => target === "window" && action === "warning");
+    const started = Date.now();
+    activate(context());
+    await vi.waitFor(() => expect(statusText()).toMatch(/ 72% · /), WAIT);
+    expect(warnings()).toEqual([]);
+    await vi.waitFor(() => expect(warnings()).toHaveLength(1), WAIT);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(9_000);
+  }, 60_000);
+
+  it("greys the usage out once it turns stale with refresh off, with no new reading", async () => {
+    stub.config["lookout.usage.refresh"] = "off";
+    const utilization = { five_hour: { utilization: 18 } };
+    fs.writeFileSync(path.join(configDir, ".claude.json"), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now() - 30 * 60_000 + 2_000, utilization } }));
+    const color = () => (stub.ops.filter(([target, action]) => target === "statusBar:lookout.status" && action === "set:color").at(-1)?.[2] as { id: string } | undefined)?.id;
+    activate(context());
+    await vi.waitFor(() => expect(color()).toBe("charts.green"), WAIT);
+    await vi.waitFor(() => expect(color()).toBe("disabledForeground"), WAIT);
+  }, 60_000);
+
+  it("forecasts from the readings it kept, and not from numbers too old to go by", async () => {
+    stub.config["lookout.usage.refresh"] = "off";
+    const resetsAt = Date.now() + 3 * 3_600_000;
+    const write = (ageMinutes: number) =>
+      fs.writeFileSync(
+        path.join(configDir, ".claude.json"),
+        JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now() - ageMinutes * 60_000, utilization: { five_hour: { utilization: 30, resets_at: new Date(resetsAt).toISOString() } } } }),
+      );
+    const tooltip = () => (stub.ops.filter(([target, action]) => target === "statusBar:lookout.status" && action === "set:tooltip").at(-1)?.[2] as { value: string } | undefined)?.value ?? "";
+    // 10% fifty minutes ago, 30% now: 40 points an hour runs out before the reset in three hours.
+    // Readings are kept per source of numbers: this config directory's cache.
+    const readings = () => ({ [scopeOf(path.join(configDir, ".claude.json"))]: { session: { resetsAt, samples: [{ at: Date.now() - 50 * 60_000, percent: 10 }] } } });
+    savedGlobal["lookout.usageReadings"] = readings();
+    write(20);
+    activate(context());
+    await vi.waitFor(() => expect(tooltip()).toMatch(/5h: 30% · resets in 3h 00m · at this pace 100% at (\w{3} )?\d\d:\d\d, resets (\w{3} )?\d\d:\d\d/), WAIT);
+    expect(Object.values(savedGlobal["lookout.usageReadings"] as Record<string, Record<string, { samples: unknown[] }>>)[0]!.session!.samples).toHaveLength(2);
+    for (const subscription of subscriptions.splice(0)) subscription.dispose();
+
+    // The same readings, but the numbers are 31 minutes old and nothing refreshes them.
+    stub.reset();
+    stub.config["lookout.claudeConfigDir"] = configDir;
+    stub.config["lookout.usage.refresh"] = "off";
+    savedGlobal["lookout.usageReadings"] = readings();
+    write(31);
+    activate(context());
+    await vi.waitFor(() => expect(tooltip()).toContain("stale"), WAIT);
+    expect(tooltip()).not.toContain("at this pace");
+  }, 60_000);
+
+  describe.skipIf(process.platform === "win32")("with a Claude Code binary to refresh usage", () => {
+    /**
+     * A stand-in for the binary the Claude Code extension ships: it answers
+     * get_usage with 18%, counts its runs, and, when told to, rewrites the
+     * cache in the config directory it was given with 44%.
+     */
+    function fakeClaude(rewritesCache: boolean): () => number {
+      const ext = path.join(configDir, "claude-ext");
+      const dir = path.join(ext, "resources", "native-binaries", `${process.platform}-${process.arch}`);
+      fs.mkdirSync(dir, { recursive: true });
+      const runs = path.join(configDir, "runs");
+      const script = path.join(configDir, "fake-claude.js");
+      fs.writeFileSync(
+        script,
+        `const fs = require("fs"), path = require("path");
+        fs.appendFileSync(${JSON.stringify(runs)}, "x");
+        process.stdin.resume();
+        process.stdin.on("end", () => {
+          if (${rewritesCache}) {
+            const utilization = { five_hour: { utilization: 44 }, seven_day: { utilization: 31 } };
+            fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, ".claude.json"), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now(), utilization } }));
+          }
+          const answer = { type: "control_response", response: { subtype: "success", request_id: "lookout-usage", response: { rate_limits: { five_hour: { utilization: 18 } } } } };
+          process.stdout.write(JSON.stringify(answer) + "\\n");
+          process.exit(0);
+        });`,
+      );
+      fs.writeFileSync(path.join(dir, "claude"), `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`, { mode: 0o755 });
+      stub.extension = { extensionPath: ext };
+      return () => (fs.existsSync(runs) ? fs.readFileSync(runs, "utf8").length : 0);
+    }
+    const tooltip = () => (stub.ops.filter(([target, action]) => target === "statusBar:lookout.status" && action === "set:tooltip").at(-1)?.[2] as { value: string } | undefined)?.value ?? "";
+
+    it("fetches into the cache of the config directory it reads, and shows the numbers from that cache", async () => {
+      const runs = fakeClaude(true);
+      activate(context());
+      // No numbers yet: the automatic refresh runs at once; 44% is the cache, 18% only the answer.
+      await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▰▰▱▱▱▱▱▱ 44%"), WAIT);
+      expect(runs()).toBe(1);
+    }, 60_000);
+
+    it("counts a refresh that leaves the cache as it was as failed, and lets the next one wait", async () => {
+      const runs = fakeClaude(false);
+      const utilization = { five_hour: { utilization: 30 } };
+      fs.writeFileSync(path.join(configDir, ".claude.json"), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now() - 11 * 60_000, utilization } }));
+      activate(context());
+      await vi.waitFor(() => expect(tooltip()).toMatch(/Usage the last refresh failed; trying again at \d\d:\d\d/), WAIT);
+      expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▰▱▱▱▱▱▱▱ 30%");
+      await stub.commands.get("lookout.refreshUsage")!();
+      expect(infoMessages().at(-1)).toMatch(/^Lookout fetches usage at most every 3 minutes on this machine; next at \d\d:\d\d\.$/);
+      expect(runs()).toBe(1);
+    }, 60_000);
+
+    it("starts no refresh while Claude Code's settings switch nonessential traffic off, and notices when they no longer do", async () => {
+      const runs = fakeClaude(true);
+      const settings = path.join(configDir, "settings.json");
+      fs.writeFileSync(settings, JSON.stringify({ env: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" } }));
+      const utilization = { five_hour: { utilization: 30 } };
+      fs.writeFileSync(path.join(configDir, ".claude.json"), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now() - 11 * 60_000, utilization } }));
+      activate(context());
+      await vi.waitFor(() => expect(tooltip()).toContain("Usage refresh disabled by CLAUDE\\_CODE\\_DISABLE\\_NONESSENTIAL\\_TRAFFIC"), WAIT);
+      expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▰▱▱▱▱▱▱▱ 30%");
+      expect(runs()).toBe(0);
+      fs.writeFileSync(settings, JSON.stringify({ env: {} }));
+      await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▰▰▱▱▱▱▱▱ 44%"), WAIT);
+      expect(runs()).toBe(1);
+    }, 60_000);
+  });
 
   it("restores finished marks from the workspace state", async () => {
     saved["lookout.done"] = [SESSION];
