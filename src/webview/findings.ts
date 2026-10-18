@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { describeSpan } from "../core/format";
+import { describeSpan, shortSpan } from "../core/format";
 import { parseMarkdown, type Block, type Inline } from "../core/markdown";
 import { inRange, matchesAll, matchRanges, parseQuery, type TimeRange } from "../core/terms";
 import type { FindingsMessage, FromFindings, ToFindings } from "./findingsProtocol";
@@ -251,8 +251,11 @@ window.addEventListener("message", (event: MessageEvent<ToFindings>) => {
   whereEl.textContent = message.session.where ?? "";
   whereEl.title = message.session.where ? "Project and git branch" : "";
   const times = message.messages.map((m) => m.at).filter((at): at is number => at !== undefined);
-  const span = times.length ? describeSpan(Math.min(...times), Math.max(...times)) : "";
+  const first = times.length ? Math.min(...times) : undefined;
+  const last = times.length ? Math.max(...times) : undefined;
+  const span = shortSpan(first, last, Date.now());
   countEl.textContent = `${message.messages.length} ${message.messages.length === 1 ? "message" : "messages"}${span ? ` · ${span}` : ""}`;
+  countEl.title = describeSpan(first, last);
   if (same) {
     // The conversation grew: keep the search and the place.
     const index = matches[current];

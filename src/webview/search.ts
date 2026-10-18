@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { describeSpan } from "../core/format";
+import { describeSpan, shortSpan } from "../core/format";
 import type { SearchHit } from "../core/history";
 import type { FromSearch, SearchPageSession, ToSearch } from "./searchProtocol";
 
@@ -102,19 +102,6 @@ function marked(hit: SearchHit): DocumentFragment {
   return fragment;
 }
 
-/** "Oct 16 → Oct 18 · active 3h ago": the days it spans, and how long ago it last moved. */
-function spanText(started: number | undefined, last: number | undefined): string {
-  const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const parts: string[] = [];
-  if (started !== undefined) parts.push(last !== undefined && day(last) !== day(started) ? `${day(started)} → ${day(last)}` : day(started));
-  if (last !== undefined) {
-    const ago = Date.now() - last;
-    const minutes = Math.round(ago / 60_000);
-    parts.push(minutes < 1 ? "active now" : minutes < 60 ? `active ${minutes}m ago` : minutes < 48 * 60 ? `active ${Math.round(minutes / 60)}h ago` : `active ${Math.round(minutes / 1440)}d ago`);
-  }
-  return parts.join(" · ");
-}
-
 function open(id: string, index?: number): void {
   vscode.postMessage({ type: "open", query, id, index });
 }
@@ -131,7 +118,7 @@ function sessionBlock(session: SearchPageSession): HTMLElement {
   // Line two: where it worked, and when.
   const meta = el("span", "head-meta");
   for (const part of (session.where ?? "").split(" · ").filter(Boolean)) meta.append(el("span", "chip", part));
-  const when = spanText(session.started, session.lastActive);
+  const when = shortSpan(session.started, session.lastActive, Date.now());
   if (when) {
     const time = el("span", "when", when);
     time.title = describeSpan(session.started, session.lastActive);

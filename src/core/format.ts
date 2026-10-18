@@ -173,3 +173,15 @@ export function describeSpan(started: number | undefined, last: number | undefin
   if (last !== undefined && last !== started) parts.push(`last active ${at(last)}`);
   return parts.join(" · ");
 }
+
+/** "Oct 16 → Oct 18 · active 3h ago": the days a conversation spans, and how long ago it last moved. */
+export function shortSpan(started: number | undefined, last: number | undefined, now: number): string {
+  const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const parts: string[] = [];
+  if (started !== undefined) parts.push(last !== undefined && day(last) !== day(started) ? `${day(started)} → ${day(last)}` : day(started));
+  if (last !== undefined) {
+    const minutes = Math.floor((now - last) / 60_000);
+    parts.push(minutes < 1 ? "active now" : minutes < 60 ? `active ${minutes}m ago` : minutes < 48 * 60 ? `active ${Math.round(minutes / 60)}h ago` : `active ${Math.round(minutes / 1440)}d ago`);
+  }
+  return parts.join(" · ");
+}
