@@ -78,8 +78,6 @@ export interface SessionView {
   activity?: string;
   /** Subagents in flight. */
   agents: number;
-  /** First line of the assistant's latest message. */
-  lastReply?: string;
   /** The git branch it works on. */
   branch?: string;
   model?: string;
@@ -91,26 +89,8 @@ export interface SessionView {
   pulse?: number[];
   /** Indices into `pulse` of the minutes the conversation was compacted. */
   pulseMarks?: number[];
-  /** Times the agent compacted the conversation: summarised its older part to free the context window. */
-  compactions?: number;
-  /** Epoch ms of the last compaction. */
-  compactedAt?: number;
-  /** The model's prompt cache, as the agent's last call left it. */
-  cache?: PromptCache;
   /** Tokens the session used so far, and what they cost. */
   spend?: SessionSpend;
-}
-
-/**
- * The model's prompt cache keeps a conversation for a while after each call;
- * a message sent meanwhile reads it from the cache instead of sending it
- * again at full price.
- */
-export interface PromptCache {
-  /** Epoch ms of the agent's last call. */
-  lastCallAt: number;
-  /** How long the cache keeps the conversation after a call: 5 minutes, or an hour. */
-  ttlMs: number;
 }
 
 /** A session that is not running, shown collapsed under the live ones. */

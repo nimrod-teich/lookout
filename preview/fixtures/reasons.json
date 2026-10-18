@@ -6,21 +6,21 @@
     "meters": [
       {
         "key": "session",
-        "label": "5h",
+        "label": "Session (5hr)",
         "percent": 18,
         "resetsAt": 7800000,
         "windowMs": 18000000
       },
       {
         "key": "weekly_all",
-        "label": "Week",
+        "label": "Weekly (7 day)",
         "percent": 31,
         "resetsAt": 400000000,
         "windowMs": 604800000
       },
       {
         "key": "weekly_scoped:Fable",
-        "label": "Week \u00b7 Fable",
+        "label": "Weekly Fable",
         "percent": 84,
         "resetsAt": 400000000,
         "windowMs": 604800000
@@ -262,7 +262,6 @@
       "model": "claude-fable-5-1",
       "contextTokens": 88000,
       "contextWindow": 1000000,
-      "lastReply": "Chart 6.15.0 builds and the values diff is clean.",
       "pulse": [
         1,
         3,
@@ -403,7 +402,6 @@
       "model": "claude-fable-5-1",
       "contextTokens": 95000,
       "contextWindow": 1000000,
-      "lastReply": "Both dashboards are provisioned and the alert rules are in.",
       "pulse": [
         0,
         0,

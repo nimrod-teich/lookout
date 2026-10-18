@@ -20,11 +20,10 @@ function usage(overrides: Partial<Usage> = {}): Usage {
   return {
     fetchedAt: 0,
     stale: false,
-    pace: {},
     meters: [
-      { key: "session", label: "5h", percent: 18, resetsAt: 2 * 3_600_000, windowMs: 5 * 3_600_000 },
-      { key: "weekly_all", label: "Week", percent: 31 },
-      { key: "weekly_scoped:Fable", label: "Week · Fable", percent: 84 },
+      { key: "session", label: "Session (5hr)", percent: 18, resetsAt: 2 * 3_600_000, windowMs: 5 * 3_600_000 },
+      { key: "weekly_all", label: "Weekly (7 day)", percent: 31, resetsAt: 3 * 86_400_000 },
+      { key: "weekly_scoped:Fable", label: "Weekly Fable", percent: 84 },
     ],
     ...overrides,
   };
@@ -107,12 +106,14 @@ describe("StatusBar", () => {
     bar.render(input([view({ state: "working" })], { usage: usage() }), 3 * 60_000);
     expect(lastSet("text")).toBe(`${L} ⠋ 1   ▰▰▱▱▱▱▱▱▱▱ 18%`);
     expect(lastSet("color")).toMatchObject({ id: "charts.green" });
-    expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 1 working, 0 waiting for you, 0 finished, 0 idle. Usage 5h 18%" });
+    expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: 1 working, 0 waiting for you, 0 finished, 0 idle. Usage Session (5hr) 18%" });
     const tip = (lastSet("tooltip") as { value: string }).value;
     expect(tip).toContain("**Claude usage**");
-    expect(tip).toContain("5h: 18% · resets in 1h 57m");
-    expect(tip).toContain("Week · Fable: 84%");
-    expect(tip).toContain("As of 3m ago");
+    // As Claude Code's panel has them: the limits, their share used and when they reset; no forecast, no age.
+    expect(tip).toContain("Session \\(5hr\\): 18% · resets in 1h  \n");
+    expect(tip).toContain("Weekly \\(7 day\\): 31% · resets in 2d  \n");
+    expect(tip).toContain("Weekly Fable: 84%  \n");
+    expect(tip).not.toContain("As of");
     expect(tip).toContain("Click to jump to a session");
   });
 
@@ -137,7 +138,6 @@ describe("StatusBar", () => {
     expect(lastSet("text")).toBe(`${L} 1 idle   ▰▰▰▰▰▰▰▰▰▰ 97%`);
     bar.render(input([view()], { usage: { ...high, stale: true } }), 0);
     expect(lastSet("backgroundColor")).toBeUndefined();
-    expect((lastSet("tooltip") as { value: string }).value).toMatch(/As of 0s ago \\?\(stale\\?\)/);
     bar.render(input([view({ state: "waiting" })], { usage: high }), 0);
     expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.warningBackground" });
   });
@@ -182,22 +182,18 @@ describe("StatusBar", () => {
     expect(vi.getTimerCount()).toBe(1);
   });
 
-  it("turns the bar red when the pace runs out before the reset, grey when the numbers are stale", () => {
-    const fullAt = 90 * 60_000;
-    bar.render(input([], { usage: usage({ pace: { session: { perHour: 30, fullAt, runsOut: true } } }) }), 0);
-    expect(lastSet("color")).toMatchObject({ id: "charts.red" });
-    expect((lastSet("tooltip") as { value: string }).value).toContain("at this pace 100% at");
+  it("turns the bar grey when the numbers are stale", () => {
     bar.render(input([], { usage: usage({ stale: true }) }), 0);
     expect(lastSet("color")).toMatchObject({ id: "disabledForeground" });
   });
 
-  it("says when there are no numbers, and why they are not kept fresh", () => {
+  it("says when there are no numbers, and how to fetch them when it can", () => {
     bar.render(input([view()], { usage: undefined }), 0);
     expect((lastSet("tooltip") as { value: string }).value).toContain("No usage reported; run Lookout: Refresh Usage");
-    bar.render(input([view()], { usage: undefined, usageNote: "refresh disabled by CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", canRefreshUsage: false }), 0);
+    bar.render(input([view()], { usage: undefined, canRefreshUsage: false }), 0);
     const tip = (lastSet("tooltip") as { value: string }).value;
     expect(tip).toContain("No usage reported");
-    expect(tip).toContain("Usage refresh disabled by CLAUDE\\_CODE\\_DISABLE\\_NONESSENTIAL\\_TRAFFIC");
+    expect(tip).not.toContain("Refresh Usage");
   });
 
   it("animates the spinner by rewriting only the text, once per frame, while a session works", () => {

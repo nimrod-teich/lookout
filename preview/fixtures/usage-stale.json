@@ -3,26 +3,24 @@
     "fetchedAt": 7620000,
     "stale": true,
     "canRefresh": false,
-    "note": "refresh disabled by CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-    "pace": {},
     "meters": [
       {
         "key": "session",
-        "label": "5h",
+        "label": "Session (5hr)",
         "percent": 18,
         "resetsAt": 7800000,
         "windowMs": 18000000
       },
       {
         "key": "weekly_all",
-        "label": "Week",
+        "label": "Weekly (7 day)",
         "percent": 31,
         "resetsAt": 400000000,
         "windowMs": 604800000
       },
       {
         "key": "weekly_scoped:Fable",
-        "label": "Week \u00b7 Fable",
+        "label": "Weekly Fable",
         "percent": 84,
         "resetsAt": 400000000,
         "windowMs": 604800000
@@ -43,7 +41,6 @@
       "agents": 0,
       "model": "claude-opus-5-5",
       "contextTokens": 142000,
-      "lastReply": "I need to run the migration.",
       "pulse": [
         0,
         0,
@@ -95,7 +92,6 @@
       "agents": 0,
       "model": "claude-sonnet-5-5",
       "contextTokens": 18000,
-      "lastReply": "Done. The changelog lists the three fixes and the new flag.",
       "pulse": [
         1,
         2,

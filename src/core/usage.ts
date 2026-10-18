@@ -23,10 +23,11 @@ export interface UsageSnapshot {
 export type UsageRead = { snapshot: UsageSnapshot } | { snapshot: undefined; why: "missing" | "unreadable" | "other account" };
 
 const HOUR = 3_600_000;
+/** Labelled as Claude Code's panel labels them. */
 const WINDOWS: Record<string, { label: string; windowMs: number }> = {
-  session: { label: "5h", windowMs: 5 * HOUR },
-  weekly_all: { label: "Week", windowMs: 7 * 24 * HOUR },
-  weekly_scoped: { label: "Week", windowMs: 7 * 24 * HOUR },
+  session: { label: "Session (5hr)", windowMs: 5 * HOUR },
+  weekly_all: { label: "Weekly (7 day)", windowMs: 7 * 24 * HOUR },
+  weekly_scoped: { label: "Weekly", windowMs: 7 * 24 * HOUR },
 };
 /**
  * Numbers older than this are shown as stale. A working automatic refresh
@@ -66,7 +67,7 @@ export function metersOf(limits: unknown): UsageMeter[] {
       if (percent === undefined) continue;
       const model = (limit.scope as { model?: { display_name?: unknown } } | undefined)?.model?.display_name;
       const known = WINDOWS[kind];
-      const label = kind === "weekly_scoped" && typeof model === "string" ? `Week · ${model}` : (known?.label ?? kind);
+      const label = kind === "weekly_scoped" && typeof model === "string" ? `Weekly ${model}` : (known?.label ?? kind);
       meters.push({ key: typeof model === "string" ? `${kind}:${model}` : kind, label, percent, resetsAt: when(limit.resets_at), windowMs: known?.windowMs });
     }
     if (meters.length) return meters;
@@ -82,7 +83,7 @@ export function metersOf(limits: unknown): UsageMeter[] {
     const percent = num((raw as Record<string, unknown>).utilization);
     if (percent === undefined) continue;
     const window = WINDOWS[kind]!;
-    meters.push({ key: model ? `${kind}:${model}` : kind, label: model ? `${window.label} · ${model}` : window.label, percent, resetsAt: when((raw as Record<string, unknown>).resets_at), windowMs: window.windowMs });
+    meters.push({ key: model ? `${kind}:${model}` : kind, label: model ? `${window.label} ${model}` : window.label, percent, resetsAt: when((raw as Record<string, unknown>).resets_at), windowMs: window.windowMs });
   }
   return meters;
 }

@@ -1,4 +1,3 @@
-import type { Pace } from "./pace";
 import type { Evidence, Reason, ReasonKind, SessionView, State } from "./types";
 import type { UsageMeter } from "./usage";
 
@@ -123,14 +122,12 @@ export function describeAlert(meter: UsageMeter, now: number = Date.now()): { te
   };
 }
 
-/** "at this pace 100% at 15:40, resets 17:05", "at this pace 64% at the reset". */
-export function describePace(pace: Pace | undefined, meter: UsageMeter, now: number = Date.now()): string | undefined {
-  if (!pace) return undefined;
-  const resets = meter.resetsAt === undefined ? undefined : clockTime(meter.resetsAt, now);
-  if (pace.runsOut && pace.fullAt !== undefined) return `at this pace 100% at ${clockTime(pace.fullAt, now)}${resets ? `, resets ${resets}` : ""}`;
-  if (pace.atReset !== undefined && resets) return `at this pace ${pace.atReset}% at the reset`;
-  if (pace.fullAt !== undefined) return `at this pace 100% at ${clockTime(pace.fullAt, now)}`;
-  return undefined;
+/** How long until a limit resets, as Claude Code's panel says it: "in 42m", "in 3h", "in 2d". */
+export function formatResetIn(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `in ${Math.max(0, minutes)}m`;
+  const hours = Math.floor(ms / 3_600_000);
+  return hours < 24 ? `in ${hours}h` : `in ${Math.floor(ms / 86_400_000)}d`;
 }
 
 /** "app" or, in a worktree, "app · fix-x". */
