@@ -33,6 +33,8 @@ export interface AgentSession {
   /** The git branch it works on. */
   branch?: string;
   model?: string;
+  /** The reasoning effort the model last answered with. */
+  effort?: string;
   /** Tokens in the context window at the last model call. */
   contextTokens?: number;
   /** Size of that window, when the agent knows it. */

@@ -54,6 +54,8 @@ export interface TranscriptState {
   /** Names the session's plan file, `<config>/plans/<slug>.md`. */
   slug?: string;
   model?: string;
+  /** The reasoning effort of the latest main-chain reply: low, medium, high, xhigh, max. */
+  effort?: string;
   /** Tokens in the context window at the last model call. */
   contextTokens?: number;
   /** When the assistant called tools, newest last; older than `PULSE_WINDOW_MS` is dropped. */
@@ -269,6 +271,7 @@ function applyAssistant(state: TranscriptState, e: Record<string, unknown>): voi
   const message = e.message as { id?: unknown; model?: unknown; usage?: Record<string, unknown> } | undefined;
   const model = str(message?.model);
   if (model && !model.startsWith("<")) state.model = model;
+  if (typeof e.effort === "string" && e.effort !== "") state.effort = e.effort;
   const usage = message?.usage;
   const at = typeof e.timestamp === "string" ? Date.parse(e.timestamp) : NaN;
   const id = typeof message?.id === "string" ? message.id : undefined;
