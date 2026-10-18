@@ -1325,6 +1325,20 @@ body.vscode-reduce-motion .hover-card {
   margin: 0;
 }
 
+.nothing .link {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.nothing .link:hover {
+  text-decoration: underline;
+}
+
 /* Motion ------------------------------------------------------------------ */
 
 @keyframes sweep {

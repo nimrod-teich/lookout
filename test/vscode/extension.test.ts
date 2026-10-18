@@ -314,6 +314,30 @@ describe("the extension", () => {
     await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▱▱▱▱▱▱▱▱ 18%"), WAIT);
   }, 60_000);
 
+  it("turns Claude Code off and on again from its setting: its sessions and usage leave and come back, and nothing runs to refresh them", async () => {
+    fs.writeFileSync(
+      path.join(configDir, ".claude.json"),
+      JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now(), utilization: { five_hour: { utilization: 18 }, seven_day: { utilization: 31 } } } }),
+    );
+    writeTranscript();
+    writeSession({ status: "busy", statusUpdatedAt: Date.now() });
+    activate(context());
+    await vi.waitFor(() => expect(boardStates()).toBe("working 1"), WAIT);
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▱▱▱▱▱▱▱▱ 18%"), WAIT);
+
+    stub.config["lookout.agents.claude"] = false;
+    stub.configChange.fire({ affectsConfiguration: () => true });
+    await vi.waitFor(() => expect(boardStates()).toBe(""), WAIT);
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse)"), WAIT);
+    await stub.commands.get("lookout.refreshUsage")!();
+    expect(infoMessages().at(-1)).toBe("Lookout can't fetch usage: Claude Code is turned off (lookout.agents.claude).");
+
+    stub.config["lookout.agents.claude"] = true;
+    stub.configChange.fire({ affectsConfiguration: () => true });
+    await vi.waitFor(() => expect(boardStates()).toBe("working 1"), WAIT);
+    await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▱▱▱▱▱▱▱▱ 18%"), WAIT);
+  }, 90_000);
+
   it("announces each usage threshold once per window, though every fetch reports the reset a fraction of a second apart", async () => {
     const resets = Date.now() + 2 * 3_600_000;
     const write = (percent: number, fraction: string) => {

@@ -150,6 +150,8 @@ export class Controller implements vscode.Disposable {
   private savedDone = "";
   private savedDismissed = "";
   private typedQuestions = true;
+  /** Claude Code is watched: its sessions, and its usage, fetched by running it. */
+  private claudeOn = true;
   private usageCache: UsageCache | undefined;
   private usageMode: RefreshMode = "manual";
   private usageRead: UsageRead = { snapshot: undefined, why: "missing" };
@@ -304,7 +306,7 @@ export class Controller implements vscode.Disposable {
     const claude: UsageGroup = { agent: CLAUDE_CODE, fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: (usage?.meters ?? []).map((meter) => ({ ...meter, agent: CLAUDE_CODE })), canRefresh: this.canRefreshUsage };
     // The others' numbers come with their sessions' records; Lookout cannot fetch them anew.
     const others = [...this.agentUsage].map(([agent, snapshot]): UsageGroup => ({ agent, fetchedAt: snapshot.fetchedAt, stale: isStale(snapshot, now), meters: snapshot.meters.map((meter) => ({ ...meter, agent })), canRefresh: false }));
-    return [claude, ...others];
+    return this.claudeOn ? [claude, ...others] : others;
   }
 
   /** Claude Code is told to make no network calls it can do without, which fetching usage is. Asked again each time: the settings file can change. */
@@ -314,7 +316,7 @@ export class Controller implements vscode.Disposable {
 
   /** Lookout can ask the agent for fresh usage numbers. */
   get canRefreshUsage(): boolean {
-    return this.usageMode !== "off" && !this.refreshDisabled && this.host.claudeBinary() !== undefined;
+    return this.claudeOn && this.usageMode !== "off" && !this.refreshDisabled && this.host.claudeBinary() !== undefined;
   }
 
   /** Names the numbers shown, for the refreshes on file. */
@@ -324,6 +326,7 @@ export class Controller implements vscode.Disposable {
 
   /** Why Lookout cannot fetch the usage numbers, when it cannot. */
   get usageNote(): string | undefined {
+    if (!this.claudeOn) return "Claude Code is turned off (lookout.agents.claude)";
     if (this.refreshDisabled) return "refresh disabled by CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
     if (this.usageMode === "off") return "refresh is off (lookout.usage.refresh)";
     if (this.host.claudeBinary() === undefined) return "refresh needs the Claude Code extension";
@@ -340,7 +343,8 @@ export class Controller implements vscode.Disposable {
   /** Starts, or restarts with other settings. */
   start(config: Config): void {
     this.typedQuestions = config.typedQuestions;
-    this.providers = [new ClaudeProvider(config.claudeConfigDir, this.proc)];
+    this.claudeOn = config.claudeEnabled;
+    this.providers = config.claudeEnabled ? [new ClaudeProvider(config.claudeConfigDir, this.proc)] : [];
     if (config.codexEnabled) {
       // Codex keeps no per-process file: its sessions are its running processes, found by name.
       // Which threads the VS Code extension's app-server holds, from the files it holds open.
@@ -363,7 +367,8 @@ export class Controller implements vscode.Disposable {
     }
     this.monitor = new Monitor(this.providers, this.proc);
     const cacheFile = usageCacheFile(config.claudeConfigDir);
-    this.usageCache = new UsageCache(cacheFile);
+    // Claude's usage is read from what Claude Code cached, only while Claude is watched.
+    this.usageCache = config.claudeEnabled ? new UsageCache(cacheFile) : undefined;
     this.usageRead = { snapshot: undefined, why: "missing" };
     this.scope = scopeOf(cacheFile);
     this.settingsEnv = new ClaudeSettingsEnv(path.join(config.claudeConfigDir, "settings.json"));
@@ -371,11 +376,18 @@ export class Controller implements vscode.Disposable {
     this.usageMode = config.usageRefresh;
     this.usageAlerts = config.usageAlerts;
     this.refreshDisabledByEnv = config.usageRefreshDisabled;
-    this.archived = new ArchivedSessions(stateDbCandidates(this.host.globalStorageDir));
-    if (!this.archived.available) this.log.info("The agent's archived-session list is out of reach; every past session is listed");
-    this.log.info(`Watching ${this.providers.map((p) => p.label).join(", ")} (${[config.claudeConfigDir, ...(config.codexEnabled ? [config.codexHome] : []), ...(config.copilotEnabled ? [config.copilotHome] : [])].join(", ")})`);
+    // The sessions Claude Code's panel archived: its own list, read only while Claude is watched.
+    this.archived = new ArchivedSessions(config.claudeEnabled ? stateDbCandidates(this.host.globalStorageDir) : []);
+    if (config.claudeEnabled && !this.archived.available) this.log.info("The agent's archived-session list is out of reach; every past session is listed");
+    const homes = [...(config.claudeEnabled ? [config.claudeConfigDir] : []), ...(config.codexEnabled ? [config.codexHome] : []), ...(config.copilotEnabled ? [config.copilotHome] : [])];
+    this.log.info(this.providers.length ? `Watching ${this.providers.map((p) => p.label).join(", ")} (${homes.join(", ")})` : "Watching no agent: every agent is turned off");
     this.watch();
     this.poll();
+  }
+
+  /** How many agents are watched: none when every agent is turned off. */
+  get watching(): number {
+    return this.providers.length;
   }
 
   /** Takes settings that need no restart, and shows their effect at once. */
@@ -436,7 +448,7 @@ export class Controller implements vscode.Disposable {
       .map(buildPastView);
     past.sort((a, b) => b.modifiedAt - a.modifiedAt);
     // Tabs the agent restored after a reload, not started yet: their sessions stay on the board, idle.
-    const restored = this.host.restoredTabs ? restoredTabViews(past, update.views, this.host.restoredTabs()) : [];
+    const restored = this.claudeOn && this.host.restoredTabs ? restoredTabViews(past, update.views, this.host.restoredTabs()) : [];
     const notRestored = (view: PastView) => !restored.some((r) => r.id === view.id);
     // The archived leave Earlier for the Archived group, newest archive first.
     const shownPast = past.filter((view) => !archived.has(view.id) && notRestored(view));
@@ -494,8 +506,9 @@ export class Controller implements vscode.Disposable {
   }
 
   private pollUsage(): void {
-    if (this.disposed || !this.usageCache) return;
+    if (this.disposed || !this.monitor) return;
     this.pollAgentUsage();
+    if (!this.usageCache) return;
     this.consider(this.usageCache.readWithReason());
     const now = Date.now();
     if (this.canRefreshUsage && wantsRefresh(this.usageMode, this.usageRead.snapshot, now) && now >= this.nextRefreshAt(false)) void this.refreshUsage();

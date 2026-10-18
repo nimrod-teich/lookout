@@ -199,6 +199,8 @@ Windows and macOS support is new. The process handling is tested on both in CI; 
 | `Lookout: Refresh Usage` | | Has Claude Code fetch the account's usage again. |
 | `Lookout: Search All Sessions` | | Opens the search page: every conversation's matches in an editor tab. |
 
+The settings come in two sections, **Agents** (a switch per agent, and where each keeps its files) and **General**.
+
 | Setting | Default | Description |
 | --- | --- | --- |
 | `lookout.statusBar.enabled` | `true` | Show Lookout's item in the status bar: the usage, and a click to open the board. |
@@ -214,11 +216,12 @@ Windows and macOS support is new. The process handling is tested on both in CI; 
 | `lookout.state.typedQuestions` | `true` | Count an idle session as needing you when its last reply asks you something. Off: such sessions are Finished or Idle like any other. |
 | `lookout.statusBar.usageAgent` | `auto` | Whose usage the status bar's bar shows when more than one agent reports usage: `auto`, the window under the most pressure (the highest share used, fresh numbers first), or `claude`, `codex`, `copilot`. A pinned agent that reports none leaves the bar to `auto`. |
 | `lookout.agentMarkers` | `auto` | When to tell agents apart by colour and boat: `auto` once the board shows two or more agents (running, earlier or in the usage), `always`, or `never`. |
-| `lookout.agents.codex` | `true` | Watch Codex sessions: the `codex` program in a terminal. |
-| `lookout.codexHome` | `""` | Codex's home folder, where its `sessions` are. Empty uses `CODEX_HOME`, then `~/.codex`. |
-| `lookout.agents.copilot` | `true` | Watch Copilot CLI sessions: the `copilot` program in a terminal. |
-| `lookout.copilotHome` | `""` | Copilot CLI's home folder, where its `session-state` is. Empty uses `COPILOT_HOME`, then `~/.copilot`. |
+| `lookout.agents.claude` | `true` | Watch Claude Code: its panel and `claude` in terminals, with its usage. Off: none of its sessions, earlier sessions, search matches or usage, none of its files read, and Claude Code never run to refresh the usage. |
+| `lookout.agents.codex` | `true` | Watch Codex: the Codex extension's panel, VS Code's Chat, `codex` in terminals and `codex exec` runs. |
+| `lookout.agents.copilot` | `true` | Watch Copilot: VS Code's Chat (its Copilot, Copilot CLI and Local sessions) and `copilot` in terminals. |
 | `lookout.claudeConfigDir` | `""` | Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`. |
+| `lookout.codexHome` | `""` | Codex's home folder, where its `sessions` are. Empty uses `CODEX_HOME`, then `~/.codex`. |
+| `lookout.copilotHome` | `""` | Copilot CLI's home folder, where its `session-state` is. Empty uses `COPILOT_HOME`, then `~/.copilot`. |
 
 ## How it works
 

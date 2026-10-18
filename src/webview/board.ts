@@ -41,6 +41,8 @@ let usageGroups: BoardUsage[] = [];
 let usageBar: string | undefined;
 /** Tell the agents apart: their hue and silhouette, their name in hovers. */
 let markers = false;
+/** How many agents Lookout watches; unknown from an extension that does not say. */
+let watching: number | undefined;
 /** The search the user typed, trimmed; empty when the box is empty. */
 let query = "";
 /** The results for `query`, by session id; sessions absent here are hidden while a query is active. */
@@ -1107,12 +1109,26 @@ function render(): void {
     cards.clear();
     const empty = el("div", "nothing");
     if (query !== "") empty.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message; since:, before:, project:, branch: and file: narrow the search. Esc clears it."));
-    else if (allSessions.length > 0) empty.append(el("p", "big", "Everything is hidden"), el("p", "small", markers && hiddenAgents.size > 0 ? "Click a state or an agent in the legend to show it again." : "Click a state in the legend to show it again."));
+    else if (watching === 0) {
+      const open = el("button", "link", "Turn one on in the settings");
+      open.addEventListener("click", () => vscode.postMessage({ type: "openAgentSettings" }));
+      empty.append(el("p", "big", "Every agent is turned off"), el("p", "small", "Lookout watches no agent, so no session can show here."), open);
+    } else if (allSessions.length > 0) empty.append(el("p", "big", "Everything is hidden"), el("p", "small", markers && hiddenAgents.size > 0 ? "Click a state or an agent in the legend to show it again." : "Click a state in the legend to show it again."));
     else empty.append(el("p", "big", "Nothing on the horizon"), el("p", "small", "Sessions appear here as soon as an agent starts."));
     root.append(empty);
     renderFavourites(beam);
-    renderEarlier(empty);
-    if (earlierEl) renderArchive(earlierEl);
+    // With no agent watched there is nothing earlier to list either.
+    if (watching === 0) {
+      earlierEl?.remove();
+      earlierEl = undefined;
+      pastCards.clear();
+      archiveEl?.remove();
+      archiveEl = undefined;
+      archiveCards.clear();
+    } else {
+      renderEarlier(empty);
+      if (earlierEl) renderArchive(earlierEl);
+    }
     return;
   }
   const seenIds = new Set<string>();
@@ -1212,6 +1228,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);
   usageBar = message.usageBar;
   markers = message.markers === true;
+  watching = message.watching;
   clockOffset = message.now - Date.now();
   applyFilters();
   render();

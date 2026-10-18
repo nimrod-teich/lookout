@@ -205,6 +205,8 @@ export function activate(context: vscode.ExtensionContext): void {
     dismiss: (id) => controller.dismiss(id),
     // The command, so the board's link says what the command says when it cannot fetch.
     refreshUsage: () => void vscode.commands.executeCommand(REFRESH_USAGE),
+    watching: () => controller.watching,
+    openAgentSettings: () => void vscode.commands.executeCommand("workbench.action.openSettings", "lookout.agents"),
     search: (query, zone) => controller.search(query, zone),
     openHit,
     openSearch: (query, hide) => searchPage.show(query, hide),
@@ -264,6 +266,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const next = readConfig();
       // A different place to read, or an agent switched on or off: start over.
       const moved =
+        next.claudeEnabled !== config.claudeEnabled ||
         next.claudeConfigDir !== config.claudeConfigDir ||
         next.codexEnabled !== config.codexEnabled ||
         next.codexHome !== config.codexHome ||

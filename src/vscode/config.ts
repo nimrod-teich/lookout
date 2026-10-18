@@ -24,6 +24,8 @@ export interface Config {
   notifyCooldownMs: number;
   /** An idle session whose last message asks the user something counts as needing them. */
   typedQuestions: boolean;
+  /** Watch Claude Code: its sessions and its usage. */
+  claudeEnabled: boolean;
   /** The Claude Code config directory to read sessions and transcripts from. */
   claudeConfigDir: string;
   /** When to tell agents apart by hue and silhouette. */
@@ -34,7 +36,7 @@ export interface Config {
   codexEnabled: boolean;
   /** Codex's home, where its sessions are: the setting, `CODEX_HOME`, or `~/.codex`. */
   codexHome: string;
-  /** Watch Copilot CLI's sessions. */
+  /** Watch Copilot's sessions. */
   copilotEnabled: boolean;
   /** Copilot's home: the setting, `COPILOT_HOME`, or `~/.copilot`. */
   copilotHome: string;
@@ -86,6 +88,7 @@ export function readConfig(): Config {
     notifySound: lookout.get<boolean>("notifications.sound", false),
     notifyCooldownMs: Math.max(0, lookout.get<number>("notifications.cooldownSeconds", 30)) * 1000,
     typedQuestions: lookout.get<boolean>("state.typedQuestions", true),
+    claudeEnabled: lookout.get<boolean>("agents.claude", true),
     claudeConfigDir,
     agentMarkers: markerSetting(lookout.get<string>("agentMarkers")),
     usageAgent: usageAgent(lookout.get<string>("statusBar.usageAgent")),

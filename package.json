@@ -92,138 +92,158 @@
         "key": "ctrl+alt+shift+j"
       }
     ],
-    "configuration": {
-      "title": "Lookout",
-      "properties": {
-        "lookout.statusBar.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show Lookout's item in the status bar: the usage, and a click to open the board."
-        },
-        "lookout.statusBar.showUsage": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the 5-hour and weekly usage in the status bar item."
-        },
-        "lookout.statusBar.usageReset": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Show how long until the 5-hour window resets after the usage bar, for example `32% · 1h12m`. Needs `#lookout.statusBar.showUsage#`."
-        },
-        "lookout.statusBar.usageAgent": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "claude",
-            "codex",
-            "copilot"
-          ],
-          "default": "auto",
-          "enumDescriptions": [
-            "The window under the most pressure: the highest share used among the agents' bars, fresh numbers first.",
-            "Claude's 5-hour window.",
-            "Codex's shortest window.",
-            "Copilot's, when it reports usage."
-          ],
-          "markdownDescription": "Whose usage the bar in the status bar item shows when more than one agent reports usage. A pinned agent that reports none leaves the bar to `auto`. With two or more agents, the agent's mark stands before the bar; the hover lists every agent's limits."
-        },
-        "lookout.usage.refresh": {
-          "type": "string",
-          "enum": [
-            "manual",
-            "auto",
-            "off"
-          ],
-          "default": "auto",
-          "scope": "machine",
-          "enumDescriptions": [
-            "Fetch fresh usage numbers only when you run Lookout: Refresh Usage or click the usage item.",
-            "Fetch when the numbers are older than 10 minutes or a window has reset; at most every 3 minutes on the machine, less often while fetches fail.",
-            "Never run the Claude Code binary; show only what Claude Code cached."
-          ],
-          "markdownDescription": "How Lookout keeps the usage numbers fresh. A refresh starts the Claude Code binary from the Claude Code extension and asks it for the account's usage; it fetches with its own credentials and calls no model. Lookout never reads your credentials. Never more than once every 3 minutes on the machine, across VS Code windows; after a fetch that brings no new numbers the wait doubles each time, up to 30 minutes (`Lookout: Refresh Usage` waits only for the 3 minutes). While `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set for Claude Code, Lookout does not refresh and shows only what Claude Code cached."
-        },
-        "lookout.usage.alerts": {
-          "type": "boolean",
-          "default": true,
-          "description": "Say when the 5-hour window reaches 70% and 90%, and the weekly limit 90%: once per window, in the VS Code window in front (any window when none is) and, while VS Code is not in front, on the desktop."
-        },
-        "lookout.notifications.waiting": {
-          "type": "boolean",
-          "default": true,
-          "description": "Notify when a session of this window starts to wait for you and you are not looking at it."
-        },
-        "lookout.notifications.done": {
-          "type": "boolean",
-          "default": false,
-          "description": "Notify when a session of this window finishes a turn and you are not looking at it."
-        },
-        "lookout.notifications.os": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "While VS Code is not the window in front, also show a notification on the desktop for what `#lookout.notifications.waiting#` and `#lookout.notifications.done#` announce. Uses the desktop's own tools (notify-send, osascript, Windows PowerShell, also from WSL); on SSH and container remotes there is no desktop to reach, and only the notification in the window shows."
-        },
-        "lookout.notifications.sound": {
-          "type": "boolean",
-          "default": false,
-          "description": "Play a short system sound with each desktop notification."
-        },
-        "lookout.notifications.cooldownSeconds": {
-          "type": "number",
-          "default": 30,
-          "minimum": 0,
-          "description": "Desktop notifications for the same session and the same event come at most this often. While three or more sessions need you, one notification sums them up instead."
-        },
-        "lookout.state.typedQuestions": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Count an idle session as needing you when its last message asks you something: it ends with a question mark, or asks for a choice or a yes/no. Lookout reads this from the reply rather than from the agent, so the card marks it as less certain; dismiss it with the card's ✓."
-        },
-        "lookout.agentMarkers": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "always",
-            "never"
-          ],
-          "default": "auto",
-          "enumDescriptions": [
-            "Once the board shows two or more agents: running, earlier or in the usage.",
-            "Always, even with one agent.",
-            "Never: every session looks alike."
-          ],
-          "markdownDescription": "When to tell agents apart: each agent's colour and boat on its sessions' cards and boats, in the legend, the jump list, the status bar's hover, the usage groups, the search page and the conversation tab, with the agent's name in hovers and lists."
-        },
-        "lookout.claudeConfigDir": {
-          "type": "string",
-          "default": "",
-          "scope": "machine",
-          "markdownDescription": "Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`."
-        },
-        "lookout.agents.codex": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Watch Codex sessions: the `codex` program running in a terminal. Lookout reads the rollouts Codex writes under `#lookout.codexHome#`, and runs nothing."
-        },
-        "lookout.codexHome": {
-          "type": "string",
-          "default": "",
-          "scope": "machine",
-          "markdownDescription": "Codex's home folder, where its `sessions` are. Empty uses `CODEX_HOME` from the environment, then `~/.codex`."
-        },
-        "lookout.agents.copilot": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Watch Copilot CLI sessions: the `copilot` program running in a terminal. Lookout reads the session folders Copilot writes under `#lookout.copilotHome#`, and runs nothing."
-        },
-        "lookout.copilotHome": {
-          "type": "string",
-          "default": "",
-          "scope": "machine",
-          "markdownDescription": "Copilot CLI's home folder, where its `session-state` is. Empty uses `COPILOT_HOME` from the environment, then `~/.copilot`."
+    "configuration": [
+      {
+        "title": "Agents",
+        "order": 1,
+        "properties": {
+          "lookout.agents.claude": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Watch Claude Code: its panel in VS Code and `claude` in terminals, with its usage limits. Lookout reads what Claude Code writes under `#lookout.claudeConfigDir#`, and runs Claude Code only to refresh the usage (`#lookout.usage.refresh#`). Off: none of its sessions, earlier sessions, search matches or usage, none of its files read, and Claude Code never run.",
+            "order": 1
+          },
+          "lookout.agents.codex": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Watch Codex: the Codex extension's panel, VS Code's Chat (its Codex sessions), `codex` in terminals and `codex exec` runs. Lookout reads the rollouts Codex writes under `#lookout.codexHome#`, and runs nothing.",
+            "order": 2
+          },
+          "lookout.agents.copilot": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Watch Copilot: VS Code's Chat (its Copilot, Copilot CLI and Local sessions) and `copilot` in terminals. Lookout reads the session folders Copilot writes under `#lookout.copilotHome#` and VS Code's records of its Chat sessions, and runs nothing.",
+            "order": 3
+          },
+          "lookout.claudeConfigDir": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`.",
+            "order": 4
+          },
+          "lookout.codexHome": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Codex's home folder, where its `sessions` are. Empty uses `CODEX_HOME` from the environment, then `~/.codex`.",
+            "order": 5
+          },
+          "lookout.copilotHome": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Copilot CLI's home folder, where its `session-state` is. Empty uses `COPILOT_HOME` from the environment, then `~/.copilot`.",
+            "order": 6
+          }
+        }
+      },
+      {
+        "title": "General",
+        "order": 2,
+        "properties": {
+          "lookout.statusBar.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show Lookout's item in the status bar: the usage, and a click to open the board."
+          },
+          "lookout.statusBar.showUsage": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show the 5-hour and weekly usage in the status bar item."
+          },
+          "lookout.statusBar.usageReset": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show how long until the 5-hour window resets after the usage bar, for example `32% · 1h12m`. Needs `#lookout.statusBar.showUsage#`."
+          },
+          "lookout.statusBar.usageAgent": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "claude",
+              "codex",
+              "copilot"
+            ],
+            "default": "auto",
+            "enumDescriptions": [
+              "The window under the most pressure: the highest share used among the agents' bars, fresh numbers first.",
+              "Claude's 5-hour window.",
+              "Codex's shortest window.",
+              "Copilot's, when it reports usage."
+            ],
+            "markdownDescription": "Whose usage the bar in the status bar item shows when more than one agent reports usage. A pinned agent that reports none leaves the bar to `auto`. With two or more agents, the agent's mark stands before the bar; the hover lists every agent's limits."
+          },
+          "lookout.usage.refresh": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "auto",
+              "off"
+            ],
+            "default": "auto",
+            "scope": "machine",
+            "enumDescriptions": [
+              "Fetch fresh usage numbers only when you run Lookout: Refresh Usage or click the usage item.",
+              "Fetch when the numbers are older than 10 minutes or a window has reset; at most every 3 minutes on the machine, less often while fetches fail.",
+              "Never run the Claude Code binary; show only what Claude Code cached."
+            ],
+            "markdownDescription": "How Lookout keeps the usage numbers fresh. A refresh starts the Claude Code binary from the Claude Code extension and asks it for the account's usage; it fetches with its own credentials and calls no model. Lookout never reads your credentials. Never more than once every 3 minutes on the machine, across VS Code windows; after a fetch that brings no new numbers the wait doubles each time, up to 30 minutes (`Lookout: Refresh Usage` waits only for the 3 minutes). While `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set for Claude Code, Lookout does not refresh and shows only what Claude Code cached."
+          },
+          "lookout.usage.alerts": {
+            "type": "boolean",
+            "default": true,
+            "description": "Say when the 5-hour window reaches 70% and 90%, and the weekly limit 90%: once per window, in the VS Code window in front (any window when none is) and, while VS Code is not in front, on the desktop."
+          },
+          "lookout.notifications.waiting": {
+            "type": "boolean",
+            "default": true,
+            "description": "Notify when a session of this window starts to wait for you and you are not looking at it."
+          },
+          "lookout.notifications.done": {
+            "type": "boolean",
+            "default": false,
+            "description": "Notify when a session of this window finishes a turn and you are not looking at it."
+          },
+          "lookout.notifications.os": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "While VS Code is not the window in front, also show a notification on the desktop for what `#lookout.notifications.waiting#` and `#lookout.notifications.done#` announce. Uses the desktop's own tools (notify-send, osascript, Windows PowerShell, also from WSL); on SSH and container remotes there is no desktop to reach, and only the notification in the window shows."
+          },
+          "lookout.notifications.sound": {
+            "type": "boolean",
+            "default": false,
+            "description": "Play a short system sound with each desktop notification."
+          },
+          "lookout.notifications.cooldownSeconds": {
+            "type": "number",
+            "default": 30,
+            "minimum": 0,
+            "description": "Desktop notifications for the same session and the same event come at most this often. While three or more sessions need you, one notification sums them up instead."
+          },
+          "lookout.state.typedQuestions": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Count an idle session as needing you when its last message asks you something: it ends with a question mark, or asks for a choice or a yes/no. Lookout reads this from the reply rather than from the agent, so the card marks it as less certain; dismiss it with the card's ✓."
+          },
+          "lookout.agentMarkers": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "default": "auto",
+            "enumDescriptions": [
+              "Once the board shows two or more agents: running, earlier or in the usage.",
+              "Always, even with one agent.",
+              "Never: every session looks alike."
+            ],
+            "markdownDescription": "When to tell agents apart: each agent's colour and boat on its sessions' cards and boats, in the legend, the jump list, the status bar's hover, the usage groups, the search page and the conversation tab, with the agent's name in hovers and lists."
+          }
         }
       }
-    },
+    ],
     "viewsContainers": {
       "activitybar": [
         {
