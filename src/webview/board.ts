@@ -411,8 +411,9 @@ function createCard(view: SessionView): HTMLElement {
     if (stayingFinished.delete(view.id)) render();
     vscode.postMessage({ type: card.classList.contains("typed") ? "dismiss" : "seen", id: view.id });
   });
-  actions.append(starButton(view.id), seen);
-  card.append(actions);
+  actions.append(seen, starButton(view.id));
+  // In the title row, after the time: the same place as the star on earlier cards.
+  row.append(actions);
   card.addEventListener("click", () => harbour.jump(view.id));
   card.addEventListener("mouseenter", () => harbour.highlight(view.id, true));
   card.addEventListener("mouseleave", () => harbour.highlight(view.id, false));

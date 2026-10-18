@@ -1047,11 +1047,12 @@ body.vscode-reduce-motion .hover-card {
 }
 
 /* Context ring: how full the window is. */
+/* In the card's bottom right corner, so the title row, and its icons, reach the edge on every card. */
 .ring {
   flex: none;
-  align-self: flex-end;
-  margin-bottom: 1px;
-  position: relative;
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
   width: 30px;
   height: 30px;
   border-radius: 50%;
@@ -1120,21 +1121,14 @@ body.vscode-reduce-motion .hover-card {
   display: none;
 }
 
-/* In the top right corner, out of the flow: the context ring keeps the card's right edge. */
+/* At the end of the title row, after the time; the context ring keeps the card's right edge below. */
 .actions {
-  position: absolute;
-  top: 6px;
-  right: 8px;
+  flex: none;
   display: flex;
+  align-items: baseline;
   gap: 2px;
-  opacity: 0;
-  transition: opacity 120ms ease;
 }
 
-/* The title row leaves the corner to the actions: the star and, on a finished card, the check. */
-.card:has(> .actions) .row {
-  padding-right: 44px;
-}
 
 .card:hover .actions,
 .card:focus-within .actions {
@@ -1387,10 +1381,10 @@ body.vscode-high-contrast-light .card {
   margin-left: auto;
 }
 
-/* In the corner with the other actions, the star lines up with them. */
-.actions .star {
+/* Every card's star, in the row or with the other actions, looks the same. */
+.row .star {
   margin: 0;
-  padding: 0 5px;
+  padding: 0 4px;
   font-weight: 700;
 }
 
@@ -1412,4 +1406,9 @@ body.vscode-high-contrast-light .card {
 /* A finished turn already seen: it stays under Finished, quieter. */
 .card.seen {
   opacity: 0.7;
+}
+
+/* The rows under the title leave the corner to the ring. */
+.card:has(> .ring:not(.hidden)) :is(.line, .options, .pulse, .chips, .costs, .hits) {
+  margin-right: 38px;
 }
