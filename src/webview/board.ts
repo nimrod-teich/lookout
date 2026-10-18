@@ -12,6 +12,8 @@ import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBo
 interface BoardState {
   hidden?: string[];
   earlier?: boolean;
+  /** The user opened the Archived group. */
+  archive?: boolean;
   /** Agents the user hid through the legend. */
   agents?: string[];
 }
@@ -79,9 +81,16 @@ let earlierOpen = vscode.getState()?.earlier === true;
 const PAGE_SIZE = 20;
 /** The page of earlier sessions shown, from 0: the newest first. Back to the first when the search or the scope changes. */
 let earlierPage = 0;
+/** The sessions archived in Lookout that are not running, newest archive first. */
+let archivePast: PastView[] = [];
+/** The user opened the Archived group; kept across reloads. */
+let archiveOpen = vscode.getState()?.archive === true;
+let archivePage = 0;
+let archiveEl: HTMLElement | undefined;
+const archiveCards = new Map<string, HTMLElement>();
 
 function saveState(): void {
-  vscode.setState({ hidden: [...hidden], earlier: earlierOpen, agents: [...hiddenAgents] });
+  vscode.setState({ hidden: [...hidden], earlier: earlierOpen, archive: archiveOpen, agents: [...hiddenAgents] });
 }
 const pastCards = new Map<string, HTMLElement>();
 let earlierEl: HTMLElement | undefined;
@@ -261,6 +270,7 @@ function runSearch(): void {
   query = next;
   hits = new Map();
   earlierPage = 0;
+  archivePage = 0;
   search.classList.toggle("active", query !== "");
   if (query === "") {
     search.classList.remove("searching");
@@ -315,7 +325,7 @@ let results: SearchResult[] = [];
 
 /** The agent of a session the board holds, running or not. */
 function agentOfId(id: string): string | undefined {
-  return (allSessions.find((view) => view.id === id) ?? past.find((view) => view.id === id) ?? favourites.past.find((view) => view.id === id))?.agent;
+  return (allSessions.find((view) => view.id === id) ?? past.find((view) => view.id === id) ?? favourites.past.find((view) => view.id === id) ?? archivePast.find((view) => view.id === id))?.agent;
 }
 
 /** How much the search found, among the agents shown: those hidden in the legend are left out of the count as of the cards. */
@@ -737,14 +747,36 @@ function renderHits(hitsEl: Element, result: SearchResult | undefined): void {
   }
 }
 
-function createPastCard(view: PastView): HTMLElement {
+const ARCHIVE_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="3.5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3 6v6.7c0 .4.3.8.8.8h8.4c.5 0 .8-.4.8-.8V6M6.5 9h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+const UNARCHIVE_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="3.5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3 6v6.7c0 .4.3.8.8.8h8.4c.5 0 .8-.4.8-.8V6M8 12.2V8.2M6.3 9.9 8 8.2l1.7 1.7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/** The button on an earlier card's title row that archives it, or, on an archived card, brings it back to Earlier. */
+function archiveButton(id: string, archived: boolean): HTMLElement {
+  const button = el("span", "archive");
+  button.setAttribute("role", "button");
+  button.title = archived ? "Unarchive: back to Earlier" : "Archive: move it to Archived";
+  button.setAttribute("aria-label", button.title);
+  button.innerHTML = archived ? UNARCHIVE_ICON : ARCHIVE_ICON;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "archive", id });
+  });
+  return button;
+}
+
+/** An earlier session's card; an archived one has no star, and its button brings it back. */
+function createPastCard(view: PastView, archived = false): HTMLElement {
   const card = el("button", "card past");
   card.type = "button";
   card.dataset.id = view.id;
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  row.append(el("span", "title"), el("span", "elapsed"), starButton(view.id));
+  row.append(el("span", "title"), el("span", "elapsed"));
+  if (!archived) row.append(starButton(view.id));
+  row.append(archiveButton(view.id, archived));
   main.append(row, el("span", "chips"), el("span", "hits hidden"));
   card.append(main);
   markCard(card, row, view.agent);
@@ -927,7 +959,7 @@ function renderEarlier(after: HTMLElement): void {
       saveState();
       render();
     });
-    earlierEl.append(heading, el("p", "note hidden"), el("div", "cards"), pager());
+    earlierEl.append(heading, el("p", "note hidden"), el("div", "cards"), pager("Pages of earlier sessions", (step) => turnPage(earlierEl, () => (earlierPage += step))));
   }
   earlierEl.classList.toggle("open", open);
   for (const button of earlierEl.querySelectorAll<HTMLElement>(".scope")) button.setAttribute("aria-pressed", String(button.dataset.scope === earlier.scope));
@@ -941,14 +973,9 @@ function renderEarlier(after: HTMLElement): void {
   if (earlierEl.previousElementSibling !== after) root.insertBefore(earlierEl, after.nextSibling);
   const list = earlierEl.querySelector(".cards")!;
   list.classList.toggle("hidden", !open);
-  const { page: at, pages, first, end } = pageOf(shown.length, earlierPage, PAGE_SIZE);
+  const { page: at, first, end } = showPage(earlierEl, shown.length, earlierPage, open);
   earlierPage = at;
   const page = shown.slice(first, end);
-  const nav = earlierEl.querySelector<HTMLElement>(".pager")!;
-  nav.classList.toggle("hidden", !open || pages === 1);
-  nav.querySelector(".range")!.textContent = `${first + 1}–${end} of ${shown.length}`;
-  nav.querySelector<HTMLButtonElement>(".newer")!.disabled = earlierPage === 0;
-  nav.querySelector<HTMLButtonElement>(".older")!.disabled = earlierPage === pages - 1;
   const seen = new Set<string>();
   let previousCard: HTMLElement | undefined;
   if (open) {
@@ -972,26 +999,94 @@ function renderEarlier(after: HTMLElement): void {
   }
 }
 
-/** Under the earlier sessions: the newer page, which ones show, the older page. */
-function pager(): HTMLElement {
+/** Under a group's cards: the newer page, which ones show, the older page. */
+function pager(label: string, turn: (step: number) => void): HTMLElement {
   const nav = el("nav", "pager hidden");
-  nav.setAttribute("aria-label", "Pages of earlier sessions");
-  const turn = (step: number) => {
-    earlierPage += step;
-    render();
-    // Read the new page from its top.
-    earlierEl?.querySelector(".heading")?.scrollIntoView({ block: "nearest" });
-  };
+  nav.setAttribute("aria-label", label);
   const newer = el("button", "newer", "‹ Newer");
   newer.type = "button";
-  newer.title = "The newer earlier sessions";
+  newer.title = "The newer sessions";
   newer.addEventListener("click", () => turn(-1));
   const older = el("button", "older", "Older ›");
   older.type = "button";
-  older.title = "The older earlier sessions";
+  older.title = "The older sessions";
   older.addEventListener("click", () => turn(1));
   nav.append(newer, el("span", "range"), older);
   return nav;
+}
+
+/** Turns a group's page, and brings its heading into view to read the new page from its top. */
+function turnPage(section: HTMLElement | undefined, step: () => void): void {
+  step();
+  render();
+  section?.querySelector(".heading")?.scrollIntoView({ block: "nearest" });
+}
+
+/** Sets a group's pager for `total` sessions; returns the page shown and the range of its sessions. */
+function showPage(section: HTMLElement, total: number, page: number, open: boolean): { page: number; first: number; end: number } {
+  const shown = pageOf(total, page, PAGE_SIZE);
+  const nav = section.querySelector<HTMLElement>(".pager")!;
+  nav.classList.toggle("hidden", !open || shown.pages === 1);
+  nav.querySelector(".range")!.textContent = `${shown.first + 1}–${shown.end} of ${total}`;
+  nav.querySelector<HTMLButtonElement>(".newer")!.disabled = shown.page === 0;
+  nav.querySelector<HTMLButtonElement>(".older")!.disabled = shown.page === shown.pages - 1;
+  return shown;
+}
+
+/**
+ * The sessions archived in Lookout, under Earlier and collapsed; open while
+ * a search has matches among them. Gone while nothing is archived.
+ */
+function renderArchive(after: HTMLElement): void {
+  const listed = archivePast.filter((view) => agentShown(view.agent));
+  const shown = query === "" ? listed : listed.filter((view) => hits.has(view.id));
+  if (listed.length === 0) {
+    archiveEl?.remove();
+    archiveEl = undefined;
+    archiveCards.clear();
+    return;
+  }
+  const open = (archiveOpen || query !== "") && shown.length > 0;
+  if (!archiveEl) {
+    archiveEl = el("section", "group group-past group-archive");
+    const heading = el("h2", "heading");
+    heading.title = "Sessions you archived. Click to show or hide them; the button on a card brings it back to Earlier, and a session that runs again leaves the archive.";
+    heading.append(el("i", "chev", "▸"), el("span", "label", "Archived"), el("span", "count"));
+    heading.addEventListener("click", () => {
+      archiveOpen = !archiveOpen;
+      saveState();
+      render();
+    });
+    archiveEl.append(heading, el("div", "cards"), pager("Pages of archived sessions", (step) => turnPage(archiveEl, () => (archivePage += step))));
+  }
+  archiveEl.classList.toggle("open", open);
+  archiveEl.querySelector(".count")!.textContent = query === "" ? String(shown.length) : `${shown.length} of ${listed.length}`;
+  if (archiveEl.previousElementSibling !== after) root.insertBefore(archiveEl, after.nextSibling);
+  const list = archiveEl.querySelector(".cards")!;
+  list.classList.toggle("hidden", !open);
+  const { page: at, first, end } = showPage(archiveEl, shown.length, archivePage, open);
+  archivePage = at;
+  const seen = new Set<string>();
+  let previousCard: HTMLElement | undefined;
+  if (open) {
+    for (const view of shown.slice(first, end)) {
+      seen.add(view.id);
+      let card = archiveCards.get(view.id);
+      if (!card) {
+        card = createPastCard(view, true);
+        archiveCards.set(view.id, card);
+      }
+      updatePastCard(card, view);
+      const prev = previousCard ?? null;
+      if (card.parentElement !== list || card.previousElementSibling !== prev) list.insertBefore(card, prev ? prev.nextSibling : list.firstChild);
+      previousCard = card;
+    }
+  }
+  for (const [id, card] of archiveCards) {
+    if (seen.has(id)) continue;
+    card.remove();
+    archiveCards.delete(id);
+  }
 }
 
 function render(): void {
@@ -1000,7 +1095,9 @@ function render(): void {
   renderBeam();
   renderMeters();
   const groups = groupSessions(sessions);
-  const pastShown = shownPast().shown.length;
+  // While a search runs, archived sessions with matches count too: their group shows them.
+  const archiveMatches = query === "" ? 0 : archivePast.filter((view) => agentShown(view.agent) && hits.has(view.id)).length;
+  const pastShown = shownPast().shown.length + archiveMatches;
   const nothing = sessions.length === 0 && pastShown === 0;
   root.classList.toggle("empty", nothing);
   root.querySelector(".nothing")?.remove();
@@ -1015,6 +1112,7 @@ function render(): void {
     root.append(empty);
     renderFavourites(beam);
     renderEarlier(empty);
+    if (earlierEl) renderArchive(earlierEl);
     return;
   }
   const seenIds = new Set<string>();
@@ -1070,6 +1168,7 @@ function render(): void {
     groupsEl.delete(key);
   }
   renderEarlier(previousGroup);
+  if (earlierEl) renderArchive(earlierEl);
 }
 
 function tick(): void {
@@ -1089,6 +1188,10 @@ function tick(): void {
     const card = pastCards.get(view.id);
     if (card) card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   }
+  for (const view of archivePast) {
+    const card = archiveCards.get(view.id);
+    if (card) card.querySelector(".elapsed")!.textContent = pastElapsed(view);
+  }
   renderBeam();
   if (usageGroups.length) renderMeters();
 }
@@ -1104,6 +1207,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   past = message.past ?? [];
   if (message.earlier) earlier = message.earlier;
   favourites = message.favourites ?? { ids: [], past: [] };
+  archivePast = message.archive ?? [];
   // One group, from an extension that knew only Claude's usage, or one per agent.
   usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);
   usageBar = message.usageBar;

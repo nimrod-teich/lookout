@@ -183,6 +183,8 @@ export function activate(context: vscode.ExtensionContext): void {
     setEarlierScope: (scope) => controller.setEarlierScope(scope),
     favourites: () => controller.favourites,
     toggleFavourite: (id) => controller.toggleFavourite(id),
+    archive: () => controller.archive,
+    toggleArchive: (id) => controller.toggleArchive(id),
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
     usageBar: () => pickBar(controller.usageGroups, config.usageAgent)?.group.agent,

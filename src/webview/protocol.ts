@@ -48,6 +48,8 @@ export type ToBoard =
       markers?: boolean;
       earlier?: EarlierInfo;
       favourites?: Favourites;
+      /** The sessions archived in Lookout that are not running, newest archive first. */
+      archive?: PastView[];
     }
   /** `pending` sessions were not read yet; the board asks again. */
   | { type: "search"; query: string; results: SearchResult[]; pending: number };
@@ -75,4 +77,6 @@ export type FromBoard =
   /** List and search the earlier sessions of this window's folders, or of every project. */
   | { type: "earlierScope"; scope: EarlierScope }
   /** Star a session, or take its star away. */
-  | { type: "favourite"; id: string };
+  | { type: "favourite"; id: string }
+  /** Archive a session that is not running, or bring an archived one back to Earlier. */
+  | { type: "archive"; id: string };
