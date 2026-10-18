@@ -407,6 +407,8 @@ function createCard(view: SessionView): HTMLElement {
   seen.addEventListener("click", (event) => {
     event.stopPropagation();
     // On a question read from the reply, the check dismisses that question.
+    // A finished turn already seen stays under Finished until its check clears it.
+    if (stayingFinished.delete(view.id)) render();
     vscode.postMessage({ type: card.classList.contains("typed") ? "dismiss" : "seen", id: view.id });
   });
   actions.append(starButton(view.id), seen);
@@ -430,11 +432,31 @@ function cardTitle(view: SessionView): string {
   return lines.join("\n");
 }
 
+/**
+ * Finished turns the user has looked at stay under Finished, dimmed, until
+ * the session works again or the check clears them: a click on a card must
+ * not make it jump to another group under the pointer.
+ */
+const stayingFinished = new Set<string>();
+
+function keepFinished(views: SessionView[]): SessionView[] {
+  return views.map((view) => {
+    if (view.state === "done") {
+      stayingFinished.add(view.id);
+      return view;
+    }
+    if (view.state === "idle" && stayingFinished.has(view.id)) return { ...view, state: "done", seen: true } as SessionView;
+    stayingFinished.delete(view.id);
+    return view;
+  });
+}
+
 function updateCard(card: HTMLElement, view: SessionView): void {
   const typed = view.reason?.kind === "typed";
   const quiet = quietFor(view, now()) !== undefined;
   const prose = view.state === "waiting" && view.reason !== undefined && view.reason.kind !== "permission";
   card.className = `card state-${view.state} host-${view.host}${typed ? " typed" : ""}${quiet ? " quiet" : ""}${prose ? " prose" : ""}`;
+  card.classList.toggle("seen", (view as { seen?: boolean }).seen === true);
   card.title = cardTitle(view);
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = elapsedText(view);
@@ -780,7 +802,10 @@ function render(): void {
       if (group.key === "done") {
         const all = el("button", "link", "mark all seen");
         all.type = "button";
-        all.addEventListener("click", () => vscode.postMessage({ type: "seenAll" }));
+        all.addEventListener("click", () => {
+          stayingFinished.clear();
+          vscode.postMessage({ type: "seenAll" });
+        });
         heading.append(all);
       }
       section.append(heading, el("div", "cards"));
@@ -847,7 +872,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
     return;
   }
   if (message.type !== "sessions") return;
-  allSessions = message.sessions;
+  allSessions = keepFinished(message.sessions);
   past = message.past ?? [];
   if (message.earlier) earlier = message.earlier;
   favourites = message.favourites ?? { ids: [], past: [] };
