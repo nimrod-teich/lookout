@@ -9,6 +9,7 @@ import { stub, TabInputTerminal } from "./stub-vscode";
 
 const CLAUDE_OPEN = "claude-vscode.editor.open";
 const LAST_MESSAGE = "claude-vscode.focusLastMessage";
+const FOCUS_INPUT = "claude-vscode.focus";
 
 function commandCalls(): string[] {
   return stub.ops.filter(([target]) => target === "commands").map(([, command]) => command);
@@ -49,13 +50,37 @@ describe("jumpToSession, panel sessions", () => {
     ]);
   });
 
-  it("then brings the session's newest message into view, once its tab is in front", async () => {
+  it("then brings the session's newest message into view once its tab is in front, and the cursor back to its prompt box", async () => {
     const group = stub.addClaudeGroup(["Other", "Wire the cache"]);
     stub.commands.set(CLAUDE_OPEN, () => stub.activate(group.tabs[1]!));
     stub.commands.set(LAST_MESSAGE, () => undefined);
+    stub.commands.set(FOCUS_INPUT, () => undefined);
+    stub.activeTextEditor = { selection: { isEmpty: true } };
     expect(await jumpToSession(view(), await terminals(), fakeLog())).toBe("revealed");
-    await vi.waitFor(() => expect(commandCalls()).toEqual([CLAUDE_OPEN, LAST_MESSAGE]), { timeout: 2_000, interval: 20 });
+    await vi.waitFor(() => expect(commandCalls()).toEqual([CLAUDE_OPEN, LAST_MESSAGE, FOCUS_INPUT]), { timeout: 2_000, interval: 20 });
   });
+
+  it("leaves the focus on the newest message when the prompt box command would reach another chat or insert a selection", async () => {
+    const group = stub.addClaudeGroup(["Wire the cache"]);
+    stub.addClaudeGroup(["Beside it"]).activeTab = undefined;
+    stub.commands.set(CLAUDE_OPEN, () => stub.activate(group.tabs[0]!));
+    stub.commands.set(LAST_MESSAGE, () => undefined);
+    stub.commands.set(FOCUS_INPUT, () => undefined);
+    const t = await terminals();
+    // Text selected in the active editor would be inserted as an @-mention.
+    stub.activeTextEditor = { selection: { isEmpty: false } };
+    await jumpToSession(view(), t, fakeLog());
+    await vi.waitFor(() => expect(commandCalls()).toEqual([CLAUDE_OPEN, LAST_MESSAGE]), { timeout: 2_000, interval: 20 });
+    // Another chat in front of its own group would get the cursor too.
+    stub.activeTextEditor = undefined;
+    const beside = stub.groups[1]!;
+    beside.activeTab = beside.tabs[0];
+    stub.ops.length = 0;
+    await jumpToSession(view(), t, fakeLog());
+    await vi.waitFor(() => expect(commandCalls()).toEqual([CLAUDE_OPEN, LAST_MESSAGE]), { timeout: 2_000, interval: 20 });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(commandCalls()).toEqual([CLAUDE_OPEN, LAST_MESSAGE]);
+  }, 10_000);
 
   it("scrolls no tab when the session's tab does not come to the front", async () => {
     const group = stub.addClaudeGroup(["Other", "Wire the cache"]);
@@ -70,6 +95,7 @@ describe("jumpToSession, panel sessions", () => {
   it("drops the scroll of a jump that a later jump or a rename overtakes", async () => {
     const group = stub.addClaudeGroup(["Wire the cache", "Second"]);
     stub.commands.set(LAST_MESSAGE, () => undefined);
+    stub.commands.set(FOCUS_INPUT, () => undefined);
     stub.commands.set("claude-vscode.renameSessionTab", () => undefined);
     stub.commands.set(CLAUDE_OPEN, () => undefined);
     const t = await terminals();
@@ -81,7 +107,7 @@ describe("jumpToSession, panel sessions", () => {
     await jumpToSession(view(), t, fakeLog());
     await vi.waitFor(() => expect(commandCalls().filter((c) => c === LAST_MESSAGE)).toHaveLength(1), { timeout: 2_000, interval: 20 });
     await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(commandCalls()).toEqual([CLAUDE_OPEN, CLAUDE_OPEN, "claude-vscode.renameSessionTab", CLAUDE_OPEN, CLAUDE_OPEN, LAST_MESSAGE]);
+    expect(commandCalls()).toEqual([CLAUDE_OPEN, CLAUDE_OPEN, "claude-vscode.renameSessionTab", CLAUDE_OPEN, CLAUDE_OPEN, LAST_MESSAGE, FOCUS_INPUT]);
   }, 10_000);
 
   it("refuses an id that is not a session UUID", async () => {

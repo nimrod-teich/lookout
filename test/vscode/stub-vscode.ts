@@ -45,6 +45,7 @@ export const stub = {
   activeGroup: undefined as StubGroup | undefined,
   terminals: [] as StubTerminal[],
   activeTerminal: undefined as StubTerminal | undefined,
+  activeTextEditor: undefined as { selection: { isEmpty: boolean } } | undefined,
   focused: true,
   /** Picks an item from the open quick pick; undefined dismisses it. */
   quickPick: undefined as ((items: readonly unknown[]) => unknown) | undefined,
@@ -75,6 +76,7 @@ export const stub = {
     this.activeGroup = undefined;
     this.terminals = [];
     this.activeTerminal = undefined;
+    this.activeTextEditor = undefined;
     this.focused = true;
     this.quickPick = undefined;
     this.openPicker = undefined;
@@ -329,6 +331,9 @@ export const window = {
   },
   get activeTerminal() {
     return stub.activeTerminal;
+  },
+  get activeTextEditor() {
+    return stub.activeTextEditor;
   },
   get state() {
     return { focused: stub.focused };
