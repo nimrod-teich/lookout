@@ -10,7 +10,7 @@ export interface Scanner {
   dispose(): void;
 }
 
-/** While files are read, `onDidRead` fires at most this often; and once more when the last one is done. */
+/** `onDidRead` fires at most this often, and always once more after the last file read. */
 const NOTIFY_MS = 200;
 
 export class BackgroundReads {
@@ -20,17 +20,22 @@ export class BackgroundReads {
   private draining = false;
   private disposed = false;
   private notifyTimer: ReturnType<typeof setTimeout> | undefined;
-  private notifyMissed = false;
+  private notifiedAt = -Infinity;
+  /** The scanner broke: nothing more is read here. */
+  private brokenBy: unknown;
 
   constructor(
-    private scanner: Scanner,
+    private readonly scanner: Scanner,
     /** Some files were read: a search may find more. */
     private readonly onDidRead: () => void,
-    /** Takes over for good when the scanner breaks. */
-    private readonly fallback: () => Scanner,
-    /** The scanner broke, and why. */
-    private readonly onFallback?: (error: unknown) => void,
+    /** The scanner broke, and why: the owner reads some other way from now on. */
+    private readonly onBroken?: (error: unknown) => void,
   ) {}
+
+  /** The scanner broke, and nothing more is read here. */
+  get broken(): boolean {
+    return this.brokenBy !== undefined;
+  }
 
   /** The index waits to be read, or is being read. */
   has(index: HistoryIndex): boolean {
@@ -44,7 +49,7 @@ export class BackgroundReads {
 
   /** Reads what the index's file gained, after the files asked for before it. */
   read(index: HistoryIndex): void {
-    if (this.disposed || this.has(index)) return;
+    if (this.disposed || this.broken || this.has(index)) return;
     this.queue.add(index);
     void this.drain();
   }
@@ -55,7 +60,7 @@ export class BackgroundReads {
     try {
       for (;;) {
         const next = this.queue.values().next();
-        if (next.done || this.disposed) return;
+        if (next.done || this.disposed || this.broken) return;
         const index = next.value;
         this.queue.delete(index);
         this.current = index;
@@ -77,34 +82,34 @@ export class BackgroundReads {
       return await this.scanner.scan(job);
     } catch (error) {
       if (this.disposed) return undefined;
-      this.onFallback?.(error);
+      // Whatever broke it (a thread out of memory on a file, a bundle that does not load), it is not tried again:
+      // the owner goes back to reading the way it did without one.
+      this.brokenBy = error ?? new Error("The scanner failed");
+      this.queue.clear();
       this.scanner.dispose();
-      this.scanner = this.fallback();
-      return this.scanner.scan(job).catch(() => undefined);
+      this.onBroken?.(this.brokenBy);
+      return undefined;
     }
   }
 
-  /** Tells the listener, at most every `NOTIFY_MS` while reading, and right away once nothing is left. */
+  /** Tells the listener at once, unless it was told less than `NOTIFY_MS` ago: then when that time is up, once for all reads meanwhile. */
   private notify(): void {
-    if (this.pending === 0) {
-      if (this.notifyTimer) clearTimeout(this.notifyTimer);
-      this.notifyTimer = undefined;
-      this.notifyMissed = false;
-      this.onDidRead();
+    if (this.notifyTimer || this.disposed) return;
+    const wait = this.notifiedAt + NOTIFY_MS - Date.now();
+    if (wait <= 0) {
+      this.fire();
       return;
     }
-    if (this.notifyTimer) {
-      this.notifyMissed = true;
-      return;
-    }
-    this.onDidRead();
     this.notifyTimer = setTimeout(() => {
       this.notifyTimer = undefined;
-      if (this.notifyMissed && !this.disposed) {
-        this.notifyMissed = false;
-        this.onDidRead();
-      }
-    }, NOTIFY_MS);
+      this.fire();
+    }, wait);
+  }
+
+  private fire(): void {
+    if (this.disposed) return;
+    this.notifiedAt = Date.now();
+    this.onDidRead();
   }
 
   dispose(): void {

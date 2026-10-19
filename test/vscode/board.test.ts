@@ -133,6 +133,22 @@ describe("Board", () => {
     expect(search).toHaveBeenCalledTimes(calls);
   });
 
+  it("stops following a search once the box is cleared, or the page loads again", () => {
+    const { board, actions, webviewView } = setup([view()], undefined, { follows: () => true });
+    webviewView.receive({ type: "search", query: "cache" });
+    expect(actions.search).toHaveBeenCalledTimes(1);
+    const posted = webviewView.posted.length;
+    // Cleared: nothing to answer, and nothing more is sent as conversations are read.
+    webviewView.receive({ type: "search", query: "" });
+    board.followSearch();
+    expect(actions.search).toHaveBeenCalledTimes(1);
+    expect(webviewView.posted).toHaveLength(posted);
+    webviewView.receive({ type: "search", query: "cache" });
+    webviewView.receive({ type: "ready" });
+    board.followSearch();
+    expect(actions.search).toHaveBeenCalledTimes(2);
+  });
+
   it("passes the board's time zone along with a search, and drops one that is not a zone", () => {
     const { actions, webviewView } = setup([view()]);
     webviewView.receive({ type: "search", query: "cache since:today", zone: -180 });

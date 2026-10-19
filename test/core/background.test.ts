@@ -46,7 +46,7 @@ describe("BackgroundReads", () => {
   it("reads one file at a time, in the order asked, and says when it read some", async () => {
     const scanner = new HeldScanner();
     const onDidRead = vi.fn();
-    const background = new BackgroundReads(scanner, onDidRead, inThreadScanner);
+    const background = new BackgroundReads(scanner, onDidRead);
     const [a, b, c] = [transcript(1), transcript(2), transcript(3)].map((file) => new HistoryIndex(file, TRANSCRIPT_LINES));
     for (const index of [a!, b!, c!]) index.update(background);
     // Asked for again while queued: still one read.
@@ -64,14 +64,14 @@ describe("BackgroundReads", () => {
     await idle(background);
     expect(scanner.jobs.map((job) => path.basename(job.file))).toEqual(["t1.jsonl", "t2.jsonl", "t3.jsonl"]);
     expect([b!, c!].map((index) => index.messages.length)).toEqual([4, 6]);
-    // Once nothing is left, the listener hears so, however soon after the last time.
-    expect(onDidRead.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // Once nothing is left, the listener hears so, within 200 ms of the last time.
+    await vi.waitFor(() => expect(onDidRead.mock.calls.length).toBeGreaterThanOrEqual(2));
     background.dispose();
   });
 
   it("does not read a file again until it changes, then reads only what it gained", async () => {
     const scanner = new HeldScanner();
-    const background = new BackgroundReads(scanner, () => {}, inThreadScanner);
+    const background = new BackgroundReads(scanner, () => {});
     const file = transcript(1);
     const index = new HistoryIndex(file, TRANSCRIPT_LINES);
     index.update(background);
@@ -90,26 +90,82 @@ describe("BackgroundReads", () => {
     background.dispose();
   });
 
-  it("turns to its fallback for good when the scanner breaks, and says why once", async () => {
+  it("stops for good when the scanner breaks, says why once, and reads nothing more", async () => {
     const broken: Scanner = { scan: vi.fn(() => Promise.reject(new Error("no thread"))), dispose: vi.fn() };
-    const onFallback = vi.fn();
-    const background = new BackgroundReads(broken, () => {}, inThreadScanner, onFallback);
+    const onBroken = vi.fn();
+    const background = new BackgroundReads(broken, () => {}, onBroken);
     const [a, b] = [transcript(1), transcript(2)].map((file) => new HistoryIndex(file, TRANSCRIPT_LINES));
     a!.update(background);
     b!.update(background);
-    await idle(background);
-    expect([a!.messages.length, b!.messages.length]).toEqual([2, 4]);
+    await vi.waitFor(() => expect(onBroken).toHaveBeenCalledTimes(1));
+    expect(onBroken.mock.calls[0]![0]).toEqual(new Error("no thread"));
+    expect(background.broken).toBe(true);
+    expect(background.pending).toBe(0);
     expect(broken.scan).toHaveBeenCalledTimes(1);
     expect(broken.dispose).toHaveBeenCalledTimes(1);
-    expect(onFallback).toHaveBeenCalledTimes(1);
-    expect(onFallback.mock.calls[0]![0]).toEqual(new Error("no thread"));
+    a!.update(background);
+    expect(background.pending).toBe(0);
+    expect([a!.ready, b!.ready]).toEqual([false, false]);
     background.dispose();
+  });
+
+  it("does not read a file it cannot read again until the file changes", async () => {
+    // A folder where a conversation file should be: looked at, but never read.
+    const folder = path.join(tempConfigDir(), "t.jsonl");
+    fs.mkdirSync(folder);
+    const scanned: string[] = [];
+    const scanner = inThreadScanner();
+    const onDidRead = vi.fn();
+    const background = new BackgroundReads({ scan: (job) => (scanned.push(job.file), scanner.scan(job)), dispose: () => {} }, onDidRead);
+    const index = new HistoryIndex(folder, TRANSCRIPT_LINES);
+    index.update(background);
+    await idle(background);
+    expect(index.ready).toBe(true);
+    expect(index.messages).toEqual([]);
+    // Every look after it, as a search or the conversation tab makes, finds nothing changed.
+    for (let i = 0; i < 5; i++) index.update(background);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(scanned).toHaveLength(1);
+    expect(onDidRead).toHaveBeenCalledTimes(1);
+    background.dispose();
+  });
+
+  it("tells the listener at most every 200 ms, and once more after the last read", async () => {
+    vi.useFakeTimers();
+    try {
+      const scanner = new HeldScanner();
+      const onDidRead = vi.fn();
+      const background = new BackgroundReads(scanner, onDidRead);
+      const indexes = [transcript(1), transcript(2), transcript(3)].map((file) => new HistoryIndex(file, TRANSCRIPT_LINES));
+      for (const index of indexes) index.update(background);
+      const finish = async () => {
+        scanner.release();
+        await vi.advanceTimersByTimeAsync(0);
+      };
+      await vi.advanceTimersByTimeAsync(0);
+      await finish();
+      expect(onDidRead).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(10);
+      await finish();
+      await vi.advanceTimersByTimeAsync(10);
+      // The last read, 20 ms after the first: told once more, but not before 200 ms have passed.
+      await finish();
+      expect(background.pending).toBe(0);
+      expect(onDidRead).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(onDidRead).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(onDidRead).toHaveBeenCalledTimes(2);
+      background.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stops reading once disposed", async () => {
     const scanner = new HeldScanner();
     const onDidRead = vi.fn();
-    const background = new BackgroundReads(scanner, onDidRead, inThreadScanner);
+    const background = new BackgroundReads(scanner, onDidRead);
     const [a, b] = [transcript(1), transcript(2)].map((file) => new HistoryIndex(file, TRANSCRIPT_LINES));
     a!.update(background);
     b!.update(background);
@@ -152,7 +208,7 @@ describe("the reading thread", () => {
   });
 
   it("feeds the background reads that a search waits on", async () => {
-    const background = new BackgroundReads(new WorkerScanner(path.join(dir, "dist", "reader.js")), () => {}, inThreadScanner);
+    const background = new BackgroundReads(new WorkerScanner(path.join(dir, "dist", "reader.js")), () => {});
     const index = new HistoryIndex(transcript(2, "deploy"), TRANSCRIPT_LINES);
     index.update(background);
     await idle(background);

@@ -62,6 +62,8 @@ function run(): void {
   query = input.value.trim();
   vscode.setState({ query });
   if (query === "") {
+    // The extension stops sending this search again as it reads more.
+    vscode.postMessage({ type: "search", query: "" });
     summary.textContent = "";
     showHint();
     return;

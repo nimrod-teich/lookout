@@ -71,8 +71,9 @@ export function scanFile(file: string, reader: LineReader, from: number, identit
     const end = readLines(file, start, reader, (found) => facts.push(found));
     return { identity: now, size: st.size, reset, end, facts };
   } catch {
-    // Read again next time; a replaced file is at least emptied of what was read before.
-    return reset ? { identity: now, size: 0, reset, end: 0, facts: [] } : undefined;
+    // A file that cannot be read (not ours to read, held by another process) is tried again once it changes,
+    // not at every look; a replaced one is at least emptied of what was read before.
+    return { identity: now, size: st.size, reset, end: start, facts: [] };
   }
 }
 

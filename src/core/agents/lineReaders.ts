@@ -8,14 +8,18 @@ import { EVENTS_LINES } from "./copilot/events";
 
 export const LINE_READERS: Readonly<Record<string, LineReader>> = Object.fromEntries([TRANSCRIPT_LINES, ROLLOUT_LINES, EVENTS_LINES].map((reader) => [reader.name!, reader]));
 
-/** Reads in this thread instead, one file per turn of the event loop: for when a thread of its own cannot run. */
+/** Reads in this thread, one file per turn of the event loop. */
 export function inThreadScanner(): Scanner {
   return {
     scan: (job) =>
-      new Promise((resolve) => {
+      new Promise((resolve, reject) => {
         setImmediate(() => {
-          const reader = LINE_READERS[job.reader];
-          resolve(reader ? scanFile(job.file, reader, job.from, job.identity) : undefined);
+          try {
+            const reader = LINE_READERS[job.reader];
+            resolve(reader ? scanFile(job.file, reader, job.from, job.identity) : undefined);
+          } catch (error) {
+            reject(error);
+          }
         });
       }),
     dispose: () => {},

@@ -651,6 +651,28 @@ describe("the extension", () => {
       }
     }, 60_000);
 
+    it("searches in the extension host again, a little at a time, when the reading thread breaks", async () => {
+      const extension = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-ext-"));
+      try {
+        // A bundle that does not load: the thread fails on its first read.
+        fs.mkdirSync(path.join(extension, "dist"));
+        fs.writeFileSync(path.join(extension, "dist", "reader.js"), 'throw new Error("broken bundle");');
+        activate(context(extension));
+        const { boardView, listed } = openBoard();
+        await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+        const answers = () => boardView.posted.filter((m) => (m as { type: string }).type === "search") as { results: { id: string; count: number }[]; pending: number; follows?: boolean }[];
+        boardView.receive({ type: "search", query: "deploy" });
+        expect(answers()[0]).toMatchObject({ follows: true });
+        // Told the thread broke, the board gets an answer read here, and asks again by itself from then on.
+        await vi.waitFor(() => expect(answers().at(-1)).toMatchObject({ pending: 0, results: [{ id: HERE, count: 1 }] }), WAIT);
+        expect(answers().at(-1)?.follows).toBeUndefined();
+        boardView.receive({ type: "search", query: "tune" });
+        expect(answers().at(-1)).toMatchObject({ query: "tune", results: [{ id: HERE, count: 1 }] });
+      } finally {
+        fs.rmSync(extension, { recursive: true, force: true });
+      }
+    }, 60_000);
+
     it("searches every conversation on the search page, and opens a match in the conversation tab", async () => {
       activate(context());
       const { listed } = openBoard();

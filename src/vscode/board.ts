@@ -83,6 +83,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
+    this.lastSearch = undefined;
     view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "dist"), vscode.Uri.joinPath(this.extensionUri, "media")] };
     view.webview.html = this.html(view.webview);
     this.subscriptions.push(
@@ -141,6 +142,8 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
     const message = raw as Partial<FromBoard>;
     switch (message?.type) {
       case "ready":
+        // A page that loads has nothing in its search box.
+        this.lastSearch = undefined;
         this.refresh();
         return;
       case "jump":
@@ -179,6 +182,11 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
       }
       case "search": {
         if (typeof message.query !== "string") return;
+        // An empty box: nothing to answer, nor to follow.
+        if (message.query.trim() === "") {
+          this.lastSearch = undefined;
+          return;
+        }
         const zone = typeof message.zone === "number" && Math.abs(message.zone) <= 24 * 60 ? message.zone : undefined;
         this.lastSearch = { query: message.query, zone };
         this.answer(this.lastSearch);

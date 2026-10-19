@@ -3,7 +3,6 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { AgentHostSessions } from "../core/agentHost";
 import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents/agent";
-import { inThreadScanner } from "../core/agents/lineReaders";
 import { BackgroundReads } from "../core/background";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
@@ -196,8 +195,8 @@ export class Controller implements vscode.Disposable {
   private disposed = false;
   private readonly announcing = new Set<ReturnType<typeof setTimeout>>();
   private readonly terminalsChanged: vscode.Disposable;
-  /** Reads the conversations in a thread of their own, when there is one. */
-  private readonly background: BackgroundReads | undefined;
+  /** Reads the conversations in a thread of their own, when there is one and it has not broken. */
+  private background: BackgroundReads | undefined;
   private readonly read = new vscode.EventEmitter<void>();
   /** Conversations were read in the background: a search may find more. */
   readonly onDidRead = this.read.event;
@@ -227,16 +226,24 @@ export class Controller implements vscode.Disposable {
     this.alerts.prune(Date.now());
     this.ledger.prune(Date.now());
     const script = host.readerScript;
-    this.background = script
-      ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), inThreadScanner, (error) =>
-          this.log.errorOnce(`The thread that reads the conversations stopped (${error instanceof Error ? error.message : String(error)}); they are read in the extension host instead`),
-        )
-      : undefined;
+    this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error)) : undefined;
   }
 
   /** A search's results fill in as the conversations are read in the background, so nobody needs to ask again. */
   get follows(): boolean {
     return this.background !== undefined;
+  }
+
+  /**
+   * The thread that reads the conversations broke: searches read them here
+   * again, a little at a time, as without one. Whoever follows a search hears
+   * of it, and from now on asks again by itself.
+   */
+  private backgroundBroke(error: unknown): void {
+    this.log.errorOnce(`The thread that reads the conversations stopped (${error instanceof Error ? error.message : String(error)}); searches read them in the extension host, a little at a time`);
+    this.background?.dispose();
+    this.background = undefined;
+    this.read.fire();
   }
 
   get sessions(): readonly SessionView[] {

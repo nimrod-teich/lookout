@@ -433,6 +433,8 @@ function runSearch(): void {
   archivePage = 0;
   search.classList.toggle("active", query !== "");
   if (query === "") {
+    // The extension stops sending this search again as it reads more.
+    vscode.postMessage({ type: "search", query: "" });
     search.classList.remove("searching");
     summary.textContent = "";
     applyFilters();

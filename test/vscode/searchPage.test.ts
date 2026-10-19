@@ -56,6 +56,27 @@ describe("SearchPage", () => {
     page.dispose();
   });
 
+  it("follows its search only while it is in view, and not once its box is cleared", () => {
+    const { actions } = setup();
+    const page = new SearchPage({ fsPath: "/ext" } as never, { ...actions, follows: () => true });
+    page.show("deploy");
+    const panel = stub.panels.at(-1)!;
+    panel.receive({ type: "search", query: "deploy" });
+    expect(actions.search).toHaveBeenCalledTimes(1);
+    panel.visible = false;
+    page.followSearch();
+    expect(actions.search).toHaveBeenCalledTimes(1);
+    panel.visible = true;
+    page.followSearch();
+    expect(actions.search).toHaveBeenCalledTimes(2);
+    const posted = panel.posted.length;
+    panel.receive({ type: "search", query: "  " });
+    page.followSearch();
+    expect(actions.search).toHaveBeenCalledTimes(2);
+    expect(panel.posted).toHaveLength(posted);
+    page.dispose();
+  });
+
   it("passes on the agents hidden on the board, to leave them out", () => {
     const { page } = setup();
     page.show("deploy", ["codex"]);

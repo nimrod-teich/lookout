@@ -74,9 +74,9 @@ export class SearchPage implements vscode.Disposable {
     return results;
   }
 
-  /** Sends the page's results again: more conversations were read. */
+  /** Sends the page's results again while it is in view: more conversations were read. */
   followSearch(): void {
-    if (this.panel && this.searched && this.query.trim() !== "") this.post(this.results(this.query, this.zone));
+    if (this.panel?.visible && this.searched && this.query.trim() !== "") this.post(this.results(this.query, this.zone));
   }
 
   private post(message: ToSearch): void {
@@ -110,9 +110,11 @@ export class SearchPage implements vscode.Disposable {
       case "search": {
         if (typeof message.query !== "string") return;
         this.query = message.query;
+        // An empty box: nothing to answer, nor to follow.
+        this.searched = message.query.trim() !== "";
+        if (!this.searched) return;
         const zone = typeof message.zone === "number" && Math.abs(message.zone) <= 24 * 60 ? message.zone : undefined;
         this.zone = zone;
-        this.searched = true;
         this.post(this.results(message.query, zone));
         return;
       }
