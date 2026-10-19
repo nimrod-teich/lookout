@@ -2,7 +2,7 @@ import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import { countStates } from "../core/format";
 import type { SearchOutcome } from "../core/agents/agent";
-import type { SessionSort } from "../core/sorting";
+import { isSortKey, type SessionSort } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "../webview/protocol";
 
@@ -30,6 +30,8 @@ export interface BoardActions {
   sort?(): SessionSort;
   /** The user dragged a card: their own order, which the board now follows. */
   setOrder?(ids: string[]): void;
+  /** The user picked an order from the board's sort chip. */
+  setSort?(by: SessionSort["by"]): void;
   /** The user dragged a starred card: the favourites in their new order. */
   orderFavourites?(ids: string[]): void;
   /** Resumes a past session in the agent's panel. */
@@ -183,6 +185,9 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         if (known) this.actions.toggleArchive(id);
         return;
       }
+      case "sort":
+        if (isSortKey(message.by)) this.actions.setSort?.(message.by);
+        return;
       case "order":
       case "favouriteOrder": {
         const ids = Array.isArray(message.ids) ? message.ids.filter((id): id is string => typeof id === "string") : [];

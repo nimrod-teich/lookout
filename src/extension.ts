@@ -214,6 +214,7 @@ export function activate(context: vscode.ExtensionContext): void {
     togglePark: (id) => controller.togglePark(id),
     sort,
     setOrder: (ids) => setSort({ by: "custom", order: readSort({ order: ids }).order }),
+    setSort: (by) => setSort({ ...sort(), by }),
     orderFavourites: (ids) => controller.orderFavourites(ids),
     toggleArchive: (id) => controller.toggleArchive(id),
     resume: (id) => void resume(id),
