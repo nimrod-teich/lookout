@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UsageMeter } from "../../src/core/usage";
-import { barMeter, chosenGroup, groupHeading, peakMeter, pickBar, sortGroups, type UsageGroup } from "../../src/core/usageGroups";
+import { barMeter, chosenGroup, groupHeading, peakMeter, pickBar, sortGroups, tabMeters, type UsageGroup } from "../../src/core/usageGroups";
 
 const HOUR = 3_600_000;
 
@@ -62,6 +62,15 @@ describe("peakMeter", () => {
     expect(peakMeter([meter("session", 3), meter("weekly", 61), meter("weekly-fable", 81)])?.key).toBe("weekly-fable");
     expect(peakMeter([meter("five", 40), meter("weekly", 40)])?.key).toBe("five");
     expect(peakMeter([])).toBeUndefined();
+  });
+});
+
+describe("tabMeters", () => {
+  it("shows the session window, and names a limit closer to its end for the hover", () => {
+    expect(tabMeters([meter("session", 18), meter("weekly", 31), meter("weekly-fable", 84)])).toMatchObject({ shown: { key: "session" }, closest: { key: "weekly-fable" } });
+    expect(tabMeters([meter("session", 90), meter("weekly", 40)])).toEqual({ shown: expect.objectContaining({ key: "session" }), closest: undefined });
+    expect(tabMeters([meter("session", 40), meter("weekly", 40)]).closest).toBeUndefined();
+    expect(tabMeters([])).toEqual({ shown: undefined, closest: undefined });
   });
 });
 

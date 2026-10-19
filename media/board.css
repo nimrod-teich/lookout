@@ -637,19 +637,19 @@ body.vscode-reduce-motion .hover-card {
   font-weight: 600;
 }
 
-.usage-tab .peak {
+.usage-tab .share {
   font-variant-numeric: tabular-nums;
 }
 
-.usage-tab .peak.mid {
+.usage-tab .share.mid {
   color: var(--waiting);
 }
 
-.usage-tab .peak.high {
+.usage-tab .share.high {
   color: var(--vscode-errorForeground, #f14c4c);
 }
 
-.usage-tab.stale .peak {
+.usage-tab.stale .share {
   color: var(--idle);
 }
 
