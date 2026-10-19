@@ -532,6 +532,8 @@ body.vscode-reduce-motion .hover-card {
 
 .search .pickers {
   display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
   margin-left: auto;
 }
@@ -563,16 +565,13 @@ body.vscode-reduce-motion .hover-card {
   outline-offset: -1px;
 }
 
-.chip-button .glyph {
-  display: inline-flex;
-  width: 11px;
-  height: 11px;
+/* What the chip chooses, quiet; what is chosen, in full colour. */
+.chip-button .prefix {
+  color: var(--muted);
 }
 
-.chip-button .glyph svg {
-  width: 11px;
-  height: 11px;
-  opacity: 1;
+.chip-button .label {
+  color: var(--ink);
 }
 
 .chip-button .caret {
@@ -580,14 +579,14 @@ body.vscode-reduce-motion .hover-card {
   opacity: 0.7;
 }
 
-/* Under the chip, at the row's right edge, over the cards. */
+/* Placed by the board next to its chip, inside the board's edges, over the cards; its list scrolls when the board is too short for it. */
 .picker .menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 6;
-  min-width: 256px;
-  max-width: calc(100vw - 24px);
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(232px, calc(100vw - 12px));
   padding: 4px;
   border: 1px solid var(--vscode-dropdown-border, color-mix(in srgb, var(--ink) 18%, transparent));
   border-radius: 6px;
@@ -599,12 +598,37 @@ body.vscode-reduce-motion .hover-card {
   display: none;
 }
 
+.picker .menu-heading {
+  flex: none;
+  padding: 3px 8px 4px;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  color: var(--muted);
+}
+
+.picker .menu-items {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* What the option under the pointer does, two lines kept for it so the menu does not jump. */
+.picker .menu-hint {
+  flex: none;
+  min-height: calc(2 * 1.35em);
+  margin-top: 4px;
+  padding: 5px 8px 2px;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+  font-size: calc(var(--vscode-font-size) - 2px);
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 .picker .item {
   display: grid;
   grid-template-columns: 12px 1fr;
   column-gap: 6px;
   width: 100%;
-  padding: 4px 8px;
+  padding: 2px 8px;
   border: 0;
   border-radius: 4px;
   background: none;
@@ -628,12 +652,6 @@ body.vscode-reduce-motion .hover-card {
 
 .picker .item[aria-checked="true"] .mark {
   visibility: visible;
-}
-
-.picker .item .detail {
-  grid-column: 2;
-  font-size: calc(var(--vscode-font-size) - 2px);
-  color: var(--muted);
 }
 
 .hits {

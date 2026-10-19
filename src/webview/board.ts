@@ -310,8 +310,9 @@ summary.addEventListener("click", () => {
   if (query !== "") vscode.postMessage(hide ? { type: "openSearch", query, hide } : { type: "openSearch", query });
 });
 
-// A chip that names a choice, with a small menu under it to change it: the
-// board's own, in its own style, so the choice is always in view.
+// A chip that names a choice, with a small menu to change it: the board's
+// own, in its own style, so the choice is always in view. The chip says what
+// it chooses ("Group by:", "Sort by:") and what is chosen.
 
 interface PickerOption<K extends string> {
   key: K;
@@ -321,55 +322,112 @@ interface PickerOption<K extends string> {
   detail: string;
 }
 
-function picker<K extends string>(glyph: string, title: string, options: readonly PickerOption<K>[], pick: (key: K) => void): { element: HTMLElement; set(key: K): void } {
+/** Room left between an open menu and the edges of the board. */
+const MENU_MARGIN = 6;
+
+function picker<K extends string>(prefix: string, heading: string, title: string, options: readonly PickerOption<K>[], pick: (key: K) => void): { element: HTMLElement; set(key: K): void } {
   const wrap = el("span", "picker");
   const chip = el("button", "chip-button");
   chip.type = "button";
   chip.title = title;
   chip.setAttribute("aria-haspopup", "menu");
   chip.setAttribute("aria-expanded", "false");
-  const icon = el("span", "glyph");
-  icon.innerHTML = glyph;
   const label = el("span", "label");
-  chip.append(icon, label, el("span", "caret", "▾"));
+  chip.append(el("span", "prefix", prefix), label, el("span", "caret", "▾"));
   const menu = el("div", "menu hidden");
   menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", heading);
+  const list = el("div", "menu-items");
+  // What the option under the pointer, or in focus, does; the chosen one's otherwise.
+  const hint = el("div", "menu-hint");
+  menu.append(el("div", "menu-heading", heading), list, hint);
   let current = options[0]!.key;
   const items = new Map<K, HTMLButtonElement>();
+  const describe = (key: K) => (hint.textContent = options.find((option) => option.key === key)?.detail ?? "");
   const away = (event: Event) => {
     if (!wrap.contains(event.target as Node)) close();
   };
   const keys = (event: KeyboardEvent) => {
-    if (event.key !== "Escape") return;
-    close();
-    chip.focus();
+    if (event.key === "Escape") {
+      close();
+      chip.focus();
+      return;
+    }
+    // Tab leaves the menu as it would any other control, and the menu closes behind it.
+    if (event.key === "Tab") {
+      close();
+      return;
+    }
+    const all = [...items.values()];
+    const at = all.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "ArrowDown" ? at + 1 : event.key === "ArrowUp" ? at - 1 : event.key === "Home" ? 0 : event.key === "End" ? all.length - 1 : undefined;
+    if (next === undefined) return;
+    event.preventDefault();
+    all[(next + all.length) % all.length]?.focus();
+  };
+  // The board scrolled or resized under the menu: the chip moved, so the menu goes.
+  const moved = (event: Event) => {
+    if (!(event.target instanceof Node && menu.contains(event.target))) close();
+  };
+  /** Under the chip, or over it when there is more room there; inside the board's edges, scrolling within itself only when the board is too short for it. */
+  const place = () => {
+    const at = chip.getBoundingClientRect();
+    const width = document.documentElement.clientWidth;
+    const height = document.documentElement.clientHeight;
+    menu.style.maxHeight = "";
+    menu.style.left = `${Math.max(MENU_MARGIN, Math.min(at.right - menu.offsetWidth, width - menu.offsetWidth - MENU_MARGIN))}px`;
+    const below = height - at.bottom - 4 - MENU_MARGIN;
+    const above = at.top - 4 - MENU_MARGIN;
+    const tall = menu.offsetHeight;
+    if (tall <= below || below >= above) {
+      menu.style.top = `${at.bottom + 4}px`;
+      menu.style.maxHeight = `${Math.max(below, 80)}px`;
+    } else {
+      menu.style.top = `${Math.max(MENU_MARGIN, at.top - 4 - tall)}px`;
+      menu.style.maxHeight = `${above}px`;
+    }
   };
   const open = () => {
     menu.classList.remove("hidden");
     chip.setAttribute("aria-expanded", "true");
-    items.get(current)?.focus();
+    describe(current);
+    place();
+    const chosen = items.get(current);
+    // Into view within the menu, never by scrolling the board.
+    chosen?.focus({ preventScroll: true });
+    if (chosen && (chosen.offsetTop < list.scrollTop || chosen.offsetTop + chosen.offsetHeight > list.scrollTop + list.clientHeight)) list.scrollTop = chosen.offsetTop - list.clientHeight / 2;
     document.addEventListener("pointerdown", away, true);
     document.addEventListener("keydown", keys, true);
+    document.addEventListener("scroll", moved, true);
+    window.addEventListener("resize", moved);
   };
   const close = () => {
     menu.classList.add("hidden");
     chip.setAttribute("aria-expanded", "false");
     document.removeEventListener("pointerdown", away, true);
     document.removeEventListener("keydown", keys, true);
+    document.removeEventListener("scroll", moved, true);
+    window.removeEventListener("resize", moved);
   };
   for (const option of options) {
     const item = el("button", "item");
     item.type = "button";
     item.setAttribute("role", "menuitemradio");
-    item.append(el("span", "mark", "✓"), el("span", "name", option.label), el("span", "detail", option.detail));
+    item.setAttribute("aria-description", option.detail);
+    item.append(el("span", "mark", "✓"), el("span", "name", option.label));
     item.addEventListener("click", (event) => {
       event.stopPropagation();
       close();
       if (option.key !== current) pick(option.key);
     });
+    item.addEventListener("pointerenter", () => describe(option.key));
+    item.addEventListener("focus", () => describe(option.key));
     items.set(option.key, item);
-    menu.append(item);
+    list.append(item);
   }
+  list.addEventListener("pointerleave", () => {
+    if (!list.contains(document.activeElement)) describe(current);
+  });
   chip.addEventListener("click", () => (menu.classList.contains("hidden") ? open() : close()));
   wrap.append(chip, menu);
   const set = (key: K) => {
@@ -381,11 +439,8 @@ function picker<K extends string>(glyph: string, title: string, options: readonl
   return { element: wrap, set };
 }
 
-const SORT_GLYPH =
-  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M2.5 11 5 13.5 7.5 11M11 13.5v-11M8.5 5 11 2.5 13.5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
 /** The order inside each group, as a chip at the end of the search row; a pick goes to the extension, which keeps it for every window. */
-const sortPicker = picker<SortKey>(SORT_GLYPH, "How the sessions are ordered inside each group", SORTS, (by) => {
+const sortPicker = picker<SortKey>("Sort by:", "Sort the sessions in each group by", "How the sessions are ordered inside each group", SORTS, (by) => {
   // Your order starts from the one on screen, the first time it is picked.
   if (by === "custom" && sort.order.length === 0) {
     sort = { by, order: sessions.map((view) => view.id) };
@@ -397,11 +452,8 @@ const sortPicker = picker<SortKey>(SORT_GLYPH, "How the sessions are ordered ins
   applyFilters();
   render();
 });
-const GROUP_GLYPH =
-  '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="2" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="2" y="9" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="9" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
-
 /** What the sections are made by, as a chip beside the sort; a pick goes to the extension, which keeps it for every window. */
-const groupPicker = picker<GroupBy>(GROUP_GLYPH, "How the board makes its sections: by state, or by what the sessions share", GROUPINGS, (by) => {
+const groupPicker = picker<GroupBy>("Group by:", "Group the sessions by", "How the board makes its sections: by state, or by what the sessions share", GROUPINGS, (by) => {
   groupBy = by;
   vscode.postMessage({ type: "group", by });
   render();
