@@ -21,6 +21,12 @@ body.vscode-high-contrast-light {
   --agent-other: #717171;
 }
 
+/* One column: nothing on the board scrolls sideways; whatever would is cut at the edge. */
+html,
+body {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   padding: 0;
