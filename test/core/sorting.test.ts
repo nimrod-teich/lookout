@@ -23,6 +23,19 @@ describe("orderViews", () => {
     expect(ids(orderViews(views, { by: "project", order: [] }))).toEqual(["c", "b", "e", "d", "a"]);
   });
 
+  it("orders by tokens and by price, most first, the unpriced last by their tokens", () => {
+    const spend = (costUsd: number | undefined, tokens: number) => ({ input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, costUsd, estimated: false, partial: false });
+    const priced = [
+      view({ id: "cheap", spend: spend(0.5, 9_000) }),
+      view({ id: "none" }),
+      view({ id: "dear", spend: spend(20, 3_000) }),
+      view({ id: "unpriced-big", spend: spend(undefined, 50_000) }),
+      view({ id: "unpriced-small", spend: spend(undefined, 100) }),
+    ];
+    expect(ids(orderViews(priced, { by: "tokens", order: [] }))).toEqual(["unpriced-big", "cheap", "dear", "unpriced-small", "none"]);
+    expect(ids(orderViews(priced, { by: "cost", order: [] }))).toEqual(["dear", "cheap", "unpriced-big", "unpriced-small", "none"]);
+  });
+
   it("follows the user's order, with sessions it does not place first, as they came", () => {
     expect(ids(orderViews(views, { by: "custom", order: ["e", "c", "a"] }))).toEqual(["b", "d", "e", "c", "a"]);
     expect(ids(orderViews(views, { by: "custom", order: [] }))).toEqual(["a", "b", "c", "d", "e"]);

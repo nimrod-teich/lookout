@@ -4,7 +4,7 @@ import type { SessionView } from "./types";
 /** At most this many sessions keep a place in the user's own order; the rest come first, as new ones do. */
 const LIMIT = 500;
 
-export type SortKey = "time" | "recent" | "name" | "project" | "custom";
+export type SortKey = "time" | "recent" | "name" | "project" | "tokens" | "cost" | "custom";
 
 /** The order the user chose, and their own order of the sessions, kept for when they choose it. */
 export interface SessionSort {
@@ -21,6 +21,8 @@ export const SORTS: readonly { key: SortKey; label: string; short: string; detai
   { key: "recent", label: "Latest change first", short: "Recent", detail: "Last state change first in each group" },
   { key: "name", label: "Name", short: "Name", detail: "By title, A to Z" },
   { key: "project", label: "Project", short: "Project", detail: "By project, then worktree, then title" },
+  { key: "tokens", label: "Most tokens first", short: "Tokens", detail: "Input, output and cache together" },
+  { key: "cost", label: "Most expensive first", short: "Price", detail: "At API list rates; sessions without a price last" },
   { key: "custom", label: "Your order", short: "Yours", detail: "As you drag the cards; new ones first" },
 ];
 
@@ -37,6 +39,12 @@ export function readSort(raw: unknown): SessionSort {
 
 const text = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
 
+/** Every token a session used; none counted while it has no spend yet. */
+export function tokensOf(view: SessionView): number {
+  const spend = view.spend;
+  return spend ? spend.input + spend.output + spend.cacheRead + spend.cacheWrite : 0;
+}
+
 /**
  * The sessions in the chosen order. Groups are made from this order and keep
  * it, so only the order inside a group counts. "time" keeps the order the
@@ -52,6 +60,11 @@ export function orderViews(views: readonly SessionView[], sort: SessionSort): Se
       return [...views].sort((a, b) => text(a.title, b.title));
     case "project":
       return [...views].sort((a, b) => text(a.project, b.project) || text(a.worktree ?? "", b.worktree ?? "") || text(a.title, b.title));
+    case "tokens":
+      return [...views].sort((a, b) => tokensOf(b) - tokensOf(a));
+    case "cost":
+      // A session whose model has no price goes after every priced one, by its tokens.
+      return [...views].sort((a, b) => (b.spend?.costUsd ?? -1) - (a.spend?.costUsd ?? -1) || tokensOf(b) - tokensOf(a));
     case "custom": {
       const rank = new Map(sort.order.map((id, i) => [id, i]));
       // Sessions without a place come first, as they came: new ones show at the top.
