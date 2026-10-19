@@ -14,6 +14,8 @@ interface BoardState {
   /** Favourites and the state groups the user folded to their heading. */
   folded?: string[];
   earlier?: boolean;
+  /** The user opened the Parked group. */
+  parked?: boolean;
   /** The user opened the Archived group. */
   archive?: boolean;
   /** Agents the user hid through the legend. */
@@ -85,6 +87,8 @@ function setStar(card: HTMLElement, id: string): void {
 }
 /** The user opened the Earlier group; kept across reloads. */
 let earlierOpen = vscode.getState()?.earlier === true;
+/** The user opened the Parked group, folded until then; kept across reloads. */
+let parkedOpen = vscode.getState()?.parked === true;
 /** Earlier sessions on one page. */
 const PAGE_SIZE = 20;
 /** The page of earlier sessions shown, from 0: the newest first. Back to the first when the search or the scope changes. */
@@ -100,14 +104,18 @@ let archiveEl: HTMLElement | undefined;
 const archiveCards = new Map<string, HTMLElement>();
 
 function saveState(): void {
-  vscode.setState({ hidden: [...hidden], folded: [...folded], earlier: earlierOpen, archive: archiveOpen, agents: [...hiddenAgents], usageTab });
+  vscode.setState({ hidden: [...hidden], folded: [...folded], earlier: earlierOpen, parked: parkedOpen, archive: archiveOpen, agents: [...hiddenAgents], usageTab });
 }
 
-/** A click on the heading folds the group to it, or unfolds it. */
+/** A click on the heading folds the group to it, or unfolds it; Parked starts folded. */
 function foldOnClick(heading: HTMLElement, key: FoldKey): void {
-  heading.title = "Click to fold or unfold the group";
+  heading.title =
+    key === "parked"
+      ? "Running sessions out of the way: you parked them, or they rested longer than lookout.parkAfterHours. Each comes back when it works again. Click to show or hide them."
+      : "Click to fold or unfold the group";
   heading.addEventListener("click", () => {
-    if (folded.has(key)) folded.delete(key);
+    if (key === "parked") parkedOpen = !parkedOpen;
+    else if (folded.has(key)) folded.delete(key);
     else folded.add(key);
     saveState();
     render();
@@ -116,7 +124,7 @@ function foldOnClick(heading: HTMLElement, key: FoldKey): void {
 
 /** Opens or folds a group's cards; a search unfolds every group while it runs, so its matches show. */
 function showFold(section: HTMLElement, key: FoldKey): void {
-  const open = !folded.has(key) || query !== "";
+  const open = (key === "parked" ? parkedOpen : !folded.has(key)) || query !== "";
   section.classList.toggle("open", open);
   section.querySelector(".cards")!.classList.toggle("hidden", !open);
 }
@@ -423,7 +431,7 @@ function toggleGroup(key: GroupKey): void {
 /** The legend counts every session; a click hides that group from the board. */
 function renderBeam(): void {
   harbour.update(sessions, tidePercent(), now(), markers);
-  const counts = { waiting: 0, done: 0, working: 0, idle: 0 };
+  const counts = { waiting: 0, done: 0, working: 0, idle: 0, parked: 0 };
   for (const group of groupSessions(allSessions)) counts[group.key] = group.views.length;
   legend.textContent = "";
   for (const [key, label] of [
@@ -431,6 +439,7 @@ function renderBeam(): void {
     ["done", "finished"],
     ["working", "working"],
     ["idle", "idle"],
+    ["parked", "parked"],
   ] as const) {
     if (!counts[key] && !hidden.has(key)) continue;
     const item = el("button", `legend-item state-${key}${hidden.has(key) ? " off" : ""}`);
@@ -630,7 +639,7 @@ function createCard(view: SessionView): HTMLElement {
     if (stayingFinished.delete(view.id)) render();
     vscode.postMessage({ type: card.classList.contains("typed") ? "dismiss" : "seen", id: view.id });
   });
-  actions.append(seen, starButton(view.id));
+  actions.append(seen, parkButton(view.id), starButton(view.id));
   // In the title row, after the time: the same place as the star on earlier cards.
   row.append(actions);
   markCard(card, row, view.agent);
@@ -638,6 +647,31 @@ function createCard(view: SessionView): HTMLElement {
   card.addEventListener("mouseenter", () => harbour.highlight(view.id, true));
   card.addEventListener("mouseleave", () => harbour.highlight(view.id, false));
   return card;
+}
+
+const PARK_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.2M5.2 7 8 9.8 10.8 7M3 13h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const UNPARK_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V5.8M5.2 8.5 8 5.7l2.8 2.8M3 3h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/** The button that parks a session whose turn is over, or brings a parked one back; shown while the session rests. */
+function parkButton(id: string): HTMLElement {
+  const button = el("span", "action park");
+  button.setAttribute("role", "button");
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "park", id });
+  });
+  return button;
+}
+
+function setPark(card: HTMLElement, view: SessionView): void {
+  const button = card.querySelector<HTMLElement>(".action.park")!;
+  const parked = String(view.parked === true);
+  if (button.dataset.parked === parked) return;
+  button.dataset.parked = parked;
+  button.innerHTML = view.parked ? UNPARK_ICON : PARK_ICON;
+  button.title = view.parked ? "Bring back: out of Parked" : "Park: under Parked until it works again";
 }
 
 const MARKS = { waiting: "?", working: "›", done: "✓", idle: "", unknown: "" } as const;
@@ -662,6 +696,11 @@ const stayingFinished = new Set<string>();
 
 function keepFinished(views: SessionView[]): SessionView[] {
   return views.map((view) => {
+    // A parked session is out of the way, whatever its state.
+    if (view.parked) {
+      stayingFinished.delete(view.id);
+      return view;
+    }
     if (view.state === "done") {
       stayingFinished.add(view.id);
       return view;
@@ -679,6 +718,7 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   card.className = `card state-${view.state} host-${view.host}${typed ? " typed" : ""}${quiet ? " quiet" : ""}${prose ? " prose" : ""}${markers ? " marked" : ""}${canJump(view) ? "" : " nojump"}`;
   card.classList.toggle("seen", (view as { seen?: boolean }).seen === true);
   card.title = cardTitle(view);
+  setPark(card, view);
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = elapsedText(view);
   setStar(card, view.id);

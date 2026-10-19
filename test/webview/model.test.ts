@@ -18,6 +18,11 @@ describe("groupSessions", () => {
       ["idle", "Idle", ["u", "i"]],
     ]);
     expect(groupSessions([view({ state: "working" })]).map((g) => g.key)).toEqual(["working"]);
+    // Parked last, whatever their state.
+    expect(groupSessions([view({ id: "p", state: "idle", parked: true }), view({ id: "w", state: "waiting" })]).map((g) => [g.key, g.label, g.views.map((v) => v.id)])).toEqual([
+      ["waiting", "Needs you", ["w"]],
+      ["parked", "Parked", ["p"]],
+    ]);
     expect(groupSessions([])).toEqual([]);
   });
 });
@@ -93,6 +98,11 @@ describe("layoutBoats", () => {
       expect(boat.bearing).toBeGreaterThan(0);
       expect(boat.bearing).toBeLessThan(90);
     }
+  });
+
+  it("gives a parked session no boat", () => {
+    const boats = layoutBoats([view({ id: "i", state: "idle", since: 0 }), view({ id: "p", state: "idle", since: 0, parked: true })], 60_000, water);
+    expect(boats.map((b) => b.id)).toEqual(["i"]);
   });
 
   it("puts a session farther from the shore the longer it has been in its state, up to the far edge", () => {

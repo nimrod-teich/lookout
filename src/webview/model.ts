@@ -2,7 +2,7 @@
 import { formatElapsed, quietFor, reasonLabel } from "../core/format";
 import type { SessionView, State } from "../core/types";
 
-export type GroupKey = "waiting" | "done" | "working" | "idle";
+export type GroupKey = "waiting" | "done" | "working" | "idle" | "parked";
 
 export interface Group {
   key: GroupKey;
@@ -11,7 +11,7 @@ export interface Group {
 }
 
 export function isGroupKey(value: unknown): value is GroupKey {
-  return value === "waiting" || value === "done" || value === "working" || value === "idle";
+  return value === "waiting" || value === "done" || value === "working" || value === "idle" || value === "parked";
 }
 
 /** A group the user can fold to its heading: Favourites, or a state group. */
@@ -22,14 +22,14 @@ export function isFoldKey(value: unknown): value is FoldKey {
 }
 
 const GROUP_OF: Record<State, GroupKey> = { waiting: "waiting", done: "done", working: "working", unknown: "idle", idle: "idle" };
-const LABELS: Record<GroupKey, string> = { waiting: "Needs you", done: "Finished", working: "Working", idle: "Idle" };
-const ORDER: GroupKey[] = ["waiting", "done", "working", "idle"];
+const LABELS: Record<GroupKey, string> = { waiting: "Needs you", done: "Finished", working: "Working", idle: "Idle", parked: "Parked" };
+const ORDER: GroupKey[] = ["waiting", "done", "working", "idle", "parked"];
 
-/** The sessions by group, in display order, without empty groups. The input is already sorted. */
+/** The sessions by group, in display order, without empty groups; parked ones last, whatever their state. The input is already sorted. */
 export function groupSessions(views: readonly SessionView[]): Group[] {
   const groups = new Map<GroupKey, SessionView[]>();
   for (const view of views) {
-    const key = GROUP_OF[view.state];
+    const key = view.parked ? "parked" : GROUP_OF[view.state];
     const list = groups.get(key) ?? [];
     list.push(view);
     groups.set(key, list);
@@ -143,7 +143,7 @@ export const HARBOUR = {
 };
 
 /** How far below the waterline each group's boats float. */
-const LANES: Record<GroupKey, number> = { waiting: 8, working: 17, done: 26, idle: 35 };
+const LANES: Record<Exclude<GroupKey, "parked">, number> = { waiting: 8, working: 17, done: 26, idle: 35 };
 /** Boats of one lane stay at least this far apart, so sessions started together stay visible. */
 const MIN_GAP = 11;
 /** The far edge of the harbour means this long in a state. */
@@ -173,10 +173,13 @@ export interface Boat {
  * Places the sessions on the water: the time in state sets the distance from
  * the shore (log scale: the first minutes spread out, hours still fit), the
  * state picks the lane. Sessions that need the user carry their title.
+ * Parked sessions are out of the way: they have no boat.
  */
 export function layoutBoats(views: readonly SessionView[], now: number, water: number): Boat[] {
   const boats: Boat[] = [];
   for (const group of groupSessions(views)) {
+    const key = group.key;
+    if (key === "parked") continue;
     // Newest first in the lane, so the push for spacing goes away from the shore.
     const lane = [...group.views].sort((a, b) => (b.since ?? 0) - (a.since ?? 0));
     let lastX = -Infinity;
@@ -185,8 +188,8 @@ export function layoutBoats(views: readonly SessionView[], now: number, water: n
       const t = Math.min(1, Math.log10(1 + minutes) / Math.log10(1 + MAX_MINUTES));
       const x = Math.min(HARBOUR.farX, Math.max(HARBOUR.nearX + (HARBOUR.farX - HARBOUR.nearX) * t, lastX + MIN_GAP));
       lastX = x;
-      const y = water + LANES[group.key] + (i % 2) * 3;
-      const label = group.key === "waiting" && i < 2 ? `${view.title} · ${view.since === undefined ? "" : elapsed(now - view.since)}`.replace(/ · $/, "") : undefined;
+      const y = water + LANES[key] + (i % 2) * 3;
+      const label = key === "waiting" && i < 2 ? `${view.title} · ${view.since === undefined ? "" : elapsed(now - view.since)}`.replace(/ · $/, "") : undefined;
       boats.push({
         id: view.id,
         agent: view.agent,

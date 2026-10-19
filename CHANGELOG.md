@@ -2,6 +2,7 @@
 
 ## 0.1.1
 
+- **Parked.** A park button on the card of a running session whose turn is over moves it to **Parked**, a folded group under Idle, out of the way until it works or waits for you again; the button on a parked card brings it back. A session idle or finished for 24 hours parks on its own (`lookout.parkAfterHours`, `0` for never) and drops its finished mark. Parked sessions have no boat in the harbour, and every window shows them.
 - **Finished in every window.** A session in another VS Code window that runs Lookout shows under Finished in this window too, as that window marks it; it used to show as Idle, since only the window that hosts a session can tell whether you looked at it. Its ✓, "mark all seen" and a jump to it clear the mark in that window as well.
 - **The usage tab shows the session window.** Each agent's tab on the board shows its session window (Claude's **Session (5hr)**, Codex's **5h limit**), the limit that runs out first and the one the status bar shows, not the limit with the highest share; the tab's hover names another limit when that one is closer to its end, such as **Weekly Fable**.
 - **Fold any group.** A click on the heading of Favourites, Needs you, Finished, Working or Idle folds the group to its heading and count, as Earlier and Archived already did; another click opens it again. The board remembers which groups are folded, and a search opens them all while it runs.

@@ -1246,6 +1246,28 @@ body.vscode-reduce-motion .hover-card {
   background: color-mix(in srgb, var(--done) 20%, transparent);
 }
 
+/* Park: only while the session's turn is over. */
+.action.park {
+  display: none;
+  align-self: center;
+  padding: 1px 3px;
+}
+
+.state-idle .action.park,
+.state-done .action.park {
+  display: inline-flex;
+}
+
+.action.park svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Parked: out of the way, quieter until pointed at. */
+.group-parked .card:not(:hover) {
+  opacity: 0.75;
+}
+
 /* Earlier: the sessions that are not running ------------------------------ */
 
 .group-past .heading {

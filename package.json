@@ -236,6 +236,12 @@
             "default": true,
             "markdownDescription": "Count an idle session as needing you when its last message asks you something: it ends with a question mark, or asks for a choice or a yes/no. Lookout reads this from the reply rather than from the agent, so the card marks it as less certain; dismiss it with the card's ✓."
           },
+          "lookout.parkAfterHours": {
+            "type": "number",
+            "default": 24,
+            "minimum": 0,
+            "markdownDescription": "A running session that has been idle or finished this many hours goes under **Parked**, a folded group at the bottom of the board, and comes back when it works again. Its finished mark goes with it. `0`: only the sessions you park yourself."
+          },
           "lookout.agentMarkers": {
             "type": "string",
             "enum": [

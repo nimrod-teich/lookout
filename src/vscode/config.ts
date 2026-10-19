@@ -24,6 +24,8 @@ export interface Config {
   notifyCooldownMs: number;
   /** An idle session whose last message asks the user something counts as needing them. */
   typedQuestions: boolean;
+  /** A session idle or finished this long goes under Parked; 0: never on its own. */
+  parkAfterMs: number;
   /** Watch Claude Code: its sessions and its usage. */
   claudeEnabled: boolean;
   /** The Claude Code config directory to read sessions and transcripts from. */
@@ -88,6 +90,7 @@ export function readConfig(): Config {
     notifySound: lookout.get<boolean>("notifications.sound", false),
     notifyCooldownMs: Math.max(0, lookout.get<number>("notifications.cooldownSeconds", 30)) * 1000,
     typedQuestions: lookout.get<boolean>("state.typedQuestions", true),
+    parkAfterMs: Math.max(0, lookout.get<number>("parkAfterHours", 24)) * 3_600_000,
     claudeEnabled: lookout.get<boolean>("agents.claude", true),
     claudeConfigDir,
     agentMarkers: markerSetting(lookout.get<string>("agentMarkers")),

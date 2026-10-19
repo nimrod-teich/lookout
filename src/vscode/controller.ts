@@ -13,6 +13,7 @@ import { Attention } from "../core/attention";
 import { clockTime } from "../core/format";
 import { buildPastView, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
 import { Monitor } from "../core/monitor";
+import { isParked, park, readParking, settle, unpark, type Parking } from "../core/parking";
 import { createProcessFinder, createProcessTable, type ProcessTable } from "../core/proc";
 import type { PastView, SessionView, State } from "../core/types";
 import { RefreshLedger } from "../core/refreshLedger";
@@ -41,6 +42,8 @@ const EARLIER_SCOPE_KEY = "lookout.earlierScope";
 const FAVOURITES_KEY = "lookout.favourites";
 /** The sessions the user archived in Lookout, newest first; kept for the machine. They leave Earlier for the Archived group. */
 const ARCHIVE_KEY = "lookout.archive";
+/** The sessions parked, and those brought back from Parked; kept for every window. */
+const PARKING_KEY = "lookout.parking";
 /** The earlier sessions listed at most, the newest. */
 const EARLIER_LIMIT = 500;
 /** While the earlier sessions are still being read, the next slice is listed this soon. */
@@ -154,6 +157,8 @@ export class Controller implements vscode.Disposable {
   private savedDone = "";
   private savedDismissed = "";
   private typedQuestions = true;
+  /** A session resting this long parks on its own; 0: never. */
+  private parkAfterMs = 24 * 3_600_000;
   /** Claude Code is watched: its sessions, and its usage, fetched by running it. */
   private claudeOn = true;
   private usageCache: UsageCache | undefined;
@@ -278,6 +283,37 @@ export class Controller implements vscode.Disposable {
     this.poll();
   }
 
+  private parking(): Parking {
+    return readParking(this.host.globalState.get<unknown>(PARKING_KEY));
+  }
+
+  private saveParking(parking: Parking): void {
+    if (JSON.stringify(parking) !== JSON.stringify(this.parking())) void this.host.globalState.update(PARKING_KEY, parking);
+  }
+
+  /** Parks a session whose turn is over, or brings a parked one back. */
+  togglePark(id: string): void {
+    const view = this.current.find((v) => v.id === id);
+    if (!view) return;
+    this.saveParking(view.parked ? unpark(this.parking(), id) : park(this.parking(), id));
+    this.poll();
+  }
+
+  /**
+   * The parked sessions go under Parked, idle: a finished mark this window
+   * keeps goes with them, and another window drops its own the same way.
+   */
+  private parkViews(views: readonly SessionView[], now: number): SessionView[] {
+    const parking = settle(this.parking(), views);
+    this.saveParking(parking);
+    return views.map((view) => {
+      if (!isParked(view, parking, now, this.parkAfterMs)) return view;
+      if (view.state !== "done") return { ...view, parked: true };
+      this.attention.markSeen(view.id);
+      return { ...view, state: "idle", parked: true };
+    });
+  }
+
   /** Where a live or a past session works: its project, worktree and git branch. */
   whereOf(id: string): string | undefined {
     const view = this.current.find((v) => v.id === id) ?? this.pastView(id);
@@ -366,6 +402,7 @@ export class Controller implements vscode.Disposable {
   /** Starts, or restarts with other settings. */
   start(config: Config): void {
     this.typedQuestions = config.typedQuestions;
+    this.parkAfterMs = config.parkAfterMs;
     this.claudeOn = config.claudeEnabled;
     this.providers = config.claudeEnabled ? [new ClaudeProvider(config.claudeConfigDir, this.proc)] : [];
     if (config.codexEnabled) {
@@ -417,6 +454,7 @@ export class Controller implements vscode.Disposable {
   /** Takes settings that need no restart, and shows their effect at once. */
   configure(config: Config): void {
     this.typedQuestions = config.typedQuestions;
+    this.parkAfterMs = config.parkAfterMs;
     this.usageMode = config.usageRefresh;
     this.usageAlerts = config.usageAlerts;
     this.refreshDisabledByEnv = config.usageRefreshDisabled;
@@ -491,7 +529,7 @@ export class Controller implements vscode.Disposable {
     this.earlierNotes = notes;
     // An idle tab or terminal with nothing sent is not worth a card.
     const shown = update.views.filter((view) => !(view.empty && view.state === "idle"));
-    this.publish(sortViews([...shown, ...restored]), shownPast.slice(0, EARLIER_LIMIT), favouritePast, archivePast);
+    this.publish(sortViews(this.parkViews([...shown, ...restored], Date.now())), shownPast.slice(0, EARLIER_LIMIT), favouritePast, archivePast);
     for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast]) this.pastSeen.set(view.id, view);
     if (incomplete) this.scheduleFill();
     this.saveDone();

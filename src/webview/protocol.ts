@@ -85,4 +85,6 @@ export type FromBoard =
   /** Star a session, or take its star away. */
   | { type: "favourite"; id: string }
   /** Archive a session that is not running, or bring an archived one back to Earlier. */
-  | { type: "archive"; id: string };
+  | { type: "archive"; id: string }
+  /** Park a running session whose turn is over, or bring a parked one back. */
+  | { type: "park"; id: string };

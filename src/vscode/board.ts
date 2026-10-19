@@ -23,6 +23,8 @@ export interface BoardActions {
   archive?(): { ids: string[]; past: PastView[] };
   /** Archives a session, or brings it back to Earlier. */
   toggleArchive?(id: string): void;
+  /** Parks a running session whose turn is over, or brings a parked one back. */
+  togglePark?(id: string): void;
   /** Resumes a past session in the agent's panel. */
   resume(id: string): void;
   /** One agent's usage, or each agent's. */
@@ -171,6 +173,12 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         if (typeof id !== "string" || !this.actions.toggleArchive) return;
         const known = this.actions.past().some((p) => p.id === id) || this.actions.favourites().past.some((p) => p.id === id) || (this.actions.archive?.().ids.includes(id) ?? false);
         if (known) this.actions.toggleArchive(id);
+        return;
+      }
+      case "park": {
+        // Only a running session the board was shown.
+        const view = this.actions.sessions().find((s) => s.id === message.id);
+        if (view) this.actions.togglePark?.(view.id);
         return;
       }
       case "earlierScope":

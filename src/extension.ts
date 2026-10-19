@@ -202,6 +202,7 @@ export function activate(context: vscode.ExtensionContext): void {
     favourites: () => controller.favourites,
     toggleFavourite: (id) => controller.toggleFavourite(id),
     archive: () => controller.archive,
+    togglePark: (id) => controller.togglePark(id),
     toggleArchive: (id) => controller.toggleArchive(id),
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
