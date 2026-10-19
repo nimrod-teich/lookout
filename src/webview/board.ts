@@ -763,7 +763,7 @@ function renderMeters(): void {
       line = el("div", "meter");
       const bar = el("span", "bar");
       bar.append(el("span", "fill"));
-      line.append(el("span", "label"), bar, el("span", "value"));
+      line.append(el("span", "label"), bar, el("span", "value"), el("span", "reset"));
       meterRows.set(id, line);
     }
     const percent = Math.floor(meter.percent);
@@ -771,7 +771,9 @@ function renderMeters(): void {
     line.className = `meter ${meterLevel(meter.percent)}`;
     line.querySelector(".label")!.textContent = meter.label;
     (line.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
-    line.querySelector(".value")!.textContent = reset ? `${percent}% · ${reset}` : `${percent}%`;
+    // The share and the time to reset in columns of their own: the shares line up, with a time or without.
+    line.querySelector(".value")!.textContent = `${percent}%`;
+    line.querySelector(".reset")!.textContent = reset ? `· ${reset}` : "";
     line.title = reset ? `${meter.label}: ${percent}% used, resets in ${reset}` : `${meter.label}: ${percent}% used`;
     if (line !== row) usageRows.insertBefore(line, row);
     row = line.nextElementSibling;
@@ -851,10 +853,12 @@ function createCard(view: SessionView): HTMLElement {
   return card;
 }
 
+/** A parking sign: the card goes under Parked. */
 const PARK_ICON =
-  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.2M5.2 7 8 9.8 10.8 7M3 13h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6.4 11.6V4.6h2.3a2.1 2.1 0 0 1 0 4.2H6.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+/** A return arrow: a parked card comes back. */
 const UNPARK_ICON =
-  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V5.8M5.2 8.5 8 5.7l2.8 2.8M3 3h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2.8 6.2 6 9.4M3.2 6.2h6.3a3.4 3.4 0 0 1 0 6.8H7.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 /** The button that parks a session whose turn is over, or brings a parked one back; shown while the session rests. */
 function parkButton(id: string): HTMLElement {
@@ -867,13 +871,32 @@ function parkButton(id: string): HTMLElement {
   return button;
 }
 
+/**
+ * What VS Code's context menu offers on a card: the extension's card
+ * commands, each shown when it applies, named in words.
+ */
+function setMenu(card: HTMLElement, view: SessionView): void {
+  const context = JSON.stringify({
+    webviewSection: "card",
+    preventDefaultContextMenuItems: true,
+    sessionId: view.id,
+    lookoutCanJump: canJump(view),
+    lookoutCanRename: canRename(view),
+    lookoutFinished: view.state === "done",
+    lookoutStarred: favourites.ids.includes(view.id),
+    lookoutResting: view.state === "idle" || view.state === "done",
+    lookoutParked: view.parked === true,
+  });
+  if (card.dataset.vscodeContext !== context) card.dataset.vscodeContext = context;
+}
+
 function setPark(card: HTMLElement, view: SessionView): void {
   const button = card.querySelector<HTMLElement>(".action.park")!;
   const parked = String(view.parked === true);
   if (button.dataset.parked === parked) return;
   button.dataset.parked = parked;
   button.innerHTML = view.parked ? UNPARK_ICON : PARK_ICON;
-  button.title = view.parked ? "Bring back: out of Parked" : "Park: under Parked until it works again";
+  button.title = view.parked ? "Bring back from Parked" : "Park: out of the way under Parked, until it works again";
 }
 
 const MARKS = { waiting: "?", working: "›", done: "✓", idle: "", unknown: "" } as const;
@@ -921,6 +944,7 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   card.classList.toggle("seen", (view as { seen?: boolean }).seen === true);
   card.title = cardTitle(view);
   setPark(card, view);
+  setMenu(card, view);
   // A card drags only in the user's own order: no other order changes behind their back.
   card.draggable = sort.by === "custom";
   card.querySelector(".title")!.textContent = view.title;
@@ -1440,8 +1464,10 @@ function render(): void {
       heading.append(el("span", "label", group.label), el("span", "count"), el("span", "summary"));
       foldOnClick(heading, group.id as FoldKey);
       if (group.id === "done") {
-        const all = el("button", "link", "mark all seen");
+        // Right after the count, in the cards' own check colour: it acts on this group.
+        const all = el("button", "mark-seen", "✓ all seen");
         all.type = "button";
+        all.title = "Mark every finished session as seen";
         all.addEventListener("click", (event) => {
           // An action, not a click on the heading.
           event.stopPropagation();

@@ -798,6 +798,26 @@ describe("the extension", () => {
     expect(savedGlobal["lookout.group"]).toBe("model");
   }, 60_000);
 
+  it("acts on a card from its context menu as its buttons do, and on no session it does not run", async () => {
+    writeTranscript();
+    writeSession({ status: "idle", statusUpdatedAt: Date.now() });
+    activate(context());
+    await vi.waitFor(() => expect(boardStates()).toBe("idle 1"), WAIT);
+    const card = { webview: "lookout.board", webviewSection: "card", sessionId: SESSION };
+    await stub.commands.get("lookout.card.park")!(card);
+    expect(savedGlobal["lookout.parking"]).toEqual({ parked: [SESSION], kept: [] });
+    await stub.commands.get("lookout.card.unpark")!(card);
+    expect(savedGlobal["lookout.parking"]).toEqual({ parked: [], kept: [SESSION] });
+    await stub.commands.get("lookout.card.star")!(card);
+    expect(savedGlobal["lookout.favourites"]).toEqual([SESSION]);
+    await stub.commands.get("lookout.card.unstar")!(card);
+    expect(savedGlobal["lookout.favourites"]).toEqual([]);
+    // Not running, or no card at all: nothing happens.
+    await stub.commands.get("lookout.card.star")!({ ...card, sessionId: "gone" });
+    await stub.commands.get("lookout.card.star")!();
+    expect(savedGlobal["lookout.favourites"]).toEqual([]);
+  }, 60_000);
+
   it("parks a session from its card, brings it back, and lets it leave Parked when it works again", async () => {
     writeTranscript();
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });

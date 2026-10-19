@@ -202,6 +202,18 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     open: openHit,
   });
+  /**
+   * Registers the card menu's commands. VS Code passes the card's context:
+   * the session's id, looked up among the running sessions; a session that
+   * ended since the menu opened does nothing.
+   */
+  const cardCommands = (handlers: Record<string, (view: SessionView) => unknown>) =>
+    Object.entries(handlers).map(([id, act]) =>
+      vscode.commands.registerCommand(id, (arg?: { sessionId?: unknown }) => {
+        const view = typeof arg?.sessionId === "string" ? controller.sessions.find((v) => v.id === arg.sessionId) : undefined;
+        if (view) return act(view);
+      }),
+    );
   const sort = () => readSort(context.globalState.get<unknown>(SORT_KEY));
   const setSort = (next: SessionSort) => {
     void context.globalState.update(SORT_KEY, next);
@@ -331,6 +343,19 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(MARK_ALL_SEEN, markAllSeen),
     vscode.commands.registerCommand(SHOW_BOARD, () => vscode.commands.executeCommand(`${BOARD_VIEW}.focus`)),
     vscode.commands.registerCommand(SEARCH, () => searchPage.show("")),
+    // The card's context menu: the same acts as its buttons, named in words.
+    ...cardCommands({
+      "lookout.card.jump": (view) => jump(view),
+      "lookout.card.conversation": (view) => openHit("", view.id),
+      "lookout.card.rename": async (view) => {
+        if (canRename(view)) await renameSession(view, terminals, log);
+      },
+      "lookout.card.seen": (view) => markSeen(view.id),
+      "lookout.card.star": (view) => controller.toggleFavourite(view.id),
+      "lookout.card.unstar": (view) => controller.toggleFavourite(view.id),
+      "lookout.card.park": (view) => controller.togglePark(view.id),
+      "lookout.card.unpark": (view) => controller.togglePark(view.id),
+    }),
     vscode.commands.registerCommand(SORT, async () => {
       const current = sort();
       const items = SORTS.map((option) => ({ label: option.key === current.by ? `$(check) ${option.label}` : option.label, description: option.detail, key: option.key }));
