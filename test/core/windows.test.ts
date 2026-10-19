@@ -40,6 +40,18 @@ describe("WindowRegistry", () => {
     expect(registry.read(100, 10_000).get(200)).toEqual({ label: "api", terminals: [], folders: ["/work/api"] });
   });
 
+  it("publishes each window's finished sessions, so the others show them as finished", () => {
+    const { dir, proc, registry } = setup();
+    proc.procs.set(200, {});
+    const other = new WindowRegistry(dir, proc);
+    other.register(200, "api", [], [], ["s1", "s2"]);
+    expect(registry.read(100, 0).get(200)).toEqual({ label: "api", terminals: [], done: ["s1", "s2"] });
+    other.register(200, "api");
+    expect(registry.read(100, 10_000).get(200)).toEqual({ label: "api", terminals: [] });
+    fs.writeFileSync(path.join(dir, "200.json"), '{"pid":200,"label":"api","done":["s1",7,null]}');
+    expect(registry.read(100, 20_000).get(200)).toEqual({ label: "api", terminals: [], done: ["s1"] });
+  });
+
   it("publishes each window's terminals, and their changes", () => {
     const { dir, proc, registry } = setup();
     proc.procs.set(200, {});

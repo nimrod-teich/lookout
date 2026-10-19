@@ -13,6 +13,8 @@ export interface AttentionUpdate {
 export interface AttentionOptions {
   /** An idle session whose last message asks the user something needs them. */
   typedQuestions: boolean;
+  /** Another window that runs Lookout hosts this session and marked its turn finished. */
+  doneElsewhere?: (view: SessionView) => boolean;
 }
 
 function keyOf(question: TypedQuestion): string {
@@ -26,8 +28,9 @@ const LATE_QUESTION_MS = 60_000;
  * Tracks which finished turns the user has not seen. A session is "done" from
  * the moment it goes from working to idle unwatched, until the user looks at
  * it, it starts working again, or it ends. Sessions that run elsewhere (another
- * window, an external terminal) are never marked: this window can't tell when
- * they are looked at.
+ * window, an external terminal) are never marked here: this window can't tell
+ * when they are looked at. Another window that runs Lookout marks its own, and
+ * they show as it says.
  *
  * An idle session of this window whose last message asks the user something
  * needs them, the way a prompt does, until it works again or the user
@@ -78,12 +81,14 @@ export class Attention {
       if (view.state === "waiting" && before !== undefined && before !== "waiting" && here && !isWatched(view)) update.waiting.push(view);
       return view;
     }
-    const unseen = before === "working" && here && !isWatched(view);
+    // Another window's session: that window knows whether its turn was seen.
+    if (!here) return options.doneElsewhere?.(view) ? { ...view, state: "done" } : view;
+    const unseen = before === "working" && !isWatched(view);
     if (unseen) this.done.add(view.id);
     const question = view.question;
     if (question) this.questions.set(view.id, keyOf(question));
     else this.questions.delete(view.id);
-    if (options.typedQuestions && here && question && this.dismissed.get(view.id) !== keyOf(question)) {
+    if (options.typedQuestions && question && this.dismissed.get(view.id) !== keyOf(question)) {
       const asked: SessionView = { ...view, state: "waiting", reason: { kind: "typed", ask: question.text }, evidence: { source: "transcript", at: question.at, note: "its last message asks you" } };
       // A turn the user has not seen that ends on a question is announced once; the
       // reply can reach the transcript a poll after the session goes idle.

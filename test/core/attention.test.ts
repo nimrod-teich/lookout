@@ -46,6 +46,21 @@ describe("Attention", () => {
     expect(update.finished).toEqual([]);
   });
 
+  it("shows another window's session as that window marks it", () => {
+    const attention = new Attention();
+    const other = (state: State) => view({ state, host: "window", windowPid: 200 });
+    const marked = { typedQuestions: true, doneElsewhere: (v: SessionView) => v.windowPid === 200 };
+    expect(states(attention.update([other("idle")], unwatched))).toEqual(["idle"]);
+    const update = attention.update([other("idle")], unwatched, marked);
+    expect(states(update)).toEqual(["done"]);
+    // That window announces its own finished turns.
+    expect(update.finished).toEqual([]);
+    expect(attention.snapshot()).toEqual([]);
+    expect(states(attention.update([other("working")], unwatched, marked))).toEqual(["working"]);
+    // A question in its last reply stays that window's to show.
+    expect(states(attention.update([{ ...other("idle"), question: { text: "Open the PR?" } }], unwatched, marked))).toEqual(["done"]);
+  });
+
   it("marks terminal sessions of this window", () => {
     const attention = new Attention();
     attention.update([view({ state: "working", host: "terminal", terminalPid: 70 })], unwatched);

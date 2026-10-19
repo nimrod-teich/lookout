@@ -97,8 +97,19 @@ export function activate(context: vscode.ExtensionContext): void {
     // On a Mac the extension host's parent is the application's main process, which AppleScript addresses by pid.
     raise: () => raiseWindow(desktop, { title: vscode.workspace.name ?? "", app: vscode.env.appName, appPid: desktop === "macos" ? process.ppid : undefined }, log),
     registryChanged: () => controller.windowsChanged(),
+    seen: (ids) => controller.seenElsewhere(ids),
     log,
   });
+  /** The user marked a finished turn seen: another window's session goes to that window, which keeps its marks. */
+  const markSeen = (id: string) => {
+    const view = controller.sessions.find((v) => v.id === id);
+    if (view?.host === "window") crossWindow.markSeen([view]);
+    else controller.markSeen(id);
+  };
+  const markAllSeen = () => {
+    crossWindow.markSeen(controller.sessions.filter((view) => view.state === "done" && view.host === "window"));
+    controller.markAllSeen();
+  };
   // The key that switches between windows of one application: GNOME keeps Alt+Tab for applications.
   const switchKey = desktop === "macos" ? "⌘`" : desktop === "linux" && /gnome/i.test(process.env.XDG_CURRENT_DESKTOP ?? "") ? "Alt+`" : "Alt+Tab";
   const jumpToOtherWindow = async (view: SessionView) => {
@@ -200,8 +211,8 @@ export function activate(context: vscode.ExtensionContext): void {
     rename: async (view) => {
       if (canRename(view)) await renameSession(view, terminals, log);
     },
-    markSeen: (id) => controller.markSeen(id),
-    markAllSeen: () => controller.markAllSeen(),
+    markSeen,
+    markAllSeen,
     dismiss: (id) => controller.dismiss(id),
     // The command, so the board's link says what the command says when it cannot fetch.
     refreshUsage: () => void vscode.commands.executeCommand(REFRESH_USAGE),
@@ -292,7 +303,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (view) await jump(view);
       else void vscode.window.showInformationMessage("Lookout: no session in this window is waiting for you.");
     }),
-    vscode.commands.registerCommand(MARK_ALL_SEEN, () => controller.markAllSeen()),
+    vscode.commands.registerCommand(MARK_ALL_SEEN, markAllSeen),
     vscode.commands.registerCommand(SHOW_BOARD, () => vscode.commands.executeCommand(`${BOARD_VIEW}.focus`)),
     vscode.commands.registerCommand(SEARCH, () => searchPage.show("")),
     vscode.commands.registerCommand(REFRESH_USAGE, async () => {
