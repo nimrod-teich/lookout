@@ -33,6 +33,29 @@ function setup() {
 describe("SearchPage", () => {
   beforeEach(() => stub.reset());
 
+  it("sends its results again as more conversations are read, once it has searched, saying it follows", () => {
+    const { page, actions } = setup();
+    const follows = Object.assign(actions, { follows: () => true });
+    const followed = new SearchPage({ fsPath: "/ext" } as never, follows);
+    followed.followSearch();
+    expect(actions.search).not.toHaveBeenCalled();
+    followed.show("deploy");
+    const panel = stub.panels.at(-1)!;
+    // The query is in its box, but the page has not asked yet.
+    followed.followSearch();
+    expect(actions.search).not.toHaveBeenCalled();
+    panel.receive({ type: "search", query: "deploy", zone: 120 });
+    expect(panel.posted.at(-1)).toMatchObject({ type: "results", query: "deploy", pending: 2, follows: true });
+    followed.followSearch();
+    expect(actions.search).toHaveBeenCalledTimes(2);
+    expect(actions.search).toHaveBeenLastCalledWith("deploy", 120);
+    // Closed: nothing more is sent.
+    panel.dispose();
+    followed.followSearch();
+    expect(actions.search).toHaveBeenCalledTimes(2);
+    page.dispose();
+  });
+
   it("passes on the agents hidden on the board, to leave them out", () => {
     const { page } = setup();
     page.show("deploy", ["codex"]);

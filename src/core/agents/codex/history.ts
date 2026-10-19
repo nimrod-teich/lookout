@@ -66,4 +66,4 @@ export function factsOf(line: string): LineFacts | undefined {
 }
 
 /** How the search reads a rollout: a line without one of `factsOf`'s needles is never decoded. */
-export const ROLLOUT_LINES = readerOf([MESSAGE, FILE_CHANGE, COMMAND], factsOf);
+export const ROLLOUT_LINES = readerOf("codex-rollout", [MESSAGE, FILE_CHANGE, COMMAND], factsOf);

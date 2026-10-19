@@ -1,5 +1,6 @@
 // Searching an agent's conversations, live and past: the same for every agent.
 import type { SearchOutcome } from "./agents/agent";
+import type { BackgroundReads } from "./background";
 import type { HistoryIndex, SearchResult, SnippetSize } from "./history";
 import { projectOf } from "./model";
 import { hasFilters, type Query } from "./terms";
@@ -36,12 +37,13 @@ export function picked(query: Query, cwd: string, branch: string | undefined): b
 /**
  * The words in the messages written within the query's times, of the
  * conversations its `project:`, `branch:` and `file:` pick. Each conversation
- * is read into memory on its first search, then only what was appended; a
- * first read happens only while the budget allows, in the order given (live
- * sessions first). A query of operators alone lists the conversations they
- * pick, without matches.
+ * is read into memory on its first search, then only what was appended. With
+ * `background`, the reads happen there, in the order given (live sessions
+ * first), and a conversation not read yet counts as pending; without, a first
+ * read happens here only while the budget allows. A query of operators alone
+ * lists the conversations they pick, without matches.
  */
-export function searchConversations(conversations: Iterable<Searchable>, parsed: Query, limit: number, budgetMs: number, snippet?: SnippetSize): SearchOutcome {
+export function searchConversations(conversations: Iterable<Searchable>, parsed: Query, limit: number, budgetMs: number, snippet?: SnippetSize, background?: BackgroundReads): SearchOutcome {
   if (parsed.terms.length === 0 && !hasFilters(parsed)) return { results: [], pending: 0 };
   const range = { since: parsed.since, before: parsed.before };
   const timed = parsed.since !== undefined || parsed.before !== undefined;
@@ -54,11 +56,20 @@ export function searchConversations(conversations: Iterable<Searchable>, parsed:
     if ((parsed.projects.length > 0 || parsed.branches.length > 0) && !picked(parsed, conversation.cwd, conversation.branch)) continue;
     const index = conversation.index();
     if (!index) continue;
-    if (!index.ready && Date.now() - started >= budgetMs) {
-      pending++;
-      continue;
+    if (background) {
+      index.update(background);
+      if (!index.ready) {
+        // A file that could not be looked at is not waited for.
+        if (background.has(index)) pending++;
+        continue;
+      }
+    } else {
+      if (!index.ready && Date.now() - started >= budgetMs) {
+        pending++;
+        continue;
+      }
+      index.refresh();
     }
-    index.refresh();
     if (parsed.files.length > 0 && !index.touched(parsed.files)) continue;
     if (parsed.terms.length > 0) {
       const { count, hits } = index.search(parsed.terms, limit, range, snippet);
@@ -66,4 +77,16 @@ export function searchConversations(conversations: Iterable<Searchable>, parsed:
     } else if (!timed || index.hasMessageIn(range)) results.push({ id: conversation.id, count: 0, hits: [] });
   }
   return { results, pending };
+}
+
+/**
+ * Has `background` read the conversations the search covers, before anyone
+ * searches: those of the live sessions, as they go on, and every past one
+ * once.
+ */
+export function readConversationsAhead(conversations: Iterable<Searchable>, background: BackgroundReads): void {
+  for (const conversation of conversations) {
+    const index = conversation.index();
+    if (index && (conversation.pastModifiedAt === undefined || !index.ready)) index.update(background);
+  }
 }

@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpMailbox } from "../../src/core/jumpMailbox";
 import { activate } from "../../src/extension";
+import { buildReader } from "../readerBundle";
 import { createWebviewView, stub, TabInputWebview, workspace } from "./stub-vscode";
 
 // The whole extension against a real process: a child of this test process
@@ -21,11 +22,12 @@ let subscriptions: { dispose(): void }[];
 let saved: Record<string, unknown>;
 let savedGlobal: Record<string, unknown>;
 
-function context() {
+/** The extension's context; `extension`: where it is installed, by default a folder without the reading thread's bundle. */
+function context(extension = "/ext") {
   return {
     subscriptions,
     globalStorageUri: { fsPath: path.join(configDir, "global-storage") },
-    extensionUri: { fsPath: "/ext" },
+    extensionUri: { fsPath: extension },
     workspaceState: {
       get: (key: string, fallback: unknown) => saved[key] ?? fallback,
       update: (key: string, value: unknown) => {
@@ -631,6 +633,22 @@ describe("the extension", () => {
       panel.receive({ type: "jump", id: ELSEWHERE });
       await vi.waitFor(() => expect(refusals()).toBe(3), WAIT);
       expect(opened(ELSEWHERE)).toBe(false);
+    }, 60_000);
+
+    it("reads the conversations in a thread of its own, and sends a search's results again as they are read", async () => {
+      const extension = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-ext-"));
+      try {
+        buildReader(extension);
+        activate(context(extension));
+        const { boardView, listed } = openBoard();
+        await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+        const answers = () => boardView.posted.filter((m) => (m as { type: string }).type === "search") as { results: { id: string; count: number }[]; pending: number; follows?: boolean }[];
+        boardView.receive({ type: "search", query: "deploy" });
+        expect(answers()[0]).toMatchObject({ query: "deploy", follows: true });
+        await vi.waitFor(() => expect(answers().at(-1)).toMatchObject({ pending: 0, results: [{ id: HERE, count: 1 }] }), WAIT);
+      } finally {
+        fs.rmSync(extension, { recursive: true, force: true });
+      }
     }, 60_000);
 
     it("searches every conversation on the search page, and opens a match in the conversation tab", async () => {

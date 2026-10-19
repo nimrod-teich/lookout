@@ -3,6 +3,7 @@
 ## 0.1.2
 
 - **A quicker search.** Each conversation is read once and kept when its session ends or is resumed, instead of being read again whole. The lines that can hold no message and no path, most of a transcript (request records, tool output, attachments, replies that only think or run a command), are skipped without being decoded, so a long history is read in about half the time. Each message is lowercased once rather than on every search, and a search starts 100 ms after the last keystroke instead of 250 ms.
+- **Search never holds up VS Code.** Lookout reads the conversations in a thread of its own, starting a few seconds after the window opens, so the first search finds them read, and VS Code's extension host, which Claude Code and every other extension in the window share, never waits on a large transcript. While some are still being read, their matches come in as each one is.
 
 ## 0.1.1
 

@@ -24,6 +24,8 @@ export interface SearchPageActions {
   isLive(id: string): boolean;
   /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
   open(query: string, id: string, index?: number): void;
+  /** A search's results fill in as the conversations are read in the background: they are sent again as they do. */
+  follows?(): boolean;
 }
 
 /**
@@ -34,6 +36,10 @@ export class SearchPage implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
   /** The query the page runs, sent again when its webview says it is ready. */
   private query = "";
+  /** The page's time zone, as it last searched. */
+  private zone: number | undefined;
+  /** The page asked for a search since it opened: its results are sent again as more conversations are read. */
+  private searched = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -63,7 +69,14 @@ export class SearchPage implements vscode.Disposable {
     }));
     const newest = (session: SearchPageSession) => session.hits[0]?.at ?? -Infinity;
     sessions.sort((a, b) => newest(b) - newest(a));
-    return { type: "results", query, sessions, pending: outcome.pending, markers: this.actions.markers?.() };
+    const results: ToSearch = { type: "results", query, sessions, pending: outcome.pending, markers: this.actions.markers?.() };
+    if (this.actions.follows?.()) results.follows = true;
+    return results;
+  }
+
+  /** Sends the page's results again: more conversations were read. */
+  followSearch(): void {
+    if (this.panel && this.searched && this.query.trim() !== "") this.post(this.results(this.query, this.zone));
   }
 
   private post(message: ToSearch): void {
@@ -80,7 +93,9 @@ export class SearchPage implements vscode.Disposable {
     panel.webview.html = this.html(panel.webview);
     panel.webview.onDidReceiveMessage((raw: unknown) => this.receive(raw));
     panel.onDidDispose(() => {
-      if (this.panel === panel) this.panel = undefined;
+      if (this.panel !== panel) return;
+      this.panel = undefined;
+      this.searched = false;
     });
     this.panel = panel;
     return panel;
@@ -96,6 +111,8 @@ export class SearchPage implements vscode.Disposable {
         if (typeof message.query !== "string") return;
         this.query = message.query;
         const zone = typeof message.zone === "number" && Math.abs(message.zone) <= 24 * 60 ? message.zone : undefined;
+        this.zone = zone;
+        this.searched = true;
         this.post(this.results(message.query, zone));
         return;
       }

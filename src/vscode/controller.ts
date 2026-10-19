@@ -3,6 +3,8 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { AgentHostSessions } from "../core/agentHost";
 import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents/agent";
+import { inThreadScanner } from "../core/agents/lineReaders";
+import { BackgroundReads } from "../core/background";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
@@ -23,6 +25,7 @@ import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../cor
 import type { UsageGroup } from "../core/usageGroups";
 import { refreshEnv, refreshUsage, type RefreshResult } from "../core/usageRefresh";
 import { WindowRegistry } from "../core/windows";
+import { WorkerScanner } from "../core/workerScanner";
 import type { Config } from "./config";
 import type { Log } from "./log";
 import type { Terminals } from "./terminals";
@@ -52,8 +55,12 @@ const FILL_MS = 300;
 const ALERT_GRACE_MS = 10_000;
 /** Matches shown per session. */
 const SEARCH_HITS = 3;
-/** A search reads conversations not read yet for at most this long; the rest are reported pending. */
+/** Without a thread to read them in, a search reads conversations not read yet for at most this long; the rest are reported pending. */
 const SEARCH_BUDGET_MS = 150;
+/** The conversations are read ahead of any search this long after the window opens, out of the way of its start. */
+const READ_AHEAD_AFTER_MS = 3000;
+/** And then looked at again at most this often, for what the live ones gained. */
+const READ_AHEAD_MS = 2000;
 /**
  * The agent can write to the transcript a moment after it records a state:
  * a prompt's tool call, a turn's last reply. An announcement looks again
@@ -83,6 +90,8 @@ export interface ControllerHost {
   workspaceFolders(): string[];
   /** VS Code's extension storage directory, next to which it keeps extension state. */
   globalStorageDir: string;
+  /** The bundle of the thread that reads the conversations (`dist/reader.js`); without one, a search reads them here, a little at a time. */
+  readerScript?: string;
   /**
    * The agent's tabs open in this window whose session is not running: after
    * a reload the agent restores its tabs but starts a session only once its
@@ -187,6 +196,14 @@ export class Controller implements vscode.Disposable {
   private disposed = false;
   private readonly announcing = new Set<ReturnType<typeof setTimeout>>();
   private readonly terminalsChanged: vscode.Disposable;
+  /** Reads the conversations in a thread of their own, when there is one. */
+  private readonly background: BackgroundReads | undefined;
+  private readonly read = new vscode.EventEmitter<void>();
+  /** Conversations were read in the background: a search may find more. */
+  readonly onDidRead = this.read.event;
+  /** When the conversations are next read ahead of any search. */
+  private readAheadAt = Infinity;
+  private readAheadTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly host: ControllerHost,
@@ -209,6 +226,17 @@ export class Controller implements vscode.Disposable {
     this.ledger = new RefreshLedger(path.join(host.usageDir, "refresh"));
     this.alerts.prune(Date.now());
     this.ledger.prune(Date.now());
+    const script = host.readerScript;
+    this.background = script
+      ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), inThreadScanner, (error) =>
+          this.log.errorOnce(`The thread that reads the conversations stopped (${error instanceof Error ? error.message : String(error)}); they are read in the extension host instead`),
+        )
+      : undefined;
+  }
+
+  /** A search's results fill in as the conversations are read in the background, so nobody needs to ask again. */
+  get follows(): boolean {
+    return this.background !== undefined;
   }
 
   get sessions(): readonly SessionView[] {
@@ -453,6 +481,10 @@ export class Controller implements vscode.Disposable {
     const homes = [...(config.claudeEnabled ? [config.claudeConfigDir] : []), ...(config.codexEnabled ? [config.codexHome] : []), ...(config.copilotEnabled ? [config.copilotHome] : [])];
     this.log.info(this.providers.length ? `Watching ${this.providers.map((p) => p.label).join(", ")} (${homes.join(", ")})` : "Watching no agent: every agent is turned off");
     this.watch();
+    if (this.background && this.readAheadAt === Infinity) {
+      this.readAheadAt = Date.now() + READ_AHEAD_AFTER_MS;
+      this.readAheadTimer = setTimeout(() => this.poll(), READ_AHEAD_AFTER_MS);
+    }
     this.poll();
   }
 
@@ -546,6 +578,15 @@ export class Controller implements vscode.Disposable {
     for (const view of update.finished) this.announceFinished(view);
     for (const view of update.waiting) this.announce(view);
     this.pollUsage();
+    this.readAhead();
+  }
+
+  /** Has the background read every conversation the search covers, so the first search finds them read. */
+  private readAhead(): void {
+    const now = Date.now();
+    if (!this.background || now < this.readAheadAt) return;
+    this.readAheadAt = now + READ_AHEAD_MS;
+    for (const provider of this.providers) provider.readAhead?.(this.background);
   }
 
   /**
@@ -744,7 +785,7 @@ export class Controller implements vscode.Disposable {
     if (parsed.terms.length === 0 && !hasFilters(parsed)) return outcome;
     for (const provider of this.providers) {
       const left = Math.max(0, SEARCH_BUDGET_MS - (Date.now() - started));
-      const part = provider.search?.(parsed, page?.hits ?? SEARCH_HITS, left, page?.snippet);
+      const part = provider.search?.(parsed, page?.hits ?? SEARCH_HITS, left, page?.snippet, this.background);
       if (!part) continue;
       outcome.results.push(...part.results);
       outcome.pending += part.pending;
@@ -755,7 +796,7 @@ export class Controller implements vscode.Disposable {
   /** The conversation of one live session, oldest first. */
   history(id: string): HistoryMessage[] | undefined {
     for (const provider of this.providers) {
-      const messages = provider.history?.(id);
+      const messages = provider.history?.(id, this.background);
       if (messages) return messages;
     }
     return undefined;
@@ -875,6 +916,9 @@ export class Controller implements vscode.Disposable {
     if (this.timer) clearInterval(this.timer);
     if (this.debounce) clearTimeout(this.debounce);
     if (this.fill) clearTimeout(this.fill);
+    if (this.readAheadTimer) clearTimeout(this.readAheadTimer);
+    this.background?.dispose();
+    this.read.dispose();
     for (const timer of this.announcing) clearTimeout(timer);
     this.announcing.clear();
     this.timer = undefined;

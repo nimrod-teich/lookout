@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { ClaudeProvider } from "../../../../src/core/agents/claude/provider";
+import { inThreadScanner } from "../../../../src/core/agents/lineReaders";
+import { BackgroundReads } from "../../../../src/core/background";
 import { parseQuery } from "../../../../src/core/terms";
 import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseOf, summarizeTool, titleOf, type TranscriptState } from "../../../../src/core/agents/claude/transcript";
 import { appendEntries, FakeProc, sessionId, tempConfigDir, transcriptPath, writeSession } from "../../helpers";
@@ -337,6 +339,51 @@ describe("ClaudeProvider", () => {
     provider.past(scope, new Set([id]));
     expect(provider.history(id)).toBe(read);
     expect(provider.search(parseQuery("billing"), 3, 0).results.map((r) => r.id)).toEqual([id]);
+  });
+
+  it("reads in the background when given one: a search counts what is not read yet as pending, and finds it once read", async () => {
+    const { configDir, proc, provider } = setup();
+    const live = sessionId(1);
+    const old = sessionId(2);
+    writeSession(configDir, proc, { pid: 11, sessionId: live, cwd: "/work/app" });
+    appendEntries(transcriptPath(configDir, "/work/app", live), [{ type: "user", message: { content: "Fix the billing webhook" } }]);
+    appendEntries(transcriptPath(configDir, "/work/app", old), [
+      { type: "ai-title", aiTitle: "Old billing work" },
+      { type: "user", message: { content: "The billing export" } },
+    ]);
+    provider.poll(0);
+    provider.past({ folders: ["/work/app"], all: false, limit: 500 }, new Set([live]));
+    const onDidRead = vi.fn();
+    const background = new BackgroundReads(inThreadScanner(), onDidRead, inThreadScanner);
+    // However long a budget it is given, nothing is read here.
+    expect(provider.search(parseQuery("billing"), 3, 10_000, undefined, background)).toEqual({ results: [], pending: 2 });
+    await vi.waitFor(() => expect(background.pending).toBe(0));
+    expect(onDidRead).toHaveBeenCalled();
+    const { results, pending } = provider.search(parseQuery("billing"), 3, 0, undefined, background);
+    expect(pending).toBe(0);
+    expect(results.map((r) => [r.id, r.count]).sort()).toEqual([[live, 1], [old, 1]].sort());
+    // The live conversation goes on: what it gained is read in the background too.
+    appendEntries(transcriptPath(configDir, "/work/app", live), [{ type: "assistant", message: { content: [{ type: "text", text: "The billing webhook retries now" }] } }]);
+    expect(provider.history(live, background)?.map((m) => m.text)).toEqual(["Fix the billing webhook"]);
+    await vi.waitFor(() => expect(provider.history(live, background)).toHaveLength(2));
+    background.dispose();
+  });
+
+  it("reads ahead of any search: every past conversation once, the live ones as they go on", async () => {
+    const { configDir, proc, provider } = setup();
+    const live = sessionId(1);
+    const old = sessionId(2);
+    writeSession(configDir, proc, { pid: 11, sessionId: live, cwd: "/work/app" });
+    appendEntries(transcriptPath(configDir, "/work/app", live), [{ type: "user", message: { content: "Fix the cache" } }]);
+    appendEntries(transcriptPath(configDir, "/work/app", old), [{ type: "user", message: { content: "Old cache work" } }]);
+    provider.poll(0);
+    provider.past({ folders: ["/work/app"], all: false, limit: 500 }, new Set([live]));
+    const background = new BackgroundReads(inThreadScanner(), () => {}, inThreadScanner);
+    provider.readAhead(background);
+    expect(background.pending).toBe(2);
+    await vi.waitFor(() => expect(background.pending).toBe(0));
+    expect(provider.search(parseQuery("cache"), 3, 0, undefined, background).results).toHaveLength(2);
+    background.dispose();
   });
 
   it("narrows a search by time, project, branch and the files the tool calls worked on", () => {

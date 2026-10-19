@@ -210,4 +210,4 @@ export function factsOf(line: string): LineFacts | undefined {
 }
 
 /** How the search reads an events file: a line without one of `factsOf`'s needles is never decoded. */
-export const EVENTS_LINES = readerOf([USER_MESSAGE, REPLY, TOOL_START], factsOf);
+export const EVENTS_LINES = readerOf("copilot-events", [USER_MESSAGE, REPLY, TOOL_START], factsOf);

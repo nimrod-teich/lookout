@@ -14,6 +14,9 @@ const extension = {
   logLevel: "info",
 };
 
+// The thread the search reads the conversation files in, started by the extension.
+const reader = { ...extension, entryPoints: ["src/reader.ts"], outfile: "dist/reader.js" };
+
 // The board runs inside a webview: a browser bundle with no imports left.
 const board = {
   entryPoints: ["src/webview/board.ts"],
@@ -31,7 +34,7 @@ const findings = { ...board, entryPoints: ["src/webview/findings.ts"], outfile: 
 const search = { ...board, entryPoints: ["src/webview/search.ts"], outfile: "dist/search.js" };
 
 if (watch) {
-  for (const options of [extension, board, findings, search]) await (await esbuild.context(options)).watch();
+  for (const options of [extension, reader, board, findings, search]) await (await esbuild.context(options)).watch();
 } else {
-  await Promise.all([esbuild.build(extension), esbuild.build(board), esbuild.build(findings), esbuild.build(search)]);
+  await Promise.all([esbuild.build(extension), esbuild.build(reader), esbuild.build(board), esbuild.build(findings), esbuild.build(search)]);
 }

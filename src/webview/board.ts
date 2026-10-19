@@ -462,7 +462,7 @@ clear.addEventListener("click", () => {
   input.focus();
 });
 
-function receiveSearch(message: { query: string; results: SearchResult[]; pending: number }): void {
+function receiveSearch(message: { query: string; results: SearchResult[]; pending: number; follows?: boolean }): void {
   // An answer to an older query is of no use.
   if (message.query !== query) return;
   hits = new Map(message.results.map((result) => [result.id, result]));
@@ -472,8 +472,8 @@ function receiveSearch(message: { query: string; results: SearchResult[]; pendin
   summarise();
   applyFilters();
   render();
-  // Conversations not read within the time given: ask again shortly, until none is left.
-  if (pending > 0) {
+  // Conversations not read within the time given: ask again shortly, until none is left. The extension sends them itself when it follows.
+  if (pending > 0 && !message.follows) {
     setTimeout(() => {
       if (query === message.query) askSearch();
     }, 400);

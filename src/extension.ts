@@ -55,6 +55,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const log = createLog();
   const terminals = new Terminals();
   const sharedDir = path.join(context.globalStorageUri.fsPath, "windows");
+  // The search reads the conversations in a thread of its own; a package without its bundle reads them here instead.
+  const readerScript = vscode.Uri.joinPath(context.extensionUri, "dist", "reader.js").fsPath;
   const controller = new Controller(
     {
       pid: process.pid,
@@ -68,6 +70,7 @@ export function activate(context: vscode.ExtensionContext): void {
       workspaceFolders: () => vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [],
       globalStorageDir: path.dirname(context.globalStorageUri.fsPath),
       restoredTabs: () => ({ labels: claudeTabLabels(), label: claudeTabLabel }),
+      readerScript: fs.existsSync(readerScript) ? readerScript : undefined,
     },
     terminals,
     log,
@@ -201,6 +204,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return times.length ? { started: Math.min(...times), lastActive: Math.max(...times) } : {};
     },
     open: openHit,
+    follows: () => controller.follows,
   });
   /**
    * Registers the card menu's commands. VS Code passes the card's context:
@@ -256,6 +260,7 @@ export function activate(context: vscode.ExtensionContext): void {
     watching: () => controller.watching,
     openAgentSettings: () => void vscode.commands.executeCommand("workbench.action.openSettings", "lookout.agents"),
     search: (query, zone) => controller.search(query, zone),
+    follows: () => controller.follows,
     openHit,
     openSearch: (query, hide) => searchPage.show(query, hide),
   });
@@ -292,6 +297,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(BOARD_VIEW, board),
     controller.onDidChange(render),
     controller.onDidChange(() => findings.refresh()),
+    // More conversations read: what is being searched or shown fills in.
+    controller.onDidRead(() => {
+      board.followSearch();
+      searchPage.followSearch();
+      findings.refresh();
+    }),
     controller.onDidStartWaiting(async (view) => {
       // A turn that ends on a question is a finished turn too.
       if (!config.notifyWaiting && !(view.reason?.kind === "typed" && config.notifyDone)) return;

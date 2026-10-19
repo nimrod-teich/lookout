@@ -180,8 +180,8 @@ function receive(message: Extract<ToSearch, { type: "results" }>): void {
     list.append(empty);
   }
   for (const session of kept) list.append(sessionBlock(session));
-  // Conversations not read within the time given: ask again shortly, until none is left.
-  if (message.pending > 0)
+  // Conversations not read within the time given: ask again shortly, until none is left. The extension sends them itself when it follows.
+  if (message.pending > 0 && !message.follows)
     setTimeout(() => {
       if (message.query === query) ask();
     }, 300);

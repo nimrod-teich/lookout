@@ -1,3 +1,4 @@
+import type { BackgroundReads } from "../background";
 import type { HistoryMessage, SearchResult, SnippetSize } from "../history";
 import type { Query } from "../terms";
 import type { UsageSnapshot } from "../usage";
@@ -143,15 +144,22 @@ export interface AgentProvider {
    * Searches the conversations of the live and the past sessions: what the
    * user wrote and what the agent replied, narrowed by the query's operators.
    * Returns only sessions with matches, each with its newest `limit` matches,
-   * or, for a query of operators alone, the sessions they pick. A
-   * conversation not read yet is read only while `budgetMs` allows; the rest
-   * are counted as pending.
+   * or, for a query of operators alone, the sessions they pick. With
+   * `background`, conversations are read there and those not read yet are
+   * counted as pending; without, a conversation not read yet is read here
+   * only while `budgetMs` allows, and the rest are counted as pending.
    */
-  search?(query: Query, limit: number, budgetMs: number, snippet?: SnippetSize): SearchOutcome;
+  search?(query: Query, limit: number, budgetMs: number, snippet?: SnippetSize, background?: BackgroundReads): SearchOutcome;
+  /** Has `background` read the conversations the search covers, before anyone searches. */
+  readAhead?(background: BackgroundReads): void;
   /** The sessions of the scope that are not running, newest first, without the ids in `exclude`. */
   past?(scope: PastScope, exclude: ReadonlySet<string>): PastList;
-  /** The conversation of one live session, oldest first; undefined when the agent keeps no transcript for it. */
-  history?(id: string): HistoryMessage[] | undefined;
+  /**
+   * The conversation of one live session, oldest first; undefined when the
+   * agent keeps no transcript for it. With `background`, what it gained is
+   * read there, and shows on a later call.
+   */
+  history?(id: string, background?: BackgroundReads): HistoryMessage[] | undefined;
   /**
    * How to resume a session that is not running in a terminal: the command
    * and the folder to run it in. For agents whose sessions resume in a
