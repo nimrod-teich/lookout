@@ -86,6 +86,11 @@
         "command": "lookout.sortSessions",
         "title": "Sort Sessions",
         "category": "Lookout"
+      },
+      {
+        "command": "lookout.groupSessions",
+        "title": "Group Sessions",
+        "category": "Lookout"
       }
     ],
     "menus": {

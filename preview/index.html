@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked; &sort=name|project|recent|custom orders the groups. -->
+<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked; &sort=name|project|recent|custom orders the groups; &group=project|branch|model|agent|window makes the sections. -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -47,6 +47,8 @@
   let earlierScope = "folders";
   /** As the extension keeps it: &sort=name|project|recent|custom; a drag makes it "custom". */
   let sort = { by: params.get("sort") ?? "time", order: [] };
+  /** As the extension keeps it: &group=project|branch|model|agent|window. */
+  let groupBy = params.get("group") ?? "state";
   let fixtureSessions = [];
   window.acquireVsCodeApi = () => ({
     postMessage: (m) => {
@@ -55,6 +57,10 @@
       if (m.type === "earlierScope") post(m.scope);
       if (m.type === "order") {
         sort = { by: "custom", order: m.ids };
+        post(earlierScope);
+      }
+      if (m.type === "group") {
+        groupBy = m.by;
         post(earlierScope);
       }
       if (m.type === "sort") {
@@ -130,7 +136,7 @@
       fixtureSessions = [...fixture.sessions, ...past, ...archive];
       // Starred sessions that are not running and that the scope does not list come along.
       const favourites = { ids: favouriteIds, past: (fixture.past ?? []).filter((p) => favouriteIds.includes(p.id) && !past.includes(p)) };
-      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, markers, earlier: { ...earlier }, favourites, archive, sort }, "*");
+      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, markers, earlier: { ...earlier }, favourites, archive, sort, group: groupBy }, "*");
     };
     post(earlier.scope);
     const q = params.get("q");

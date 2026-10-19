@@ -7,6 +7,7 @@ import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
+import { GROUPINGS, readGroupBy, type GroupBy } from "./core/grouping";
 import { readSort, SORTS, type SessionSort } from "./core/sorting";
 import type { SessionView } from "./core/types";
 import { pickBar } from "./core/usageGroups";
@@ -35,6 +36,9 @@ const SHOW_BOARD = "lookout.showBoard";
 const REFRESH_USAGE = "lookout.refreshUsage";
 const SEARCH = "lookout.search";
 const SORT = "lookout.sortSessions";
+const GROUP = "lookout.groupSessions";
+/** How the board makes its sections; kept for every window. */
+const GROUP_KEY = "lookout.group";
 /** How the board orders the sessions in each group, and the user's own order; kept for every window. */
 const SORT_KEY = "lookout.sort";
 
@@ -203,6 +207,11 @@ export function activate(context: vscode.ExtensionContext): void {
     void context.globalState.update(SORT_KEY, next);
     board.refresh();
   };
+  const group = () => readGroupBy(context.globalState.get<unknown>(GROUP_KEY));
+  const setGroup = (by: GroupBy) => {
+    void context.globalState.update(GROUP_KEY, by);
+    board.refresh();
+  };
   const board = new Board(context.extensionUri, {
     sessions: () => controller.sessions,
     past: () => controller.past,
@@ -215,6 +224,8 @@ export function activate(context: vscode.ExtensionContext): void {
     sort,
     setOrder: (ids) => setSort({ by: "custom", order: readSort({ order: ids }).order }),
     setSort: (by) => setSort({ ...sort(), by }),
+    group,
+    setGroup,
     orderFavourites: (ids) => controller.orderFavourites(ids),
     toggleArchive: (id) => controller.toggleArchive(id),
     resume: (id) => void resume(id),
@@ -325,6 +336,12 @@ export function activate(context: vscode.ExtensionContext): void {
       const items = SORTS.map((option) => ({ label: option.key === current.by ? `$(check) ${option.label}` : option.label, description: option.detail, key: option.key }));
       const picked = await vscode.window.showQuickPick(items, { placeHolder: "Order the sessions in each group" });
       if (picked) setSort({ ...current, by: picked.key });
+    }),
+    vscode.commands.registerCommand(GROUP, async () => {
+      const current = group();
+      const items = GROUPINGS.map((option) => ({ label: option.key === current ? `$(check) ${option.label}` : option.label, description: option.detail, key: option.key }));
+      const picked = await vscode.window.showQuickPick(items, { placeHolder: "Make the board's sections by" });
+      if (picked) setGroup(picked.key);
     }),
     vscode.commands.registerCommand(REFRESH_USAGE, async () => {
       if (!controller.canRefreshUsage) {

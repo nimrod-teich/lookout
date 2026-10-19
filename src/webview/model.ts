@@ -14,11 +14,11 @@ export function isGroupKey(value: unknown): value is GroupKey {
   return value === "waiting" || value === "done" || value === "working" || value === "idle" || value === "parked";
 }
 
-/** A group the user can fold to its heading: Favourites, or a state group. */
-export type FoldKey = GroupKey | "favourites";
+/** A group the user can fold to its heading: Favourites, a state group, or a section by attribute (`project:api`). */
+export type FoldKey = GroupKey | "favourites" | `${string}:${string}`;
 
 export function isFoldKey(value: unknown): value is FoldKey {
-  return value === "favourites" || isGroupKey(value);
+  return value === "favourites" || isGroupKey(value) || (typeof value === "string" && /^(project|branch|model|agent|window):/.test(value));
 }
 
 const GROUP_OF: Record<State, GroupKey> = { waiting: "waiting", done: "done", working: "working", unknown: "idle", idle: "idle" };

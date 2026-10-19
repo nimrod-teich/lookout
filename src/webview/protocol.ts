@@ -1,3 +1,4 @@
+import type { GroupBy } from "../core/grouping";
 import type { SearchResult } from "../core/history";
 import type { SessionSort, SortKey } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
@@ -57,6 +58,8 @@ export type ToBoard =
       watching?: number;
       /** How the sessions are ordered inside each group, and the user's own order. */
       sort?: SessionSort;
+      /** How the board makes its sections: by state, or by what the sessions share. */
+      group?: GroupBy;
     }
   /** `pending` sessions were not read yet; the board asks again. */
   | { type: "search"; query: string; results: SearchResult[]; pending: number };
@@ -96,4 +99,6 @@ export type FromBoard =
   /** The user dragged a starred card: the favourites in their new order. */
   | { type: "favouriteOrder"; ids: string[] }
   /** The user picked an order from the board's sort chip. */
-  | { type: "sort"; by: SortKey };
+  | { type: "sort"; by: SortKey }
+  /** The user picked a grouping from the board's group chip. */
+  | { type: "group"; by: GroupBy };
