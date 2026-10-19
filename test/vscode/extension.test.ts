@@ -769,7 +769,7 @@ describe("the extension", () => {
       return (items as { key: string }[]).find((item) => item.key === "name");
     };
     await stub.commands.get("lookout.sortSessions")!();
-    expect(offered).toEqual(["Longest in its state first", "Latest change first", "Name", "Project", "$(check) Your order"]);
+    expect(offered).toEqual(["Longest in its state first", "Latest change first", "Name", "Project", "Most tokens first", "Most expensive first", "$(check) Your order"]);
     expect(savedGlobal["lookout.sort"]).toEqual({ by: "name", order: [SESSION, "other"] });
     expect(last()?.sort?.by).toBe("name");
     // Dismissed: nothing changes.
