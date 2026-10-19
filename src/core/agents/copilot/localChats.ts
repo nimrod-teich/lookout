@@ -16,7 +16,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { quoteAsk } from "../../asks";
-import { HistoryIndex, type HistoryMessage } from "../../history";
+import { HistoryIndex, type HistoryMessage, type LineReader } from "../../history";
 import type { Reason } from "../../types";
 import { applyChatLine, type ChatLog } from "./chatLog";
 
@@ -169,6 +169,9 @@ interface Read {
   log: ChatLog;
 }
 
+/** A chat log is replayed whole, never read line by line for the search. */
+const NO_LINES: LineReader = { mayHold: () => false, facts: () => undefined };
+
 /** The messages of a Local chat, from its log replayed, for the search and the conversation tab. */
 export class ChatLogIndex extends HistoryIndex {
   /** The log's mtime when the messages were taken; empty before. */
@@ -178,7 +181,7 @@ export class ChatLogIndex extends HistoryIndex {
     private readonly chatFile: string,
     private readonly chats: LocalChats,
   ) {
-    super(chatFile, () => undefined);
+    super(chatFile, NO_LINES);
   }
 
   override get ready(): boolean {
@@ -191,8 +194,7 @@ export class ChatLogIndex extends HistoryIndex {
     const takenAt = `${chat.mtimeMs}`;
     if (takenAt === this.takenAt) return;
     this.takenAt = takenAt;
-    this.messages.length = 0;
-    this.messages.push(...chat.messages);
+    this.replaceMessages(chat.messages);
   }
 }
 

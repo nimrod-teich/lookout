@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
+import { HistoryIndexes, type HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
 import { branchAt } from "../../git";
 import type { Query } from "../../terms";
 import { searchConversations, type Searchable } from "../../search";
 import { findLastLine, JsonlTail, lineStartAtOrAfter, readLineAt } from "../../jsonlTail";
-import { factsOf } from "./history";
+import { TRANSCRIPT_LINES } from "./history";
 import { PastTranscripts } from "./past";
 import type { ProcessTable } from "../../proc";
 import type { Evidence } from "../../types";
@@ -38,8 +38,6 @@ interface Tracked {
   nextLookupAt: number;
   /** The transcript file, once found. */
   file?: string;
-  /** Its messages, built on the first search. */
-  history?: HistoryIndex;
   /** Epoch ms the transcript was last modified. */
   writtenAt?: number;
 }
@@ -105,7 +103,8 @@ export class ClaudeProvider implements AgentProvider {
   private pastFiles = new Map<string, string>();
   /** Where the past sessions last listed ran and when they were last written, for the search's filters. */
   private pastMeta = new Map<string, { cwd: string; branch?: string; modifiedAt: number }>();
-  private readonly pastIndexes = new Map<string, HistoryIndex>();
+  /** The conversations' messages, by transcript, built on the first search: a session that ends or resumes keeps its own. */
+  private readonly indexes = new HistoryIndexes(TRANSCRIPT_LINES);
   /** Plan titles by file, read again when the file changes. */
   private readonly plans = new Map<string, { mtimeMs: number; title: string | undefined }>();
   /** The open tool call of the subagent transcript last read, by file version. */
@@ -169,7 +168,7 @@ export class ClaudeProvider implements AgentProvider {
     const all = [...transcripts, ...also];
     this.pastFiles = new Map(all.map((p) => [p.id, p.file]));
     this.pastMeta = new Map(all.map((p) => [p.id, { cwd: p.cwd, branch: p.branch, modifiedAt: p.modifiedAt }]));
-    for (const id of [...this.pastIndexes.keys()]) if (!this.pastFiles.has(id)) this.pastIndexes.delete(id);
+    this.indexes.keepOnly([...this.pastFiles.values(), ...[...this.tracked.values()].flatMap((tracked) => (tracked.file ? [tracked.file] : []))]);
     const session = (p: (typeof all)[number]): PastSession => ({ agent: this.id, id: p.id, cwd: p.cwd, title: p.title, branch: p.branch, resumable: p.resumable, modifiedAt: p.modifiedAt });
     return { sessions: transcripts.map(session), capped, incomplete, also: also.map(session) };
   }
@@ -244,19 +243,8 @@ export class ClaudeProvider implements AgentProvider {
   /** The session's conversation index, live or past; nothing until its transcript is known. */
   private indexFor(id: string): HistoryIndex | undefined {
     const tracked = this.tracked.get(id);
-    if (tracked) {
-      if (!tracked.file) return undefined;
-      tracked.history ??= new HistoryIndex(tracked.file, factsOf);
-      return tracked.history;
-    }
-    const file = this.pastFiles.get(id);
-    if (!file) return undefined;
-    let index = this.pastIndexes.get(id);
-    if (!index) {
-      index = new HistoryIndex(file, factsOf);
-      this.pastIndexes.set(id, index);
-    }
-    return index;
+    const file = tracked ? tracked.file : this.pastFiles.get(id);
+    return file ? this.indexes.of(file) : undefined;
   }
 
   /** Session files are rewritten in place on every state change, which the directory watch reports. */

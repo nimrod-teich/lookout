@@ -4,7 +4,7 @@ import { questionIn, quoteAsk } from "../../asks";
 import { within } from "../../folders";
 import { branchAt } from "../../git";
 import type { AgentHostSessions } from "../../agentHost";
-import { HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
+import { HistoryIndexes, type HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
 import { JsonlTail } from "../../jsonlTail";
 import type { ProcessFinder, ProcessTable } from "../../proc";
 import { pulseBins } from "../../pulse";
@@ -12,9 +12,9 @@ import { searchConversations, type Searchable } from "../../search";
 import type { Query } from "../../terms";
 import type { Evidence } from "../../types";
 import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, PastSession, ResumeCommand, SearchOutcome } from "../agent";
-import { activityOf, applyCopilotLine, emptyCopilot, factsOf, openPermission, type CopilotState } from "./events";
+import { activityOf, applyCopilotLine, emptyCopilot, EVENTS_LINES, openPermission, type CopilotState } from "./events";
 import { ChatLogIndex, localChatAddress, type LocalChat, type LocalChats } from "./localChats";
-import { COPILOT, lockPids, openSessionsFile, readOpenSessions, readWorkspace, sessionStateDir, type Workspace } from "./paths";
+import { COPILOT, eventsFile, lockPids, openSessionsFile, readOpenSessions, readWorkspace, sessionStateDir, type Workspace } from "./paths";
 import { resumeIdOf } from "./process";
 
 /** The terminal program; sessions Copilot runs for an editor say otherwise. */
@@ -48,7 +48,6 @@ const SPEND_BASIS = "Copilot bills premium requests, not tokens, so no price is 
 interface Tracked {
   tail: JsonlTail;
   state: CopilotState;
-  history?: HistoryIndex;
   mtimeMs?: number;
 }
 
@@ -104,7 +103,8 @@ export class CopilotProvider implements AgentProvider {
   private folders: { at: number; list: Folder[] } | undefined;
   private readonly prompts = new Map<string, string | undefined>();
   private pastListed = new Map<string, Folder & { title: string; cwd: string }>();
-  private readonly pastIndexes = new Map<string, HistoryIndex>();
+  /** The sessions' messages, by events file, built on the first search: a session that ends or resumes keeps its own. */
+  private readonly indexes = new HistoryIndexes(EVENTS_LINES);
 
   constructor(
     private readonly home: string,
@@ -171,7 +171,7 @@ export class CopilotProvider implements AgentProvider {
       const dir = path.join(root, name);
       let mtimeMs: number;
       try {
-        mtimeMs = fs.statSync(path.join(dir, "events.jsonl")).mtimeMs;
+        mtimeMs = fs.statSync(eventsFile(dir)).mtimeMs;
       } catch {
         continue;
       }
@@ -205,7 +205,7 @@ export class CopilotProvider implements AgentProvider {
       const holds = workspace?.clientName === EXTENSION_CLIENT ? (pid: number) => this.proc.get(pid) !== null : alive;
       const pid = lockPids(dir).find(holds) ?? resumed.get(id);
       if (pid === undefined) continue;
-      const file = path.join(dir, "events.jsonl");
+      const file = eventsFile(dir);
       const session = this.session(id, pid, file, workspace, open.get(id), running.find((p) => p.pid === pid)?.startedMs ?? this.proc.get(pid)?.startedMs, now);
       sessions.push(session);
       files.set(id, file);
@@ -308,7 +308,7 @@ export class CopilotProvider implements AgentProvider {
       if (f.workspace?.name) return f.workspace.name;
       if (!this.prompts.has(f.dir)) {
         if (reads++ >= READS_PER_LIST) return null;
-        this.prompts.set(f.dir, firstPromptOf(path.join(f.dir, "events.jsonl")));
+        this.prompts.set(f.dir, firstPromptOf(eventsFile(f.dir)));
       }
       const prompt = this.prompts.get(f.dir);
       return prompt ? quoteAsk(prompt, TITLE_MAX) : undefined;
@@ -334,7 +334,7 @@ export class CopilotProvider implements AgentProvider {
       if (folder && title) also.push({ ...folder, title, cwd: folder.workspace?.cwd ?? "" });
     }
     this.pastListed = new Map([...listed, ...also].map((f) => [f.id, f]));
-    for (const id of [...this.pastIndexes.keys()]) if (!this.pastListed.has(id)) this.pastIndexes.delete(id);
+    this.indexes.keepOnly([...[...this.pastListed.values()].map((f) => eventsFile(f.dir)), ...this.tracked.keys()]);
     const session = (f: Folder & { title: string; cwd: string }): PastSession => {
       const base: PastSession = { agent: this.id, id: f.id, cwd: f.cwd, title: f.title, resumable: f.cwd !== "" && within(f.cwd, scope.folders), modifiedAt: Math.round(f.mtimeMs) };
       if (!ofVscode(f.workspace)) return base;
@@ -393,20 +393,9 @@ export class CopilotProvider implements AgentProvider {
       return index;
     }
     const live = this.liveFiles.get(id);
-    if (live) {
-      const tracked = this.tracked.get(live);
-      if (!tracked) return undefined;
-      tracked.history ??= new HistoryIndex(live, factsOf);
-      return tracked.history;
-    }
+    if (live) return this.tracked.has(live) ? this.indexes.of(live) : undefined;
     const past = this.pastListed.get(id);
-    if (!past) return undefined;
-    let index = this.pastIndexes.get(id);
-    if (!index) {
-      index = new HistoryIndex(path.join(past.dir, "events.jsonl"), factsOf);
-      this.pastIndexes.set(id, index);
-    }
-    return index;
+    return past ? this.indexes.of(eventsFile(past.dir)) : undefined;
   }
 
   /** The session folders (events and locks) and the open-sessions file are watched. */

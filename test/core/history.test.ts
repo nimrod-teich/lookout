@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { HistoryIndex, PAGE_SNIPPET, snippetOf, type HistoryMessage, type LineFacts } from "../../src/core/history";
+import { HistoryIndex, HistoryIndexes, PAGE_SNIPPET, readerOf, snippetOf, type HistoryMessage, type LineFacts, type LineReader } from "../../src/core/history";
 import { tempConfigDir } from "./helpers";
 
 /** The test file format: one `{ role, text, at?, paths? }` per line. */
@@ -14,6 +14,9 @@ function parse(line: string): LineFacts | undefined {
     return undefined;
   }
 }
+
+/** Reads every line of the test format. */
+const READER: LineReader = { mayHold: () => true, facts: parse };
 
 function file(messages: unknown[]): string {
   const f = path.join(tempConfigDir(), "h.jsonl");
@@ -56,7 +59,7 @@ describe("HistoryIndex", () => {
         { role: "agent", at: 5, text: "The Billing webhook retries twice" },
         { role: "you", text: "Thanks" },
       ]),
-      parse,
+      READER,
     );
     index.refresh();
     expect(index.messages).toHaveLength(4);
@@ -68,7 +71,7 @@ describe("HistoryIndex", () => {
 
   it("reads only what was appended, and starts over when the file shrinks", () => {
     const f = file([{ role: "you", text: "one" }]);
-    const index = new HistoryIndex(f, parse);
+    const index = new HistoryIndex(f, READER);
     index.refresh();
     fs.appendFileSync(f, `${JSON.stringify({ role: "agent", text: "two" })}\n${JSON.stringify({ role: "you", text: "unfinished three" })}`);
     index.refresh();
@@ -89,7 +92,7 @@ describe("HistoryIndex", () => {
         { role: "agent", at: 5_000, text: "deploy done" },
         { role: "agent", text: "deploy, no time" },
       ]),
-      parse,
+      READER,
     );
     index.refresh();
     expect(index.search(["deploy"], 5).count).toBe(3);
@@ -105,7 +108,7 @@ describe("HistoryIndex", () => {
 
   it("forgets the paths of a file that was cut short or replaced", () => {
     const f = file([{ paths: ["/work/app/old.ts"] }, { paths: ["/work/app/older.ts"] }]);
-    const index = new HistoryIndex(f, parse);
+    const index = new HistoryIndex(f, READER);
     index.refresh();
     expect(index.touched(["old.ts"])).toBe(true);
     fs.writeFileSync(f, `${JSON.stringify({ paths: ["/work/app/new.ts"] })}\n`);
@@ -120,13 +123,82 @@ describe("HistoryIndex", () => {
   });
 
   it("handles a file that is missing or larger than one read chunk", () => {
-    const index = new HistoryIndex(path.join(tempConfigDir(), "missing.jsonl"), parse);
+    const index = new HistoryIndex(path.join(tempConfigDir(), "missing.jsonl"), READER);
     index.refresh();
     expect(index.messages).toEqual([]);
     const big = file(Array.from({ length: 3000 }, (_, i) => ({ role: "agent", text: `line ${i} ${"z".repeat(500)}` })));
-    const bigIndex = new HistoryIndex(big, parse);
+    const bigIndex = new HistoryIndex(big, READER);
     bigIndex.refresh();
     expect(bigIndex.messages).toHaveLength(3000);
     expect(bigIndex.search(["line 2999"], 1).hits[0]?.snippet.startsWith("line 2999")).toBe(true);
+    // One line longer than two chunks, between short ones.
+    const long = file([{ role: "you", text: "before" }, { role: "agent", text: `long ${"w".repeat(2_500_000)} end` }, { role: "you", text: "after" }]);
+    const longIndex = new HistoryIndex(long, READER);
+    longIndex.refresh();
+    expect(longIndex.messages.map((m) => m.text.length)).toEqual([6, 2_500_009, 5]);
+    expect(longIndex.search(["end"], 1).count).toBe(1);
+  });
+
+  it("never decodes a line its reader rules out", () => {
+    const decoded: string[] = [];
+    const reader: LineReader = {
+      mayHold: (line) => !line.includes("noise"),
+      facts: (line) => {
+        decoded.push(line);
+        return parse(line);
+      },
+    };
+    const index = new HistoryIndex(
+      file([
+        { role: "you", text: "Fix the cache" },
+        { role: "agent", text: "noise: a request record the size of a book" },
+        { role: "agent", text: "Done" },
+      ]),
+      reader,
+    );
+    index.refresh();
+    expect(index.messages.map((m) => m.text)).toEqual(["Fix the cache", "Done"]);
+    expect(decoded).toHaveLength(2);
+    expect(decoded.some((line) => line.includes("noise"))).toBe(false);
+  });
+
+  it("matches without regard to case, also after its messages are replaced", () => {
+    class Replaced extends HistoryIndex {
+      take(messages: HistoryMessage[]): void {
+        this.replaceMessages(messages);
+      }
+    }
+    const index = new Replaced(path.join(tempConfigDir(), "none.jsonl"), READER);
+    index.take([{ role: "you", text: "Fix the BILLING webhook" }]);
+    expect(index.search(["billing"], 3).count).toBe(1);
+    index.take([{ role: "agent", text: "Something else" }]);
+    expect(index.search(["billing"], 3).count).toBe(0);
+    expect(index.search(["else"], 3).hits.map((hit) => hit.snippet)).toEqual(["Something else"]);
+  });
+});
+
+describe("readerOf", () => {
+  it("lets through the lines with any of its needles", () => {
+    const reader = readerOf(['"type":"message"', '"FileChange"'], () => undefined);
+    expect(reader.mayHold(Buffer.from('{"type":"message","text":"hi"}'))).toBe(true);
+    expect(reader.mayHold(Buffer.from('{"item":"FileChange"}'))).toBe(true);
+    expect(reader.mayHold(Buffer.from('{"type":"token_count"}'))).toBe(false);
+  });
+});
+
+describe("HistoryIndexes", () => {
+  it("keeps one index per file until the file is no longer wanted", () => {
+    const indexes = new HistoryIndexes(READER);
+    const a = file([{ role: "you", text: "one" }]);
+    const first = indexes.of(a);
+    first.refresh();
+    // The same file, whoever asks: a session that ends or resumes keeps what was read of it.
+    expect(indexes.of(a)).toBe(first);
+    indexes.keepOnly([a]);
+    expect(indexes.of(a)).toBe(first);
+    indexes.keepOnly([]);
+    const again = indexes.of(a);
+    expect(again).not.toBe(first);
+    expect(again.ready).toBe(false);
   });
 });

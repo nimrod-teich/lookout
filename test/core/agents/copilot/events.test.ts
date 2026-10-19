@@ -1,6 +1,7 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { activityOf, applyCopilotLine, emptyCopilot, factsOf, openPermission, type CopilotState } from "../../../../src/core/agents/copilot/events";
+import { activityOf, applyCopilotLine, emptyCopilot, EVENTS_LINES, factsOf, openPermission, type CopilotState } from "../../../../src/core/agents/copilot/events";
 import { copilotHome, lockPids, parseWorkspace, readOpenSessions } from "../../../../src/core/agents/copilot/paths";
 import { ANSWERED, ASKING, FIXTURES, lines, tempCopilotHome } from "./fixtures";
 
@@ -74,5 +75,25 @@ describe("Copilot's files", () => {
   it("are anonymised copies of real sessions", () => {
     const text = [answered, asking, edited].map((f) => lines(f).join("\n")).join("\n");
     expect(text).not.toMatch(/\/home\/bob|Jerusalem/);
+  });
+});
+
+describe("the search's reader of an events file", () => {
+  it("never rules out a line factsOf takes something from, in any fixture", () => {
+    const files = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(dir, entry.name);
+        return entry.isDirectory() ? files(full) : entry.name.endsWith(".jsonl") ? [full] : [];
+      });
+    let taken = 0;
+    for (const file of files(FIXTURES)) {
+      for (const text of fs.readFileSync(file, "utf8").split("\n")) {
+        if (text === "" || factsOf(text) === undefined) continue;
+        taken++;
+        expect(EVENTS_LINES.mayHold(Buffer.from(text)), `${path.basename(file)}: ${text.slice(0, 80)}`).toBe(true);
+      }
+    }
+    expect(taken).toBeGreaterThan(10);
+    expect(EVENTS_LINES.mayHold(Buffer.from('{"type":"session.model_change","data":{}}'))).toBe(false);
   });
 });

@@ -17,7 +17,7 @@
 //   tokens, how many input tokens the model takes, and the effort. (The
 //   `model.*` events are Copilot's helper models, such as the one that names
 //   the session, and are left out.)
-import type { HistoryMessage, LineFacts } from "../../history";
+import { readerOf, type HistoryMessage, type LineFacts } from "../../history";
 import { quoteAsk } from "../../asks";
 import type { Reason } from "../../types";
 
@@ -179,12 +179,16 @@ function pathsOf(data: Record<string, unknown>): string[] {
   return out;
 }
 
+const USER_MESSAGE = '"type":"user.message"';
+const REPLY = '"type":"assistant.message"';
+const TOOL_START = '"type":"tool.execution_start"';
+
 /** The message or paths an events line holds, for the search and the conversation tab. */
 export function factsOf(line: string): LineFacts | undefined {
   // Cheap gates before parsing: most lines are model telemetry.
-  const user = line.includes('"type":"user.message"');
-  const reply = line.includes('"type":"assistant.message"');
-  const tool = line.includes('"type":"tool.execution_start"');
+  const user = line.includes(USER_MESSAGE);
+  const reply = line.includes(REPLY);
+  const tool = line.includes(TOOL_START);
   if (!user && !reply && !tool) return undefined;
   let event: { type?: unknown; data?: Record<string, unknown>; timestamp?: unknown };
   try {
@@ -204,3 +208,6 @@ export function factsOf(line: string): LineFacts | undefined {
   const message: HistoryMessage = { role: event.type === "user.message" ? "you" : "agent", at: when, text };
   return { message };
 }
+
+/** How the search reads an events file: a line without one of `factsOf`'s needles is never decoded. */
+export const EVENTS_LINES = readerOf([USER_MESSAGE, REPLY, TOOL_START], factsOf);

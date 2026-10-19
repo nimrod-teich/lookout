@@ -50,6 +50,11 @@ export function parseWorkspace(text: string): Workspace {
   return { id: fields.get("id"), cwd: fields.get("cwd"), clientName: fields.get("client_name"), name: fields.get("name") || undefined, createdAt: time("created_at"), updatedAt: time("updated_at") };
 }
 
+/** A session's events: one JSON line per event, the conversation among them. */
+export function eventsFile(dir: string): string {
+  return path.join(dir, "events.jsonl");
+}
+
 export function readWorkspace(dir: string): Workspace | undefined {
   try {
     return parseWorkspace(fs.readFileSync(path.join(dir, "workspace.yaml"), "utf8"));
