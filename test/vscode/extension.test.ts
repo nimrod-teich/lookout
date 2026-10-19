@@ -745,6 +745,39 @@ describe("the extension", () => {
     await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
   }, 60_000);
 
+  it("keeps the order the user drags the cards into, the stars' new order, and the sort chosen from the menu", async () => {
+    writeTranscript();
+    writeSession({ status: "idle", statusUpdatedAt: Date.now() });
+    savedGlobal["lookout.favourites"] = ["f1", "f2", SESSION];
+    activate(context());
+    const board = stub.webviewProviders.get("lookout.board") as { resolveWebviewView(view: unknown): void };
+    const boardView = createWebviewView();
+    board.resolveWebviewView(boardView);
+    const last = () => boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sort?: { by: string; order: string[] }; favourites?: { ids: string[] } } | undefined;
+    await vi.waitFor(() => expect(last()?.sort).toEqual({ by: "time", order: [] }), WAIT);
+    boardView.receive({ type: "order", ids: [SESSION, "other", 7] });
+    expect(savedGlobal["lookout.sort"]).toEqual({ by: "custom", order: [SESSION, "other"] });
+    expect(last()?.sort).toEqual({ by: "custom", order: [SESSION, "other"] });
+    // The stars it names first, the rest behind; an id that is not a star is left out.
+    boardView.receive({ type: "favouriteOrder", ids: [SESSION, "nope", "f2"] });
+    expect(savedGlobal["lookout.favourites"]).toEqual([SESSION, "f2", "f1"]);
+    await vi.waitFor(() => expect(last()?.favourites?.ids).toEqual([SESSION, "f2", "f1"]), WAIT);
+    // The menu lists every order, the current one checked; a pick keeps the user's own order for later.
+    let offered: string[] = [];
+    stub.quickPick = (items) => {
+      offered = (items as { label: string }[]).map((item) => item.label);
+      return (items as { key: string }[]).find((item) => item.key === "name");
+    };
+    await stub.commands.get("lookout.sortSessions")!();
+    expect(offered).toEqual(["Longest in its state first", "Latest change first", "Name", "Project", "$(check) Your order"]);
+    expect(savedGlobal["lookout.sort"]).toEqual({ by: "name", order: [SESSION, "other"] });
+    expect(last()?.sort?.by).toBe("name");
+    // Dismissed: nothing changes.
+    stub.quickPick = () => undefined;
+    await stub.commands.get("lookout.sortSessions")!();
+    expect(savedGlobal["lookout.sort"]).toEqual({ by: "name", order: [SESSION, "other"] });
+  }, 60_000);
+
   it("parks a session from its card, brings it back, and lets it leave Parked when it works again", async () => {
     writeTranscript();
     writeSession({ status: "idle", statusUpdatedAt: Date.now() });

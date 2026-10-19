@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked. -->
+<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked; &sort=name|project|recent|custom orders the groups. -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -45,12 +45,22 @@
   /** The archived sessions' ids, newest first: &archived=2 archives the fixture's first two earlier sessions. */
   let archiveIds = [];
   let earlierScope = "folders";
+  /** As the extension keeps it: &sort=name|project|recent|custom; a drag makes it "custom". */
+  let sort = { by: params.get("sort") ?? "time", order: [] };
   let fixtureSessions = [];
   window.acquireVsCodeApi = () => ({
     postMessage: (m) => {
       console.log("to extension:", JSON.stringify(m));
       if (m.type === "search") setTimeout(() => window.postMessage({ type: "search", query: m.query, results: fakeSearch(m.query, fixtureSessions), pending: 0 }, "*"), 100);
       if (m.type === "earlierScope") post(m.scope);
+      if (m.type === "order") {
+        sort = { by: "custom", order: m.ids };
+        post(earlierScope);
+      }
+      if (m.type === "favouriteOrder") {
+        favouriteIds = m.ids;
+        post(earlierScope);
+      }
       if (m.type === "favourite") {
         favouriteIds = favouriteIds.includes(m.id) ? favouriteIds.filter((id) => id !== m.id) : [m.id, ...favouriteIds];
         post(earlierScope);
@@ -116,7 +126,7 @@
       fixtureSessions = [...fixture.sessions, ...past, ...archive];
       // Starred sessions that are not running and that the scope does not list come along.
       const favourites = { ids: favouriteIds, past: (fixture.past ?? []).filter((p) => favouriteIds.includes(p.id) && !past.includes(p)) };
-      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, markers, earlier: { ...earlier }, favourites, archive }, "*");
+      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, markers, earlier: { ...earlier }, favourites, archive, sort }, "*");
     };
     post(earlier.scope);
     const q = params.get("q");

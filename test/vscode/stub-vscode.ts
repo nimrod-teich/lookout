@@ -343,6 +343,11 @@ export const window = {
   showInformationMessage: notify("info"),
   showWarningMessage: notify("warning"),
   createQuickPick,
+  /** A menu: answered by `stub.quickPick`, or dismissed without one. */
+  showQuickPick: async (items: readonly unknown[] | Promise<readonly unknown[]>) => {
+    stub.ops.push(["quickPick", "menu"]);
+    return stub.quickPick?.(await items);
+  },
   tabGroups: {
     get all() {
       return stub.groups;

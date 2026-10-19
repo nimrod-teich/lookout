@@ -1,0 +1,74 @@
+// How the board orders the sessions inside each group. No node imports: the board bundles it too.
+import type { SessionView } from "./types";
+
+/** At most this many sessions keep a place in the user's own order; the rest come first, as new ones do. */
+const LIMIT = 500;
+
+export type SortKey = "time" | "recent" | "name" | "project" | "custom";
+
+/** The order the user chose, and their own order of the sessions, kept for when they choose it. */
+export interface SessionSort {
+  by: SortKey;
+  /** Session ids, in the order the user dragged them into. */
+  order: string[];
+}
+
+export const DEFAULT_SORT: SessionSort = { by: "time", order: [] };
+
+/** The orders on offer, as the sort menu lists them. */
+export const SORTS: readonly { key: SortKey; label: string; detail: string }[] = [
+  { key: "time", label: "Longest in its state first", detail: "The session that has waited longest leads each group" },
+  { key: "recent", label: "Latest change first", detail: "The session whose state changed last leads each group" },
+  { key: "name", label: "Name", detail: "By title, A to Z" },
+  { key: "project", label: "Project", detail: "By project, then worktree, then title" },
+  { key: "custom", label: "Your order", detail: "As you drag the cards; new sessions come first" },
+];
+
+export function isSortKey(value: unknown): value is SortKey {
+  return SORTS.some((sort) => sort.key === value);
+}
+
+/** The sort as stored, with anything unknown dropped. */
+export function readSort(raw: unknown): SessionSort {
+  const record = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const order = Array.isArray(record.order) ? record.order.filter((id): id is string => typeof id === "string").slice(0, LIMIT) : [];
+  return { by: isSortKey(record.by) ? record.by : "time", order };
+}
+
+const text = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+
+/**
+ * The sessions in the chosen order. Groups are made from this order and keep
+ * it, so only the order inside a group counts. "time" keeps the order the
+ * sessions come in: the extension's, longest in its state first.
+ */
+export function orderViews(views: readonly SessionView[], sort: SessionSort): SessionView[] {
+  switch (sort.by) {
+    case "time":
+      return [...views];
+    case "recent":
+      return [...views].sort((a, b) => (b.since ?? 0) - (a.since ?? 0));
+    case "name":
+      return [...views].sort((a, b) => text(a.title, b.title));
+    case "project":
+      return [...views].sort((a, b) => text(a.project, b.project) || text(a.worktree ?? "", b.worktree ?? "") || text(a.title, b.title));
+    case "custom": {
+      const rank = new Map(sort.order.map((id, i) => [id, i]));
+      // Sessions without a place come first, as they came: new ones show at the top.
+      return [...views].sort((a, b) => (rank.get(a.id) ?? -1) - (rank.get(b.id) ?? -1));
+    }
+  }
+}
+
+/**
+ * The user's order after a drag inside one group: `group` is that group's
+ * sessions as shown, `moved` goes before `before` (to the end without one).
+ * The group's sessions take the front of the order in their new places;
+ * the others keep theirs, behind them, since groups never mix.
+ */
+export function dragInto(order: readonly string[], group: readonly string[], moved: string, before: string | undefined): string[] {
+  const rest = group.filter((id) => id !== moved);
+  const at = before === undefined ? rest.length : rest.indexOf(before);
+  const placed = [...rest.slice(0, at < 0 ? rest.length : at), moved, ...rest.slice(at < 0 ? rest.length : at)];
+  return [...placed, ...order.filter((id) => !placed.includes(id))].slice(0, LIMIT);
+}

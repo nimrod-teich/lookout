@@ -1,4 +1,5 @@
 import type { SearchResult } from "../core/history";
+import type { SessionSort } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import type { UsageMeter } from "../core/usage";
 
@@ -54,6 +55,8 @@ export type ToBoard =
       archive?: PastView[];
       /** How many agents Lookout watches: none when every agent is turned off in the settings. */
       watching?: number;
+      /** How the sessions are ordered inside each group, and the user's own order. */
+      sort?: SessionSort;
     }
   /** `pending` sessions were not read yet; the board asks again. */
   | { type: "search"; query: string; results: SearchResult[]; pending: number };
@@ -87,4 +90,8 @@ export type FromBoard =
   /** Archive a session that is not running, or bring an archived one back to Earlier. */
   | { type: "archive"; id: string }
   /** Park a running session whose turn is over, or bring a parked one back. */
-  | { type: "park"; id: string };
+  | { type: "park"; id: string }
+  /** The user dragged a card: their own order of the sessions, which the board now follows. */
+  | { type: "order"; ids: string[] }
+  /** The user dragged a starred card: the favourites in their new order. */
+  | { type: "favouriteOrder"; ids: string[] };

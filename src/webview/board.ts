@@ -2,6 +2,7 @@
 import { AGENTS, agentInfo, canJump, canRename, canResume, unreachable } from "../core/agents/catalog";
 import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
+import { DEFAULT_SORT, dragInto, orderViews, type SessionSort } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import { barMeter, chosenGroup, groupHeading, pickBar, sortGroups, tabMeters } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
@@ -63,6 +64,8 @@ let past: PastView[] = [];
 let earlier: EarlierInfo = { scope: "folders", limit: 500, capped: false };
 /** The sessions the user starred, newest star first. */
 let favourites: Favourites = { ids: [], past: [] };
+/** How the sessions are ordered inside each group, as the extension keeps it. */
+let sort: SessionSort = DEFAULT_SORT;
 let favouritesEl: HTMLElement | undefined;
 const favouriteCards = new Map<string, HTMLElement>();
 
@@ -380,7 +383,88 @@ function agentShown(agent: string | undefined): boolean {
 }
 
 function applyFilters(): void {
-  sessions = allSessions.filter((view) => !hidden.has(groupSessions([view])[0]!.key) && agentShown(view.agent) && (query === "" || hits.has(view.id)));
+  sessions = orderViews(
+    allSessions.filter((view) => !hidden.has(groupSessions([view])[0]!.key) && agentShown(view.agent) && (query === "" || hits.has(view.id))),
+    sort,
+  );
+}
+
+// Dragging a card: inside its own group only, since a group is a state. A
+// drop puts the board in the user's own order, starting from the one shown.
+
+/** The card being dragged, and the list it may be dropped in. */
+let dragging: { id: string; list: HTMLElement } | undefined;
+
+function cardsIn(list: HTMLElement): HTMLElement[] {
+  return [...list.children].filter((node): node is HTMLElement => node instanceof HTMLElement && node.classList.contains("card"));
+}
+
+/** The card a drop at `y` goes before, or none for the end of the list. */
+function dropBefore(list: HTMLElement, y: number): HTMLElement | undefined {
+  return cardsIn(list).find((card) => {
+    if (card.dataset.id === dragging?.id) return false;
+    const box = card.getBoundingClientRect();
+    return y < box.top + box.height / 2;
+  });
+}
+
+function clearDrop(list: HTMLElement): void {
+  for (const card of cardsIn(list)) card.classList.remove("drop-before", "drop-after");
+}
+
+/** Lets the cards of `list` be dragged into another order; `drop` gets the dragged id, the id it goes before, and the ids as shown. */
+function sortable(list: HTMLElement, drop: (moved: string, before: string | undefined, shown: string[]) => void): void {
+  list.addEventListener("dragstart", (event) => {
+    const card = (event.target as Element).closest?.(".card") as HTMLElement | null;
+    if (!card || card.parentElement !== list || !event.dataTransfer) return;
+    dragging = { id: card.dataset.id!, list };
+    card.classList.add("dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", card.dataset.id!);
+  });
+  list.addEventListener("dragover", (event) => {
+    if (dragging?.list !== list) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    clearDrop(list);
+    const before = dropBefore(list, event.clientY);
+    const last = cardsIn(list).filter((card) => card.dataset.id !== dragging?.id).at(-1);
+    (before ?? last)?.classList.add(before ? "drop-before" : "drop-after");
+  });
+  list.addEventListener("dragleave", (event) => {
+    if (!list.contains(event.relatedTarget as Node | null)) clearDrop(list);
+  });
+  list.addEventListener("drop", (event) => {
+    if (dragging?.list !== list) return;
+    event.preventDefault();
+    const before = dropBefore(list, event.clientY)?.dataset.id;
+    drop(
+      dragging.id,
+      before,
+      cardsIn(list).map((card) => card.dataset.id!),
+    );
+  });
+  list.addEventListener("dragend", () => {
+    for (const card of cardsIn(list)) card.classList.remove("dragging");
+    clearDrop(list);
+    dragging = undefined;
+  });
+}
+
+/** A drop in a state group: the user's own order, from the one shown when it was another. */
+function dropLive(moved: string, before: string | undefined, shown: string[]): void {
+  const from = sort.by === "custom" ? sort.order : sessions.map((view) => view.id);
+  sort = { by: "custom", order: dragInto(from, shown, moved, before) };
+  vscode.postMessage({ type: "order", ids: sort.order });
+  applyFilters();
+  render();
+}
+
+/** A drop among the favourites: the stars in their new order. */
+function dropFavourite(moved: string, before: string | undefined, shown: string[]): void {
+  favourites = { ...favourites, ids: dragInto(favourites.ids, shown, moved, before) };
+  vscode.postMessage({ type: "favouriteOrder", ids: favourites.ids });
+  render();
 }
 
 /** The usage groups of the agents shown. */
@@ -601,6 +685,7 @@ function agentPrefix(agent: string): string {
 function createCard(view: SessionView): HTMLElement {
   const card = el("button", "card");
   card.type = "button";
+  card.draggable = true;
   card.dataset.id = view.id;
   card.append(el("span", "rail"));
   const main = el("span", "main");
@@ -918,6 +1003,7 @@ function favouriteOf(id: string): { live?: SessionView; past?: PastView } {
 function createFavouriteCard(id: string, agent: string): HTMLElement {
   const card = el("button", "card fav");
   card.type = "button";
+  card.draggable = true;
   card.dataset.id = id;
   card.append(el("span", "rail"));
   const main = el("span", "main");
@@ -977,7 +1063,9 @@ function renderFavourites(after: HTMLElement): HTMLElement {
     const heading = el("h2", "heading");
     heading.append(el("i", "chev", "▸"), el("i", "star-mark", "★"), el("span", "label", "Favourites"), el("span", "count"));
     foldOnClick(heading, "favourites");
-    favouritesEl.append(heading, el("div", "cards"));
+    const list = el("div", "cards");
+    sortable(list, dropFavourite);
+    favouritesEl.append(heading, list);
   }
   showFold(favouritesEl, "favourites");
   favouritesEl.querySelector(".count")!.textContent = String(shown.length);
@@ -1239,7 +1327,9 @@ function render(): void {
         });
         heading.append(all);
       }
-      section.append(heading, el("div", "cards"));
+      const list = el("div", "cards");
+      sortable(list, dropLive);
+      section.append(heading, list);
       groupsEl.set(group.key, section);
     }
     showFold(section, group.key);
@@ -1313,6 +1403,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   past = message.past ?? [];
   if (message.earlier) earlier = message.earlier;
   favourites = message.favourites ?? { ids: [], past: [] };
+  if (message.sort) sort = message.sort;
   archivePast = message.archive ?? [];
   // One group, from an extension that knew only Claude's usage, or one per agent.
   usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);
