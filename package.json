@@ -91,6 +91,46 @@
         "command": "lookout.groupSessions",
         "title": "Group Sessions",
         "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.jump",
+        "title": "Jump to Session",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.conversation",
+        "title": "Open Conversation",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.rename",
+        "title": "Rename…",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.seen",
+        "title": "Mark as Seen",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.star",
+        "title": "Star",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.unstar",
+        "title": "Remove Star",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.park",
+        "title": "Park",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.unpark",
+        "title": "Bring Back from Parked",
+        "category": "Lookout"
       }
     ],
     "menus": {
@@ -99,6 +139,82 @@
           "command": "lookout.search",
           "when": "view == lookout.board",
           "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "lookout.card.jump",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.conversation",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.rename",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.seen",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.star",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.unstar",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.park",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.unpark",
+          "when": "false"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "lookout.card.jump",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutCanJump",
+          "group": "1_open@1"
+        },
+        {
+          "command": "lookout.card.conversation",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card'",
+          "group": "1_open@2"
+        },
+        {
+          "command": "lookout.card.rename",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutCanRename",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "lookout.card.seen",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutFinished",
+          "group": "3_mark@1"
+        },
+        {
+          "command": "lookout.card.star",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && !lookoutStarred",
+          "group": "3_mark@2"
+        },
+        {
+          "command": "lookout.card.unstar",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutStarred",
+          "group": "3_mark@2"
+        },
+        {
+          "command": "lookout.card.park",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutResting && !lookoutParked",
+          "group": "3_mark@3"
+        },
+        {
+          "command": "lookout.card.unpark",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutParked",
+          "group": "3_mark@3"
         }
       ]
     },

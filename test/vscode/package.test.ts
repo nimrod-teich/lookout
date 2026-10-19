@@ -20,3 +20,31 @@ describe("the package allowlist", () => {
     for (const file of loaded) expect(allowed, `${file} is not in .vscodeignore`).toContain(file);
   });
 });
+
+// A card's context menu lists the extension's card commands, each one VS Code may show: named, kept out of the
+// Command Palette (they need a card), and shown only on the board's cards.
+describe("the card menu", () => {
+  const root = path.join(__dirname, "..", "..");
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as {
+    contributes: { commands: { command: string; title: string }[]; menus: Record<string, { command: string; when?: string }[]> };
+  };
+  const cardCommands = pkg.contributes.commands.filter((c) => c.command.startsWith("lookout.card."));
+
+  it("offers every card command on the board's cards only, and none in the Command Palette", () => {
+    expect(cardCommands.map((c) => c.command).sort()).toEqual(
+      ["lookout.card.conversation", "lookout.card.jump", "lookout.card.park", "lookout.card.rename", "lookout.card.seen", "lookout.card.star", "lookout.card.unpark", "lookout.card.unstar"].sort(),
+    );
+    const menu = pkg.contributes.menus["webview/context"] ?? [];
+    for (const { command } of cardCommands) {
+      const entry = menu.find((m) => m.command === command);
+      expect(entry?.when, command).toMatch(/^webviewId == 'lookout\.board' && webviewSection == 'card'/);
+      expect(pkg.contributes.menus.commandPalette?.find((m) => m.command === command)?.when, command).toBe("false");
+    }
+  });
+
+  it("gives each context key the menu asks about a value on every card", () => {
+    const keys = new Set((pkg.contributes.menus["webview/context"] ?? []).flatMap((m) => m.when?.match(/lookout[A-Z]\w+/g) ?? []));
+    const board = fs.readFileSync(path.join(root, "src", "webview", "board.ts"), "utf8");
+    for (const key of keys) expect(board, `${key} is never set on a card`).toMatch(new RegExp(`\\b${key}:`));
+  });
+});
