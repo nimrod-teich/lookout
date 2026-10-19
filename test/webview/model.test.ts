@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardLine, contextLevel, contextPercent, groupSessions, HARBOUR, hostChip, layoutBoats, pageOf, pulseBars, secondLine, waterline } from "../../src/webview/model";
+import { cardLine, contextLevel, contextPercent, groupSessions, HARBOUR, hostChip, isFoldKey, layoutBoats, pageOf, pulseBars, secondLine, waterline } from "../../src/webview/model";
 import { view } from "../vscode/helpers";
 
 describe("groupSessions", () => {
@@ -19,6 +19,13 @@ describe("groupSessions", () => {
     ]);
     expect(groupSessions([view({ state: "working" })]).map((g) => g.key)).toEqual(["working"]);
     expect(groupSessions([])).toEqual([]);
+  });
+});
+
+describe("isFoldKey", () => {
+  it("takes Favourites and the state groups, and nothing else kept in the board's state", () => {
+    for (const key of ["favourites", "waiting", "done", "working", "idle"]) expect(isFoldKey(key)).toBe(true);
+    for (const key of ["earlier", "archive", "Favourites", "unknown", "", 1, null, undefined]) expect(isFoldKey(key)).toBe(false);
   });
 });
 

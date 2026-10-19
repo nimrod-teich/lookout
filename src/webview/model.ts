@@ -14,6 +14,13 @@ export function isGroupKey(value: unknown): value is GroupKey {
   return value === "waiting" || value === "done" || value === "working" || value === "idle";
 }
 
+/** A group the user can fold to its heading: Favourites, or a state group. */
+export type FoldKey = GroupKey | "favourites";
+
+export function isFoldKey(value: unknown): value is FoldKey {
+  return value === "favourites" || isGroupKey(value);
+}
+
 const GROUP_OF: Record<State, GroupKey> = { waiting: "waiting", done: "done", working: "working", unknown: "idle", idle: "idle" };
 const LABELS: Record<GroupKey, string> = { waiting: "Needs you", done: "Finished", working: "Working", idle: "Idle" };
 const ORDER: GroupKey[] = ["waiting", "done", "working", "idle"];

@@ -740,6 +740,34 @@ body.vscode-reduce-motion .hover-card {
   letter-spacing: 0.01em;
 }
 
+/* A click on a group's heading folds the group to it. */
+.group > .heading {
+  cursor: pointer;
+  user-select: none;
+}
+
+.group > .heading:hover .label {
+  color: var(--ink);
+}
+
+.group .chev {
+  display: inline-block;
+  width: 10px;
+  margin-right: 2px;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+
+.group.open .chev {
+  transform: rotate(90deg);
+}
+
+.group .cards.hidden {
+  display: none;
+}
+
 .heading .count {
   font-weight: 400;
   color: var(--muted);
@@ -1223,30 +1251,6 @@ body.vscode-reduce-motion .hover-card {
 .group-past .heading {
   flex-wrap: wrap;
   row-gap: 4px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.group-past .heading:hover .label {
-  color: var(--ink);
-}
-
-.group-past .chev {
-  display: inline-block;
-  width: 10px;
-  margin-right: 2px;
-  color: var(--muted);
-  font-style: normal;
-  font-size: 10px;
-  transition: transform 120ms ease;
-}
-
-.group-past.open .chev {
-  transform: rotate(90deg);
-}
-
-.group-past .cards.hidden {
-  display: none;
 }
 
 /* Which earlier sessions: this window's folders, or every project. */

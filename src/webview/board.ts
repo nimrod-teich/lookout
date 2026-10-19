@@ -6,11 +6,13 @@ import type { PastView, SessionView } from "../core/types";
 import { barMeter, chosenGroup, groupHeading, peakMeter, pickBar, sortGroups } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
 import { Harbour } from "./harbour";
-import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isGroupKey, pageOf, pulseBars, secondLine, type Chip, type GroupKey } from "./model";
+import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isFoldKey, isGroupKey, pageOf, pulseBars, secondLine, type Chip, type FoldKey, type GroupKey } from "./model";
 import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "./protocol";
 
 interface BoardState {
   hidden?: string[];
+  /** Favourites and the state groups the user folded to their heading. */
+  folded?: string[];
   earlier?: boolean;
   /** The user opened the Archived group. */
   archive?: boolean;
@@ -35,6 +37,8 @@ let allSessions: SessionView[] = [];
 let sessions: SessionView[] = [];
 /** State groups the user hid through the legend; kept across reloads. */
 const hidden = new Set<GroupKey>((vscode.getState()?.hidden ?? []).filter(isGroupKey));
+/** Favourites and the state groups the user folded to their heading; kept across reloads. */
+const folded = new Set<FoldKey>((vscode.getState()?.folded ?? []).filter(isFoldKey));
 /** Agents the user hid through the legend; kept across reloads, applied while the markers show. */
 const hiddenAgents = new Set<string>((vscode.getState()?.agents ?? []).filter((id) => typeof id === "string"));
 /** Each agent's usage, in catalog order; empty when there is none to show. */
@@ -96,7 +100,25 @@ let archiveEl: HTMLElement | undefined;
 const archiveCards = new Map<string, HTMLElement>();
 
 function saveState(): void {
-  vscode.setState({ hidden: [...hidden], earlier: earlierOpen, archive: archiveOpen, agents: [...hiddenAgents], usageTab });
+  vscode.setState({ hidden: [...hidden], folded: [...folded], earlier: earlierOpen, archive: archiveOpen, agents: [...hiddenAgents], usageTab });
+}
+
+/** A click on the heading folds the group to it, or unfolds it. */
+function foldOnClick(heading: HTMLElement, key: FoldKey): void {
+  heading.title = "Click to fold or unfold the group";
+  heading.addEventListener("click", () => {
+    if (folded.has(key)) folded.delete(key);
+    else folded.add(key);
+    saveState();
+    render();
+  });
+}
+
+/** Opens or folds a group's cards; a search unfolds every group while it runs, so its matches show. */
+function showFold(section: HTMLElement, key: FoldKey): void {
+  const open = !folded.has(key) || query !== "";
+  section.classList.toggle("open", open);
+  section.querySelector(".cards")!.classList.toggle("hidden", !open);
 }
 const pastCards = new Map<string, HTMLElement>();
 let earlierEl: HTMLElement | undefined;
@@ -911,9 +933,11 @@ function renderFavourites(after: HTMLElement): HTMLElement {
   if (!favouritesEl) {
     favouritesEl = el("section", "group group-favourites");
     const heading = el("h2", "heading");
-    heading.append(el("i", "star-mark", "★"), el("span", "label", "Favourites"), el("span", "count"));
+    heading.append(el("i", "chev", "▸"), el("i", "star-mark", "★"), el("span", "label", "Favourites"), el("span", "count"));
+    foldOnClick(heading, "favourites");
     favouritesEl.append(heading, el("div", "cards"));
   }
+  showFold(favouritesEl, "favourites");
   favouritesEl.querySelector(".count")!.textContent = String(shown.length);
   if (favouritesEl.previousElementSibling !== after) root.insertBefore(favouritesEl, after.nextSibling);
   const list = favouritesEl.querySelector(".cards")!;
@@ -1160,11 +1184,14 @@ function render(): void {
     if (!section) {
       section = el("section", `group group-${group.key}`);
       const heading = el("h2", "heading");
-      heading.append(el("i", "swatch"), el("span", "label", group.label), el("span", "count"));
+      heading.append(el("i", "chev", "▸"), el("i", "swatch"), el("span", "label", group.label), el("span", "count"));
+      foldOnClick(heading, group.key);
       if (group.key === "done") {
         const all = el("button", "link", "mark all seen");
         all.type = "button";
-        all.addEventListener("click", () => {
+        all.addEventListener("click", (event) => {
+          // An action, not a click on the heading.
+          event.stopPropagation();
           stayingFinished.clear();
           vscode.postMessage({ type: "seenAll" });
         });
@@ -1173,6 +1200,7 @@ function render(): void {
       section.append(heading, el("div", "cards"));
       groupsEl.set(group.key, section);
     }
+    showFold(section, group.key);
     section.querySelector(".count")!.textContent = String(group.views.length);
     if (section.previousElementSibling !== previousGroup) root.insertBefore(section, previousGroup.nextSibling);
     previousGroup = section;
