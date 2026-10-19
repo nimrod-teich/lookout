@@ -23,6 +23,11 @@ describe("messageOf", () => {
     expect(messageOf(line({ type: "ai-title", aiTitle: "cache" }))).toBeUndefined();
     expect(messageOf("not json")).toBeUndefined();
   });
+
+  it("takes what it can from content blocks that are not objects", () => {
+    expect(messageOf(line({ type: "user", message: { content: [null, { type: "text", text: "Fix the cache" }] } }))).toEqual({ role: "you", at: undefined, text: "Fix the cache" });
+    expect(factsOf(line({ type: "assistant", message: { content: [null, 3, "x"] } }))).toBeUndefined();
+  });
 });
 
 describe("factsOf", () => {

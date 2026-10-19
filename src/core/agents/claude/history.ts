@@ -10,7 +10,7 @@ function textOf(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return (content as Block[])
-    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
     .map((block) => block.text as string)
     .join("\n");
 }

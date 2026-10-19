@@ -162,6 +162,19 @@ describe("HistoryIndex", () => {
     expect(decoded.some((line) => line.includes("noise"))).toBe(false);
   });
 
+  it("skips a line its reader cannot take, and reads on", () => {
+    const reader: LineReader = {
+      mayHold: () => true,
+      facts: (line) => {
+        if (line.includes("broken")) throw new TypeError("cannot read properties of null");
+        return parse(line);
+      },
+    };
+    const index = new HistoryIndex(file([{ role: "you", text: "one" }, { role: "agent", text: "broken" }, { role: "you", text: "three" }]), reader);
+    index.refresh();
+    expect(index.messages.map((m) => m.text)).toEqual(["one", "three"]);
+  });
+
   it("matches without regard to case, also after its messages are replaced", () => {
     class Replaced extends HistoryIndex {
       take(messages: HistoryMessage[]): void {

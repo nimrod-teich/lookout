@@ -96,7 +96,13 @@ export function snippetOf(text: string, terms: string[], size: SnippetSize = CAR
 function readLines(file: string, from: number, reader: LineReader, onFacts: (facts: LineFacts) => void): number {
   const take = (line: Buffer) => {
     if (!reader.mayHold(line)) return;
-    const facts = reader.facts(line.toString("utf8"));
+    let facts: LineFacts | undefined;
+    try {
+      facts = reader.facts(line.toString("utf8"));
+    } catch {
+      // A line the reader cannot take is skipped, not the rest of the file.
+      return;
+    }
     if (facts) onFacts(facts);
   };
   const fd = fs.openSync(file, "r");
