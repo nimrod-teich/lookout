@@ -15,13 +15,13 @@ export interface SessionSort {
 
 export const DEFAULT_SORT: SessionSort = { by: "time", order: [] };
 
-/** The orders on offer, as the sort menu lists them. */
-export const SORTS: readonly { key: SortKey; label: string; detail: string }[] = [
-  { key: "time", label: "Longest in its state first", detail: "The session that has waited longest leads each group" },
-  { key: "recent", label: "Latest change first", detail: "The session whose state changed last leads each group" },
-  { key: "name", label: "Name", detail: "By title, A to Z" },
-  { key: "project", label: "Project", detail: "By project, then worktree, then title" },
-  { key: "custom", label: "Your order", detail: "As you drag the cards; new sessions come first" },
+/** The orders on offer, as the sort menu lists them; `short` is what the board's chip says. */
+export const SORTS: readonly { key: SortKey; label: string; short: string; detail: string }[] = [
+  { key: "time", label: "Longest in its state first", short: "Time", detail: "Waited longest first in each group" },
+  { key: "recent", label: "Latest change first", short: "Recent", detail: "Last state change first in each group" },
+  { key: "name", label: "Name", short: "Name", detail: "By title, A to Z" },
+  { key: "project", label: "Project", short: "Project", detail: "By project, then worktree, then title" },
+  { key: "custom", label: "Your order", short: "Yours", detail: "As you drag the cards; new ones first" },
 ];
 
 export function isSortKey(value: unknown): value is SortKey {

@@ -49,6 +49,8 @@ describe("readSort", () => {
     expect(readSort({ by: "size" })).toEqual(DEFAULT_SORT);
     expect(readSort(undefined)).toEqual(DEFAULT_SORT);
     expect(SORTS.map((s) => s.key).every(isSortKey)).toBe(true);
+    // The chip has room for a word.
+    expect(SORTS.every((s) => s.short.length <= 8)).toBe(true);
     expect(isSortKey("size")).toBe(false);
   });
 });

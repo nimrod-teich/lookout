@@ -1,5 +1,5 @@
 import type { SearchResult } from "../core/history";
-import type { SessionSort } from "../core/sorting";
+import type { SessionSort, SortKey } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import type { UsageMeter } from "../core/usage";
 
@@ -94,4 +94,6 @@ export type FromBoard =
   /** The user dragged a card: their own order of the sessions, which the board now follows. */
   | { type: "order"; ids: string[] }
   /** The user dragged a starred card: the favourites in their new order. */
-  | { type: "favouriteOrder"; ids: string[] };
+  | { type: "favouriteOrder"; ids: string[] }
+  /** The user picked an order from the board's sort chip. */
+  | { type: "sort"; by: SortKey };

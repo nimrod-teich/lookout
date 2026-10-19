@@ -13,7 +13,7 @@ Every part of Lookout, in full: the board and its cards, favourites, the Earlier
   </tr>
   <tr>
     <td><b>Order</b></td>
-    <td>Inside each group, the session that has been in its state longest comes first. The sort button on the board's title bar (<code>Lookout: Sort Sessions</code>) orders them instead by the latest change, by name, by project, or in your own order. Drag a card up or down its group to put it where you want it: the board switches to your own order, starting from the one it showed, and new sessions come first. A card stays in its group, since its group is its state. The favourites keep their own order, and a drag among them rearranges the stars. The choice and your order are kept for the machine, so every window shows them.</td>
+    <td>Inside each group, the session that has been in its state longest comes first. The sort chip at the end of the search row (<b>⇅ Time</b>) always says the order and opens a menu to change it, as does <code>Lookout: Sort Sessions</code> from the Command Palette: by the latest change, by name, by project, or in your own order. Drag a card up or down its group (a grip shows beside its rail when you point at it) to put it where you want it: the board switches to your own order and the chip reads <b>⇅ Yours</b>, starting from the one it showed, and new sessions come first. A card stays in its group, since its group is its state. The favourites keep their own order, and a drag among them rearranges the stars. The choice and your order are kept for the machine, so every window shows them.</td>
   </tr>
   <tr>
     <td><b>Parked</b></td>

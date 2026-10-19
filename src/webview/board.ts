@@ -2,7 +2,7 @@
 import { AGENTS, agentInfo, canJump, canRename, canResume, unreachable } from "../core/agents/catalog";
 import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
-import { DEFAULT_SORT, dragInto, orderViews, type SessionSort } from "../core/sorting";
+import { DEFAULT_SORT, dragInto, orderViews, SORTS, type SessionSort, type SortKey } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import { barMeter, chosenGroup, groupHeading, pickBar, sortGroups, tabMeters } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
@@ -290,7 +290,89 @@ summary.addEventListener("click", () => {
   const hide = markers && hiddenAgents.size ? [...hiddenAgents] : undefined;
   if (query !== "") vscode.postMessage(hide ? { type: "openSearch", query, hide } : { type: "openSearch", query });
 });
-search.append(field, clear, summary);
+
+// A chip that names a choice, with a small menu under it to change it: the
+// board's own, in its own style, so the choice is always in view.
+
+interface PickerOption<K extends string> {
+  key: K;
+  label: string;
+  /** What the chip says. */
+  short: string;
+  detail: string;
+}
+
+function picker<K extends string>(glyph: string, title: string, options: readonly PickerOption<K>[], pick: (key: K) => void): { element: HTMLElement; set(key: K): void } {
+  const wrap = el("span", "picker");
+  const chip = el("button", "chip-button");
+  chip.type = "button";
+  chip.title = title;
+  chip.setAttribute("aria-haspopup", "menu");
+  chip.setAttribute("aria-expanded", "false");
+  const icon = el("span", "glyph");
+  icon.innerHTML = glyph;
+  const label = el("span", "label");
+  chip.append(icon, label, el("span", "caret", "▾"));
+  const menu = el("div", "menu hidden");
+  menu.setAttribute("role", "menu");
+  let current = options[0]!.key;
+  const items = new Map<K, HTMLButtonElement>();
+  const away = (event: Event) => {
+    if (!wrap.contains(event.target as Node)) close();
+  };
+  const keys = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    close();
+    chip.focus();
+  };
+  const open = () => {
+    menu.classList.remove("hidden");
+    chip.setAttribute("aria-expanded", "true");
+    items.get(current)?.focus();
+    document.addEventListener("pointerdown", away, true);
+    document.addEventListener("keydown", keys, true);
+  };
+  const close = () => {
+    menu.classList.add("hidden");
+    chip.setAttribute("aria-expanded", "false");
+    document.removeEventListener("pointerdown", away, true);
+    document.removeEventListener("keydown", keys, true);
+  };
+  for (const option of options) {
+    const item = el("button", "item");
+    item.type = "button";
+    item.setAttribute("role", "menuitemradio");
+    item.append(el("span", "mark", "✓"), el("span", "name", option.label), el("span", "detail", option.detail));
+    item.addEventListener("click", (event) => {
+      event.stopPropagation();
+      close();
+      if (option.key !== current) pick(option.key);
+    });
+    items.set(option.key, item);
+    menu.append(item);
+  }
+  chip.addEventListener("click", () => (menu.classList.contains("hidden") ? open() : close()));
+  wrap.append(chip, menu);
+  const set = (key: K) => {
+    current = key;
+    label.textContent = options.find((option) => option.key === key)?.short ?? "";
+    for (const [other, item] of items) item.setAttribute("aria-checked", String(other === key));
+  };
+  set(current);
+  return { element: wrap, set };
+}
+
+const SORT_GLYPH =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M2.5 11 5 13.5 7.5 11M11 13.5v-11M8.5 5 11 2.5 13.5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/** The order inside each group, as a chip at the end of the search row; a pick goes to the extension, which keeps it for every window. */
+const sortPicker = picker<SortKey>(SORT_GLYPH, "How the sessions are ordered inside each group", SORTS, (by) => {
+  sort = { ...sort, by };
+  vscode.postMessage({ type: "sort", by });
+  applyFilters();
+  render();
+});
+search.append(field, clear, summary, sortPicker.element);
 beam.append(search);
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1404,6 +1486,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   if (message.earlier) earlier = message.earlier;
   favourites = message.favourites ?? { ids: [], past: [] };
   if (message.sort) sort = message.sort;
+  sortPicker.set(sort.by);
   archivePast = message.archive ?? [];
   // One group, from an extension that knew only Claude's usage, or one per agent.
   usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);

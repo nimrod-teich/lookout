@@ -776,6 +776,12 @@ describe("the extension", () => {
     stub.quickPick = () => undefined;
     await stub.commands.get("lookout.sortSessions")!();
     expect(savedGlobal["lookout.sort"]).toEqual({ by: "name", order: [SESSION, "other"] });
+    // The board's own chip: a pick keeps your order too; an unknown order is ignored.
+    boardView.receive({ type: "sort", by: "project" });
+    expect(savedGlobal["lookout.sort"]).toEqual({ by: "project", order: [SESSION, "other"] });
+    await vi.waitFor(() => expect(last()?.sort?.by).toBe("project"), WAIT);
+    boardView.receive({ type: "sort", by: "size" });
+    expect(savedGlobal["lookout.sort"]).toEqual({ by: "project", order: [SESSION, "other"] });
   }, 60_000);
 
   it("parks a session from its card, brings it back, and lets it leave Parked when it works again", async () => {

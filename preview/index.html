@@ -57,6 +57,10 @@
         sort = { by: "custom", order: m.ids };
         post(earlierScope);
       }
+      if (m.type === "sort") {
+        sort = { ...sort, by: m.by };
+        post(earlierScope);
+      }
       if (m.type === "favouriteOrder") {
         favouriteIds = m.ids;
         post(earlierScope);
