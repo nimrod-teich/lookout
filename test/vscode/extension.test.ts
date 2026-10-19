@@ -753,7 +753,7 @@ describe("the extension", () => {
     const board = stub.webviewProviders.get("lookout.board") as { resolveWebviewView(view: unknown): void };
     const boardView = createWebviewView();
     board.resolveWebviewView(boardView);
-    const last = () => boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sort?: { by: string; order: string[] }; favourites?: { ids: string[] } } | undefined;
+    const last = () => boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sort?: { by: string; order: string[] }; group?: string; favourites?: { ids: string[] } } | undefined;
     await vi.waitFor(() => expect(last()?.sort).toEqual({ by: "time", order: [] }), WAIT);
     boardView.receive({ type: "order", ids: [SESSION, "other", 7] });
     expect(savedGlobal["lookout.sort"]).toEqual({ by: "custom", order: [SESSION, "other"] });
@@ -782,6 +782,20 @@ describe("the extension", () => {
     await vi.waitFor(() => expect(last()?.sort?.by).toBe("project"), WAIT);
     boardView.receive({ type: "sort", by: "size" });
     expect(savedGlobal["lookout.sort"]).toEqual({ by: "project", order: [SESSION, "other"] });
+    // The group chip and its command: the grouping is kept and sent back; an unknown one is ignored.
+    expect(last()?.group).toBe("state");
+    boardView.receive({ type: "group", by: "project" });
+    expect(savedGlobal["lookout.group"]).toBe("project");
+    await vi.waitFor(() => expect(last()?.group).toBe("project"), WAIT);
+    boardView.receive({ type: "group", by: "size" });
+    expect(savedGlobal["lookout.group"]).toBe("project");
+    stub.quickPick = (items) => {
+      offered = (items as { label: string }[]).map((item) => item.label);
+      return (items as { key: string }[]).find((item) => item.key === "model");
+    };
+    await stub.commands.get("lookout.groupSessions")!();
+    expect(offered).toEqual(["State", "$(check) Project", "Branch", "Model", "Agent", "Window"]);
+    expect(savedGlobal["lookout.group"]).toBe("model");
   }, 60_000);
 
   it("parks a session from its card, brings it back, and lets it leave Parked when it works again", async () => {

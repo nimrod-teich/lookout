@@ -424,13 +424,15 @@ body.vscode-reduce-motion .hover-card {
 
 .search {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin: 0 12px 8px;
 }
 
+/* The field keeps room to type; on a narrow board the chips wrap under it, at the right. */
 .search .field {
-  flex: 1;
+  flex: 1 1 150px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -520,6 +522,12 @@ body.vscode-reduce-motion .hover-card {
 .picker {
   position: relative;
   flex: none;
+}
+
+.search .pickers {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .chip-button {
@@ -886,6 +894,39 @@ body.vscode-reduce-motion .hover-card {
 .heading .count {
   font-weight: 400;
   color: var(--muted);
+}
+
+/* A section by attribute: a long value is cut, and the states it holds follow the count. */
+.group-by .heading .label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heading .summary {
+  display: inline-flex;
+  gap: 7px;
+  margin-left: 4px;
+  font-size: calc(var(--vscode-font-size) - 2px);
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.heading .summary .sum {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.heading .summary .swatch {
+  width: 6px;
+  height: 6px;
+  margin-right: 0;
+}
+
+.heading .summary b {
+  font-weight: 600;
 }
 
 .heading .link {

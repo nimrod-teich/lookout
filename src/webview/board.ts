@@ -2,6 +2,7 @@
 import { AGENTS, agentInfo, canJump, canRename, canResume, unreachable } from "../core/agents/catalog";
 import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
+import { GROUPINGS, sectionsBy, type GroupBy, type Section } from "../core/grouping";
 import { DEFAULT_SORT, dragInto, orderViews, SORTS, type SessionSort, type SortKey } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import { barMeter, chosenGroup, groupHeading, pickBar, sortGroups, tabMeters } from "../core/usageGroups";
@@ -66,6 +67,8 @@ let earlier: EarlierInfo = { scope: "folders", limit: 500, capped: false };
 let favourites: Favourites = { ids: [], past: [] };
 /** How the sessions are ordered inside each group, as the extension keeps it. */
 let sort: SessionSort = DEFAULT_SORT;
+/** How the board makes its sections, as the extension keeps it. */
+let groupBy: GroupBy = "state";
 let favouritesEl: HTMLElement | undefined;
 const favouriteCards = new Map<string, HTMLElement>();
 
@@ -108,6 +111,22 @@ const archiveCards = new Map<string, HTMLElement>();
 
 function saveState(): void {
   vscode.setState({ hidden: [...hidden], folded: [...folded], earlier: earlierOpen, parked: parkedOpen, archive: archiveOpen, agents: [...hiddenAgents], usageTab });
+}
+
+/** On a section by attribute: a dot and a count per state it holds, in the legend's colours. */
+function setSummary(summary: HTMLElement, counts: Section["summary"]): void {
+  const parts = (["waiting", "done", "working", "idle", "unknown"] as const).filter((state) => counts?.[state]).map((state) => `${state}:${counts![state]}`);
+  if (summary.dataset.parts === parts.join(" ")) return;
+  summary.dataset.parts = parts.join(" ");
+  summary.textContent = "";
+  for (const state of ["waiting", "done", "working", "idle", "unknown"] as const) {
+    const count = counts?.[state];
+    if (!count) continue;
+    const item = el("span", `sum state-${state === "unknown" ? "idle" : state}`);
+    item.title = `${count} ${{ waiting: "need you", done: "finished", working: "working", idle: "idle", unknown: "state unknown" }[state]}`;
+    item.append(el("i", "swatch"), el("b", "", String(count)));
+    summary.append(item);
+  }
 }
 
 /** A click on the heading folds the group to it, or unfolds it; Parked starts folded. */
@@ -372,7 +391,19 @@ const sortPicker = picker<SortKey>(SORT_GLYPH, "How the sessions are ordered ins
   applyFilters();
   render();
 });
-search.append(field, clear, summary, sortPicker.element);
+const GROUP_GLYPH =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="2" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="2" y="9" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="9" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
+
+/** What the sections are made by, as a chip beside the sort; a pick goes to the extension, which keeps it for every window. */
+const groupPicker = picker<GroupBy>(GROUP_GLYPH, "How the board makes its sections: by state, or by what the sessions share", GROUPINGS, (by) => {
+  groupBy = by;
+  vscode.postMessage({ type: "group", by });
+  render();
+});
+// The two chips move as a pair: beside the field, or under it on a narrow board.
+const pickers = el("span", "pickers");
+pickers.append(groupPicker.element, sortPicker.element);
+search.append(field, clear, summary, pickers);
 beam.append(search);
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1352,7 +1383,7 @@ function render(): void {
   if (!meters.isConnected) beam.append(meters);
   renderBeam();
   renderMeters();
-  const groups = groupSessions(sessions);
+  const sections: Section[] = groupBy === "state" ? groupSessions(sessions).map((group) => ({ id: group.key, label: group.label, views: group.views })) : sectionsBy(sessions, groupBy);
   // While a search runs, archived sessions with matches count too: their group shows them.
   const archiveMatches = query === "" ? 0 : archivePast.filter((view) => agentShown(view.agent) && hits.has(view.id)).length;
   const pastShown = shownPast().shown.length + archiveMatches;
@@ -1390,15 +1421,19 @@ function render(): void {
   const seenIds = new Set<string>();
   const seenGroups = new Set<string>();
   let previousGroup: HTMLElement = renderFavourites(beam);
-  for (const group of groups) {
-    seenGroups.add(group.key);
-    let section = groupsEl.get(group.key);
+  for (const group of sections) {
+    seenGroups.add(group.id);
+    let section = groupsEl.get(group.id);
+    // A state section wears its state; one by attribute shows what states it holds.
+    const byState = isGroupKey(group.id);
     if (!section) {
-      section = el("section", `group group-${group.key}`);
+      section = el("section", byState ? `group group-${group.id}` : "group group-by");
       const heading = el("h2", "heading");
-      heading.append(el("i", "chev", "▸"), el("i", "swatch"), el("span", "label", group.label), el("span", "count"));
-      foldOnClick(heading, group.key);
-      if (group.key === "done") {
+      heading.append(el("i", "chev", "▸"));
+      if (byState) heading.append(el("i", "swatch"));
+      heading.append(el("span", "label", group.label), el("span", "count"), el("span", "summary"));
+      foldOnClick(heading, group.id as FoldKey);
+      if (group.id === "done") {
         const all = el("button", "link", "mark all seen");
         all.type = "button";
         all.addEventListener("click", (event) => {
@@ -1412,10 +1447,11 @@ function render(): void {
       const list = el("div", "cards");
       sortable(list, dropLive);
       section.append(heading, list);
-      groupsEl.set(group.key, section);
+      groupsEl.set(group.id, section);
     }
-    showFold(section, group.key);
+    showFold(section, group.id as FoldKey);
     section.querySelector(".count")!.textContent = String(group.views.length);
+    setSummary(section.querySelector(".summary")!, group.summary);
     if (section.previousElementSibling !== previousGroup) root.insertBefore(section, previousGroup.nextSibling);
     previousGroup = section;
     const list = section.querySelector(".cards")!;
@@ -1487,6 +1523,8 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   favourites = message.favourites ?? { ids: [], past: [] };
   if (message.sort) sort = message.sort;
   sortPicker.set(sort.by);
+  if (message.group) groupBy = message.group;
+  groupPicker.set(groupBy);
   archivePast = message.archive ?? [];
   // One group, from an extension that knew only Claude's usage, or one per agent.
   usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);

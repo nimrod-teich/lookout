@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import { countStates } from "../core/format";
 import type { SearchOutcome } from "../core/agents/agent";
+import { isGroupBy, type GroupBy } from "../core/grouping";
 import { isSortKey, type SessionSort } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "../webview/protocol";
@@ -32,6 +33,10 @@ export interface BoardActions {
   setOrder?(ids: string[]): void;
   /** The user picked an order from the board's sort chip. */
   setSort?(by: SessionSort["by"]): void;
+  /** How the board makes its sections. */
+  group?(): GroupBy;
+  /** The user picked a grouping from the board's group chip. */
+  setGroup?(by: GroupBy): void;
   /** The user dragged a starred card: the favourites in their new order. */
   orderFavourites?(ids: string[]): void;
   /** Resumes a past session in the agent's panel. */
@@ -109,6 +114,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
           archive: this.actions.archive?.().past,
           watching: this.actions.watching?.(),
           sort: this.actions.sort?.(),
+          group: this.actions.group?.(),
         };
         void this.view.webview.postMessage(message);
       }
@@ -187,6 +193,9 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
       }
       case "sort":
         if (isSortKey(message.by)) this.actions.setSort?.(message.by);
+        return;
+      case "group":
+        if (isGroupBy(message.by)) this.actions.setGroup?.(message.by);
         return;
       case "order":
       case "favouriteOrder": {
