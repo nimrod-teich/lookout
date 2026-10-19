@@ -81,6 +81,12 @@
         "title": "Search All Sessions",
         "category": "Lookout",
         "icon": "$(search)"
+      },
+      {
+        "command": "lookout.sortSessions",
+        "title": "Sort Sessions",
+        "category": "Lookout",
+        "icon": "$(sort-precedence)"
       }
     ],
     "menus": {
@@ -88,7 +94,12 @@
         {
           "command": "lookout.search",
           "when": "view == lookout.board",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "lookout.sortSessions",
+          "when": "view == lookout.board",
+          "group": "navigation@2"
         }
       ]
     },

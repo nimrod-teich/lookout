@@ -256,6 +256,16 @@ export class Controller implements vscode.Disposable {
     this.poll();
   }
 
+  /** Puts the starred sessions in the order the user dragged them into; stars it does not name keep theirs, behind. */
+  orderFavourites(ids: readonly string[]): void {
+    const stars = this.favouriteIds();
+    const placed = ids.filter((id, i) => stars.includes(id) && ids.indexOf(id) === i);
+    const next = [...placed, ...stars.filter((id) => !placed.includes(id))];
+    if (next.join("\n") === stars.join("\n")) return;
+    void this.host.globalState.update(FAVOURITES_KEY, next);
+    this.poll();
+  }
+
   /** The sessions the user archived in Lookout, newest archive first, and those of them that are not running. */
   get archive(): { ids: string[]; past: PastView[] } {
     return { ids: this.archiveIds(), past: this.archivePast };

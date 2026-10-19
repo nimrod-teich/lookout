@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import { countStates } from "../core/format";
 import type { SearchOutcome } from "../core/agents/agent";
+import type { SessionSort } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "../webview/protocol";
 
@@ -25,6 +26,12 @@ export interface BoardActions {
   toggleArchive?(id: string): void;
   /** Parks a running session whose turn is over, or brings a parked one back. */
   togglePark?(id: string): void;
+  /** How the sessions are ordered inside each group. */
+  sort?(): SessionSort;
+  /** The user dragged a card: their own order, which the board now follows. */
+  setOrder?(ids: string[]): void;
+  /** The user dragged a starred card: the favourites in their new order. */
+  orderFavourites?(ids: string[]): void;
   /** Resumes a past session in the agent's panel. */
   resume(id: string): void;
   /** One agent's usage, or each agent's. */
@@ -99,6 +106,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
           favourites: this.actions.favourites(),
           archive: this.actions.archive?.().past,
           watching: this.actions.watching?.(),
+          sort: this.actions.sort?.(),
         };
         void this.view.webview.postMessage(message);
       }
@@ -173,6 +181,13 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         if (typeof id !== "string" || !this.actions.toggleArchive) return;
         const known = this.actions.past().some((p) => p.id === id) || this.actions.favourites().past.some((p) => p.id === id) || (this.actions.archive?.().ids.includes(id) ?? false);
         if (known) this.actions.toggleArchive(id);
+        return;
+      }
+      case "order":
+      case "favouriteOrder": {
+        const ids = Array.isArray(message.ids) ? message.ids.filter((id): id is string => typeof id === "string") : [];
+        if (message.type === "order") this.actions.setOrder?.(ids);
+        else this.actions.orderFavourites?.(ids);
         return;
       }
       case "park": {

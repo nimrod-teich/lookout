@@ -1263,6 +1263,19 @@ body.vscode-reduce-motion .hover-card {
   height: 12px;
 }
 
+/* Dragging a card into another place in its group: a line where it goes. */
+.card.dragging {
+  opacity: 0.4;
+}
+
+.card.drop-before {
+  box-shadow: 0 -3px 0 -1px var(--vscode-focusBorder);
+}
+
+.card.drop-after {
+  box-shadow: 0 3px 0 -1px var(--vscode-focusBorder);
+}
+
 /* Parked: out of the way, quieter until pointed at. */
 .group-parked .card:not(:hover) {
   opacity: 0.75;

@@ -7,6 +7,7 @@ import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
+import { readSort, SORTS, type SessionSort } from "./core/sorting";
 import type { SessionView } from "./core/types";
 import { pickBar } from "./core/usageGroups";
 import { Board, BOARD_VIEW } from "./vscode/board";
@@ -33,6 +34,9 @@ const MARK_ALL_SEEN = "lookout.markAllSeen";
 const SHOW_BOARD = "lookout.showBoard";
 const REFRESH_USAGE = "lookout.refreshUsage";
 const SEARCH = "lookout.search";
+const SORT = "lookout.sortSessions";
+/** How the board orders the sessions in each group, and the user's own order; kept for every window. */
+const SORT_KEY = "lookout.sort";
 
 /** WSL reports itself as Linux; its kernel says otherwise. */
 function insideWsl(): boolean {
@@ -194,6 +198,11 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     open: openHit,
   });
+  const sort = () => readSort(context.globalState.get<unknown>(SORT_KEY));
+  const setSort = (next: SessionSort) => {
+    void context.globalState.update(SORT_KEY, next);
+    board.refresh();
+  };
   const board = new Board(context.extensionUri, {
     sessions: () => controller.sessions,
     past: () => controller.past,
@@ -203,6 +212,9 @@ export function activate(context: vscode.ExtensionContext): void {
     toggleFavourite: (id) => controller.toggleFavourite(id),
     archive: () => controller.archive,
     togglePark: (id) => controller.togglePark(id),
+    sort,
+    setOrder: (ids) => setSort({ by: "custom", order: readSort({ order: ids }).order }),
+    orderFavourites: (ids) => controller.orderFavourites(ids),
     toggleArchive: (id) => controller.toggleArchive(id),
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
@@ -307,6 +319,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(MARK_ALL_SEEN, markAllSeen),
     vscode.commands.registerCommand(SHOW_BOARD, () => vscode.commands.executeCommand(`${BOARD_VIEW}.focus`)),
     vscode.commands.registerCommand(SEARCH, () => searchPage.show("")),
+    vscode.commands.registerCommand(SORT, async () => {
+      const current = sort();
+      const items = SORTS.map((option) => ({ label: option.key === current.by ? `$(check) ${option.label}` : option.label, description: option.detail, key: option.key }));
+      const picked = await vscode.window.showQuickPick(items, { placeHolder: "Order the sessions in each group" });
+      if (picked) setSort({ ...current, by: picked.key });
+    }),
     vscode.commands.registerCommand(REFRESH_USAGE, async () => {
       if (!controller.canRefreshUsage) {
         void vscode.window.showInformationMessage(`Lookout can't fetch usage: ${controller.usageNote ?? "usage refresh is off"}.`);
