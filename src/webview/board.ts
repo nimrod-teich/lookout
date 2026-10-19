@@ -386,8 +386,14 @@ const SORT_GLYPH =
 
 /** The order inside each group, as a chip at the end of the search row; a pick goes to the extension, which keeps it for every window. */
 const sortPicker = picker<SortKey>(SORT_GLYPH, "How the sessions are ordered inside each group", SORTS, (by) => {
-  sort = { ...sort, by };
-  vscode.postMessage({ type: "sort", by });
+  // Your order starts from the one on screen, the first time it is picked.
+  if (by === "custom" && sort.order.length === 0) {
+    sort = { by, order: sessions.map((view) => view.id) };
+    vscode.postMessage({ type: "order", ids: sort.order });
+  } else {
+    sort = { ...sort, by };
+    vscode.postMessage({ type: "sort", by });
+  }
   applyFilters();
   render();
 });
@@ -564,10 +570,9 @@ function sortable(list: HTMLElement, drop: (moved: string, before: string | unde
   });
 }
 
-/** A drop in a state group: the user's own order, from the one shown when it was another. */
+/** A drop in a group: the user's own order, which is the one shown, since a card drags only in it. */
 function dropLive(moved: string, before: string | undefined, shown: string[]): void {
-  const from = sort.by === "custom" ? sort.order : sessions.map((view) => view.id);
-  sort = { by: "custom", order: dragInto(from, shown, moved, before) };
+  sort = { by: "custom", order: dragInto(sort.order, shown, moved, before) };
   vscode.postMessage({ type: "order", ids: sort.order });
   applyFilters();
   render();
@@ -798,7 +803,6 @@ function agentPrefix(agent: string): string {
 function createCard(view: SessionView): HTMLElement {
   const card = el("button", "card");
   card.type = "button";
-  card.draggable = true;
   card.dataset.id = view.id;
   card.append(el("span", "rail"));
   const main = el("span", "main");
@@ -917,6 +921,8 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   card.classList.toggle("seen", (view as { seen?: boolean }).seen === true);
   card.title = cardTitle(view);
   setPark(card, view);
+  // A card drags only in the user's own order: no other order changes behind their back.
+  card.draggable = sort.by === "custom";
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = elapsedText(view);
   setStar(card, view.id);
