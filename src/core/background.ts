@@ -69,7 +69,7 @@ export class BackgroundReads {
         this.current = index;
         const job = index.scan();
         // A file never read: from where a window saved its messages' places, when one did.
-        if (job && this.saved && job.from === 0 && job.identity === "") job.saved = this.saved.entryFile(job.file);
+        if (job && this.saved && job.from === 0 && job.identity === "") job.saved = { entry: this.saved.entryFile(job.file), build: this.saved.build };
         const scanned = job ? await this.scan(job) : undefined;
         this.current = undefined;
         if (this.disposed) return;

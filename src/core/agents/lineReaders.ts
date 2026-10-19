@@ -13,7 +13,7 @@ export const LINE_READERS: Readonly<Record<string, LineReader>> = Object.fromEnt
 export function runScan(job: Scan): Scanned | undefined {
   const reader = LINE_READERS[job.reader];
   if (!reader) return undefined;
-  const saved = job.saved ? readSaved(job.saved, job) : undefined;
+  const saved = job.saved ? readSaved(job.saved.entry, job, job.saved.build) : undefined;
   return scanFile(job.file, reader, job.from, job.identity, saved);
 }
 

@@ -206,12 +206,12 @@ describe("the reading thread", () => {
     const file = transcript(3, "deploy");
     const whole = new HistoryIndex(file, TRANSCRIPT_LINES);
     whole.refresh();
-    const saved = new SavedPositions(path.join(tempConfigDir(), "positions"));
+    const saved = new SavedPositions(path.join(tempConfigDir(), "positions"), "build-1");
     saved.later(whole);
     saved.dispose();
     const scanner = new WorkerScanner(path.join(dir, "dist", "reader.js"));
     try {
-      const scanned = await scanner.scan({ file, reader: TRANSCRIPT_LINES.name!, from: 0, identity: "", saved: saved.entryFile(file) });
+      const scanned = await scanner.scan({ file, reader: TRANSCRIPT_LINES.name!, from: 0, identity: "", saved: { entry: saved.entryFile(file), build: "build-1" } });
       expect(scanned?.restored).toBe(fs.statSync(file).size);
       expect(scanned?.lines.map((line) => line.facts.message?.text)).toEqual(whole.messages.map((m) => m.text));
     } finally {

@@ -12,8 +12,8 @@ const SAVE_AFTER_MS = 5_000;
 /** A save left half done by a window that went away, older than this, is cleared. */
 const STALE_TEMP_MS = 3_600_000;
 
-/** The positions of a conversation, as saved in `entryFile`; none when the entry is missing, unreadable, or not for this file and reader. */
-export function readSaved(entryFile: string, job: Pick<Scan, "file" | "reader">): SavedEntry | undefined {
+/** The positions of a conversation, as saved in `entryFile`; none when the entry is missing, unreadable, or not for this file, reader and build. */
+export function readSaved(entryFile: string, job: Pick<Scan, "file" | "reader">, build: string): SavedEntry | undefined {
   let entry: unknown;
   try {
     entry = JSON.parse(fs.readFileSync(entryFile, "utf8"));
@@ -21,7 +21,7 @@ export function readSaved(entryFile: string, job: Pick<Scan, "file" | "reader">)
     return undefined;
   }
   const e = entry as Partial<SavedEntry> | null;
-  if (!e || e.v !== 1 || e.file !== job.file || e.reader !== job.reader || typeof e.identity !== "string" || !Number.isSafeInteger(e.end) || e.end! < 0) return undefined;
+  if (!e || e.v !== 1 || e.build !== build || e.file !== job.file || e.reader !== job.reader || typeof e.identity !== "string" || typeof e.tail !== "string" || !Number.isSafeInteger(e.end) || e.end! < 0) return undefined;
   const end = e.end!;
   const places = (list: unknown): list is number[] =>
     Array.isArray(list) && list.length % 2 === 0 && list.every((n, i) => Number.isSafeInteger(n) && (n as number) >= (i % 2 ? 1 : 0)) && list.every((n, i) => i % 2 === 1 || (n as number) + (list[i + 1] as number) <= end);
@@ -36,8 +36,14 @@ export function readSaved(entryFile: string, job: Pick<Scan, "file" | "reader">)
 export class SavedPositions {
   private readonly dirty = new Set<HistoryIndex>();
   private timer: ReturnType<typeof setTimeout> | undefined;
+  /** Saves made by this window, for temporary names no other save of it shares. */
+  private saves = 0;
 
-  constructor(private readonly dir: string) {}
+  constructor(
+    private readonly dir: string,
+    /** The build of the reading code: entries saved by another are read whole, then cleared. */
+    readonly build: string,
+  ) {}
 
   /** Where a conversation file's entry is kept. */
   entryFile(file: string): string {
@@ -58,10 +64,10 @@ export class SavedPositions {
     const indexes = [...this.dirty];
     this.dirty.clear();
     for (const index of indexes) {
-      const entry = index.savedEntry();
+      const entry = this.entryOf(index);
       if (!entry) continue;
       const target = this.entryFile(entry.file);
-      const temp = `${target}.${process.pid}.tmp`;
+      const temp = this.tempFor(target);
       try {
         await fs.promises.mkdir(this.dir, { recursive: true });
         await fs.promises.writeFile(temp, JSON.stringify(entry));
@@ -80,10 +86,10 @@ export class SavedPositions {
     const indexes = [...this.dirty];
     this.dirty.clear();
     for (const index of indexes) {
-      const entry = index.savedEntry();
+      const entry = this.entryOf(index);
       if (!entry) continue;
       const target = this.entryFile(entry.file);
-      const temp = `${target}.${process.pid}.tmp`;
+      const temp = this.tempFor(target);
       try {
         fs.mkdirSync(this.dir, { recursive: true });
         fs.writeFileSync(temp, JSON.stringify(entry));
@@ -94,7 +100,17 @@ export class SavedPositions {
     }
   }
 
-  /** Deletes the entries of conversation files that are gone, and saves left half done long ago. */
+  private entryOf(index: HistoryIndex): SavedEntry | undefined {
+    const places = index.places();
+    return places && { ...places, build: this.build };
+  }
+
+  /** A name no other save shares, this window's or another's: two saves of one entry never write into one file. */
+  private tempFor(target: string): string {
+    return `${target}.${process.pid}.${++this.saves}.tmp`;
+  }
+
+  /** Deletes the entries of conversation files that are gone, those of another build, and saves left half done long ago. */
   async prune(now: number = Date.now()): Promise<void> {
     let names: string[];
     try {
@@ -110,9 +126,9 @@ export class SavedPositions {
           continue;
         }
         if (!name.endsWith(".json")) continue;
-        const entry = JSON.parse(await fs.promises.readFile(full, "utf8")) as { file?: unknown };
+        const entry = JSON.parse(await fs.promises.readFile(full, "utf8")) as { file?: unknown; build?: unknown };
         const file = typeof entry?.file === "string" ? entry.file : undefined;
-        if (!file || !(await exists(file))) await fs.promises.rm(full, { force: true });
+        if (!file || entry.build !== this.build || !(await exists(file))) await fs.promises.rm(full, { force: true });
       } catch {
         // An entry that does not parse is of no use either.
         await fs.promises.rm(full, { force: true }).catch(() => undefined);

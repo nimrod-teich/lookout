@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import type { BackgroundReads } from "./background";
 import { inRange, matchRanges, termsOf, type TimeRange } from "./terms";
@@ -40,8 +41,12 @@ export interface Scan {
   from: number;
   /** The file's identity at the last read; another one means the file was replaced, and is read from its start. */
   identity: string;
-  /** For a file never read: where a window saved the places of its messages (see `SavedPositions`), to read only those and what came after. */
-  saved?: string;
+  /**
+   * For a file never read: where a window saved the places of its messages
+   * (see `SavedPositions`), to read only those and what came after, and the
+   * build of the reading code they must come from.
+   */
+  saved?: { entry: string; build: string };
 }
 
 /** A line that holds facts, and where it sits in its file. */
@@ -70,16 +75,26 @@ export interface Scanned {
   lines: FactLine[];
   /** Its messages up to here were taken from the places a window saved, and only what came after was read. */
   restored?: number;
+  /** What the file holds just before `end` (see `tailOf`); none when the file could not be read. */
+  tail?: string;
 }
 
 /** Where a conversation's messages and paths sit in its file, as a window saved them: positions, no text. */
-export interface SavedEntry {
+export interface SavedEntry extends Places {
+  /** The build of the reading code that found them: another build may find more, and reads the file whole. */
+  build: string;
+}
+
+/** Where an index found its messages and paths, and how far it read the file. */
+export interface Places {
   v: 1;
   file: string;
   reader: string;
   identity: string;
   /** How far the file was read. */
   end: number;
+  /** What the file held just before `end`: a file rewritten in place since does not match. */
+  tail: string;
   /** Each message's line, start and length in turn, in the conversation's order. */
   messages: number[];
   /** Each path that a line of paths alone named, where it is written as a JSON string, start and length in turn. */
@@ -94,7 +109,7 @@ export interface SavedEntry {
  * `saved` places still fit it is read at those places, and from where they
  * end; a file that does not fit them is read whole.
  */
-export function scanFile(file: string, reader: LineReader, from: number, identity: string, saved?: SavedEntry): Scanned | undefined {
+export function scanFile(file: string, reader: LineReader, from: number, identity: string, saved?: Places): Scanned | undefined {
   let st: fs.Stats;
   try {
     st = fs.statSync(file);
@@ -102,20 +117,20 @@ export function scanFile(file: string, reader: LineReader, from: number, identit
     return undefined;
   }
   const now = `${st.ino}:${st.birthtimeMs}`;
-  if (saved && from === 0 && identity === "" && saved.identity === now && saved.end <= st.size) {
+  if (saved && from === 0 && identity === "" && saved.identity === now && saved.end <= st.size && saved.tail === tailOf(file, saved.end)) {
     const restored = restoreLines(file, reader, saved);
     if (restored) {
       const after = scanFile(file, reader, saved.end, now);
-      if (after && !after.reset) return { identity: now, size: after.size, reset: true, end: after.end, lines: [...restored, ...after.lines], restored: saved.end };
+      if (after && !after.reset) return { identity: now, size: after.size, reset: true, end: after.end, lines: [...restored, ...after.lines], restored: saved.end, tail: after.tail };
     }
   }
   const reset = now !== identity || st.size < from;
   const start = reset ? 0 : from;
   const lines: FactLine[] = [];
-  if (st.size === start) return { identity: now, size: st.size, reset, end: start, lines };
+  if (st.size === start) return { identity: now, size: st.size, reset, end: start, lines, tail: tailOf(file, start) };
   try {
     const end = readLines(file, start, reader, (line) => lines.push(line));
-    return { identity: now, size: st.size, reset, end, lines };
+    return { identity: now, size: st.size, reset, end, lines, tail: tailOf(file, end) };
   } catch {
     // A file that cannot be read (not ours to read, held by another process) is tried again once it changes,
     // not at every look; a replaced one is at least emptied of what was read before.
@@ -123,33 +138,68 @@ export function scanFile(file: string, reader: LineReader, from: number, identit
   }
 }
 
+/** The bytes a file's tail is known by: those just before `end`. */
+const TAIL_BYTES = 4096;
+
+/** A digest of what the file holds just before `end`; none when that cannot be read. */
+export function tailOf(file: string, end: number): string | undefined {
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const length = Math.min(end, TAIL_BYTES);
+      const bytes = Buffer.alloc(length);
+      if (fs.readSync(fd, bytes, 0, length, end - length) !== length) return undefined;
+      return crypto.createHash("sha1").update(bytes).digest("hex").slice(0, 20);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+const NEWLINE_BYTE = 0x0a;
+/** What JSON writes just before a string (a value, an array item, a key) and just after it. */
+const BEFORE_STRING = new Set([0x3a, 0x2c, 0x5b, 0x7b]);
+const AFTER_STRING = new Set([0x2c, 0x7d, 0x5d, 0x3a]);
+
 /** The lines at the saved places, read again; none when one of them no longer holds what it held. */
-function restoreLines(file: string, reader: LineReader, saved: SavedEntry): FactLine[] | undefined {
+function restoreLines(file: string, reader: LineReader, saved: Places): FactLine[] | undefined {
   let fd: number;
   try {
     fd = fs.openSync(file, "r");
   } catch {
     return undefined;
   }
-  const read = (start: number, length: number): Buffer | undefined => {
-    const buffer = Buffer.allocUnsafe(length);
-    return fs.readSync(fd, buffer, 0, length, start) === length ? buffer : undefined;
+  /** The bytes at the place, with the one before and the one after it to check where it sits. */
+  const read = (start: number, length: number): { bytes: Buffer; before: number | undefined; after: number } | undefined => {
+    const from = Math.max(0, start - 1);
+    const buffer = Buffer.allocUnsafe(start - from + length + 1);
+    if (fs.readSync(fd, buffer, 0, buffer.length, from) !== buffer.length) return undefined;
+    return { bytes: buffer.subarray(start - from, start - from + length), before: start > 0 ? buffer[0] : undefined, after: buffer[buffer.length - 1]! };
+  };
+  /** A whole line sits there: it starts the file or follows a line's end, and a line's end follows it. */
+  const line = (start: number, length: number): Buffer | undefined => {
+    const at = read(start, length);
+    return at && (at.before === undefined || at.before === NEWLINE_BYTE) && at.after === NEWLINE_BYTE ? at.bytes : undefined;
   };
   try {
     const lines: FactLine[] = [];
     for (let i = 0; i < saved.messages.length; i += 2) {
       const [start, length] = [saved.messages[i]!, saved.messages[i + 1]!];
-      const bytes = read(start, length);
+      const bytes = line(start, length);
       const facts = bytes && reader.facts(bytes.toString("utf8"));
       if (!facts?.message) return undefined;
       lines.push({ facts, start, length });
     }
     for (let i = 0; i < saved.paths.length; i += 2) {
       const [start, length] = [saved.paths[i]!, saved.paths[i + 1]!];
-      const bytes = read(start, length);
+      const at = read(start, length);
+      // A string where JSON puts one: after a colon, a comma or an opening bracket, before a comma, a colon or a closing one.
+      if (!at || at.before === undefined || !BEFORE_STRING.has(at.before) || !AFTER_STRING.has(at.after)) return undefined;
       let written: unknown;
       try {
-        written = bytes && JSON.parse(bytes.toString("utf8"));
+        written = JSON.parse(at.bytes.toString("utf8"));
       } catch {
         return undefined;
       }
@@ -158,7 +208,7 @@ function restoreLines(file: string, reader: LineReader, saved: SavedEntry): Fact
     }
     for (let i = 0; i < saved.pathLines.length; i += 2) {
       const [start, length] = [saved.pathLines[i]!, saved.pathLines[i + 1]!];
-      const bytes = read(start, length);
+      const bytes = line(start, length);
       const facts = bytes && reader.facts(bytes.toString("utf8"));
       if (!facts?.paths?.length) return undefined;
       lines.push({ facts, start, length });
@@ -338,6 +388,8 @@ export class HistoryIndex {
   private readonly pathAt: number[] = [];
   /** The lines of paths alone whose new paths are not all written as plain strings, start and length in turn. */
   private readonly pathLineAt: number[] = [];
+  /** What the file held just before `offset`, at the last read. */
+  private tail: string | undefined;
 
   constructor(
     readonly file: string,
@@ -398,6 +450,7 @@ export class HistoryIndex {
     this.offset = scanned.end;
     this.identity = scanned.identity;
     this.seenSize = scanned.size;
+    this.tail = scanned.tail;
     return true;
   }
 
@@ -416,10 +469,10 @@ export class HistoryIndex {
     for (const p of paths) this.paths.add(pathKey(p));
   }
 
-  /** Where its messages and paths sit in the file, for the next window; none before the file is read, or without a reader name. */
-  savedEntry(): SavedEntry | undefined {
-    if (!this.reader.name || !this.ready) return undefined;
-    return { v: 1, file: this.file, reader: this.reader.name, identity: this.identity, end: this.offset, messages: [...this.messageAt], paths: [...this.pathAt], pathLines: [...this.pathLineAt] };
+  /** Where its messages and paths sit in the file, for the next window; none before the file is read, or after a read that failed. */
+  places(): Places | undefined {
+    if (!this.reader.name || !this.ready || this.tail === undefined) return undefined;
+    return { v: 1, file: this.file, reader: this.reader.name, identity: this.identity, end: this.offset, tail: this.tail, messages: [...this.messageAt], paths: [...this.pathAt], pathLines: [...this.pathLineAt] };
   }
 
   /** Holds these messages instead of the ones it held. */

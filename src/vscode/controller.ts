@@ -1,3 +1,5 @@
+import * as crypto from "node:crypto";
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
@@ -232,7 +234,8 @@ export class Controller implements vscode.Disposable {
     this.alerts.prune(Date.now());
     this.ledger.prune(Date.now());
     const script = host.readerScript;
-    const saved = script && host.savedPositionsDir ? new SavedPositions(host.savedPositionsDir) : undefined;
+    const build = script && host.savedPositionsDir ? buildOf(script) : undefined;
+    const saved = build && host.savedPositionsDir ? new SavedPositions(host.savedPositionsDir, build) : undefined;
     this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error), saved) : undefined;
     if (saved) this.pruneTimer = setTimeout(() => void saved.prune(), PRUNE_AFTER_MS);
   }
@@ -948,6 +951,15 @@ export class Controller implements vscode.Disposable {
     this.thresholdReached.dispose();
     this.finished.dispose();
     this.waiting.dispose();
+  }
+}
+
+/** The build of the reading thread's bundle, which saved places must come from; none when it cannot be read. */
+function buildOf(script: string): string | undefined {
+  try {
+    return crypto.createHash("sha1").update(fs.readFileSync(script)).digest("hex").slice(0, 20);
+  } catch {
+    return undefined;
   }
 }
 
