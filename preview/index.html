@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting. -->
+<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups. -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -64,7 +64,7 @@
         post(earlierScope);
       }
     },
-    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), earlier: params.get("earlier") === "1", archive: params.get("archiveOpen") === "1", agents: (params.get("hideAgents") ?? "").split(",").filter(Boolean) }),
+    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), folded: (params.get("fold") ?? "").split(",").filter(Boolean), earlier: params.get("earlier") === "1", archive: params.get("archiveOpen") === "1", agents: (params.get("hideAgents") ?? "").split(",").filter(Boolean) }),
     setState: () => {},
   });
   window.addEventListener("load", async () => {

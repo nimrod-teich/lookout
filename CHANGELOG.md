@@ -2,6 +2,7 @@
 
 ## 0.1.1
 
+- **Fold any group.** A click on the heading of Favourites, Needs you, Finished, Working or Idle folds the group to its heading and count, as Earlier and Archived already did; another click opens it again. The board remembers which groups are folded, and a search opens them all while it runs.
 - **Usage refresh waits when Anthropic asks.** When the usage endpoint answers 429, as it does when another app polls it for the same account, Lookout starts no refresh before the wait its `Retry-After` asks, in any window and `Lookout: Refresh Usage` included, and with no numbers to show the board and the status bar's hover say "Too many usage checks; next at 14:05".
 - **Why there are no numbers.** A sign-in without plan limits (an API key, Bedrock or Vertex, or a long-lived token) says "No plan limits for this sign-in". A refresh that brings nothing logs why: the binary's own reason, the end of what it wrote to stderr, or that it gave no answer within 20 seconds.
 
