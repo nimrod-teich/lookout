@@ -1,19 +1,41 @@
 name: Release
 
 # Pushing a tag like v0.1.0 builds the extension and publishes a GitHub Release with the .vsix
-# attached and that version's changelog as its notes; then Publish (publish.yml) sends the same
-# .vsix to the Visual Studio Marketplace and to Open VSX, each on its own. A registry that
-# refuses can be finished later by running Publish by hand with the tag.
+# attached and that version's changelog as its notes; then one job per registry publishes that
+# Release's .vsix, with no stored token:
+#
+# - Visual Studio Marketplace: a user-assigned managed identity in Azure signs in through this
+#   run's OIDC token (a federated credential for the GitHub environment "marketplace") and
+#   publishes with `vsce --azure-credential`. Repository variables AZURE_CLIENT_ID and
+#   AZURE_TENANT_ID name it; without them the Marketplace is skipped. docs/development.md has
+#   the setup.
+# - Open VSX: trusted publishing. Open VSX trusts this file, release.yml, by name, so its
+#   publishing has to stay in it.
+#
+# The two jobs run whatever the other does, and each skips a version its registry already has,
+# so a release a registry refused is finished by running this workflow by hand with the tag
+# (Actions → Release → Run workflow): that skips building and goes straight to the registries.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release to publish to the registries, e.g. v0.1.1"
+        required: true
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   release:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,9 +70,67 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" "lookout-$VERSION.vsix" --title "Lookout $VERSION" --notes-file release-notes.md
 
-  publish:
+  marketplace:
     needs: release
-    uses: ./.github/workflows/publish.yml
-    with:
-      tag: ${{ github.ref_name }}
-    secrets: inherit
+    # After the Release on a tag push; on its own when run by hand.
+    if: ${{ !cancelled() && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    # The managed identity's federated credential trusts this environment, whatever the ref.
+    environment: marketplace
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Skip without an identity
+        if: vars.AZURE_CLIENT_ID == '' || vars.AZURE_TENANT_ID == ''
+        run: |
+          echo "::warning::No AZURE_CLIENT_ID and AZURE_TENANT_ID repository variables: the Marketplace is skipped"
+      - uses: actions/setup-node@v4
+        if: vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != ''
+        with:
+          node-version: 22
+      - name: Download the release's package
+        if: vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "*.vsix"
+      - name: Sign in to Azure as the publishing identity
+        if: vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != ''
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Check the identity may publish
+        if: vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != ''
+        run: |
+          publisher="$(unzip -p ./*.vsix extension/package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).publisher')"
+          if npx --yes @vscode/vsce@4.0.0 verify-pat --azure-credential "$publisher"; then exit 0; fi
+          # Not a member yet: the publisher's Members page knows the identity only by its Azure DevOps
+          # profile ID, which exists once the identity has called Azure DevOps, as this does.
+          profile="$(az rest -u https://app.vssps.visualstudio.com/_apis/profile/profiles/me --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id -o tsv)"
+          echo "::error::The publishing identity may not publish for $publisher. At https://marketplace.visualstudio.com/manage/publishers/$publisher, Members, add $profile as Contributor, then run Release by hand with the tag $TAG."
+          exit 1
+      - name: Publish to the Visual Studio Marketplace
+        if: vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != ''
+        run: npx --yes @vscode/vsce@4.0.0 publish --azure-credential --packagePath ./*.vsix --skip-duplicate
+
+  openvsx:
+    needs: release
+    if: ${{ !cancelled() && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Trusted publishing: Open VSX exchanges this run's OIDC token for a short-lived one.
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download the release's package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "*.vsix"
+      # No token: a token passed would take precedence over trusted publishing.
+      - name: Publish to Open VSX
+        run: npx --yes ovsx@1.2.0 publish ./*.vsix --trusted-publishing --skip-duplicate
