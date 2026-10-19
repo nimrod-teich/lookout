@@ -23,7 +23,7 @@ export const SORTS: readonly { key: SortKey; label: string; short: string; detai
   { key: "project", label: "Project", short: "Project", detail: "By project, then worktree, then title" },
   { key: "tokens", label: "Most tokens first", short: "Tokens", detail: "Input, output and cache together" },
   { key: "cost", label: "Most expensive first", short: "Price", detail: "At API list rates; sessions without a price last" },
-  { key: "custom", label: "Your order", short: "Yours", detail: "As you drag the cards; new ones first" },
+  { key: "custom", label: "Your order", short: "Yours", detail: "Drag the cards to arrange them; new ones first" },
 ];
 
 export function isSortKey(value: unknown): value is SortKey {
