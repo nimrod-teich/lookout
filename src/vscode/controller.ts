@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import { AgentHostSessions } from "../core/agentHost";
 import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents/agent";
 import { BackgroundReads } from "../core/background";
+import { SavedPositions } from "../core/savedPositions";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
@@ -60,6 +61,8 @@ const SEARCH_BUDGET_MS = 150;
 const READ_AHEAD_AFTER_MS = 3000;
 /** And then looked at again at most this often, for what the live ones gained. */
 const READ_AHEAD_MS = 2000;
+/** The saved places of conversations that are gone are cleared this long after the window opens. */
+const PRUNE_AFTER_MS = 60_000;
 /**
  * The agent can write to the transcript a moment after it records a state:
  * a prompt's tool call, a turn's last reply. An announcement looks again
@@ -91,6 +94,8 @@ export interface ControllerHost {
   globalStorageDir: string;
   /** The bundle of the thread that reads the conversations (`dist/reader.js`); without one, a search reads them here, a little at a time. */
   readerScript?: string;
+  /** Where the places of each conversation's messages are kept for the next window (positions, no text), when they are read in a thread of their own. */
+  savedPositionsDir?: string;
   /**
    * The agent's tabs open in this window whose session is not running: after
    * a reload the agent restores its tabs but starts a session only once its
@@ -203,6 +208,7 @@ export class Controller implements vscode.Disposable {
   /** When the conversations are next read ahead of any search. */
   private readAheadAt = Infinity;
   private readAheadTimer: ReturnType<typeof setTimeout> | undefined;
+  private pruneTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly host: ControllerHost,
@@ -226,7 +232,9 @@ export class Controller implements vscode.Disposable {
     this.alerts.prune(Date.now());
     this.ledger.prune(Date.now());
     const script = host.readerScript;
-    this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error)) : undefined;
+    const saved = script && host.savedPositionsDir ? new SavedPositions(host.savedPositionsDir) : undefined;
+    this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error), saved) : undefined;
+    if (saved) this.pruneTimer = setTimeout(() => void saved.prune(), PRUNE_AFTER_MS);
   }
 
   /** A search's results fill in as the conversations are read in the background, so nobody needs to ask again. */
@@ -924,6 +932,7 @@ export class Controller implements vscode.Disposable {
     if (this.debounce) clearTimeout(this.debounce);
     if (this.fill) clearTimeout(this.fill);
     if (this.readAheadTimer) clearTimeout(this.readAheadTimer);
+    if (this.pruneTimer) clearTimeout(this.pruneTimer);
     this.background?.dispose();
     this.read.dispose();
     for (const timer of this.announcing) clearTimeout(timer);

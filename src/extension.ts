@@ -71,6 +71,7 @@ export function activate(context: vscode.ExtensionContext): void {
       globalStorageDir: path.dirname(context.globalStorageUri.fsPath),
       restoredTabs: () => ({ labels: claudeTabLabels(), label: claudeTabLabel }),
       readerScript: fs.existsSync(readerScript) ? readerScript : undefined,
+      savedPositionsDir: path.join(context.globalStorageUri.fsPath, "search-positions"),
     },
     terminals,
     log,

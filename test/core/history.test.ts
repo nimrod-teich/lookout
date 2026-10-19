@@ -221,19 +221,19 @@ describe("scanFile", () => {
     const f = file([{ role: "you", text: "one" }]);
     const first = scanFile(f, READER, 0, "")!;
     expect(first).toMatchObject({ reset: true, end: fs.statSync(f).size });
-    expect(first.facts.map((facts) => facts.message?.text)).toEqual(["one"]);
+    expect(first.lines.map((line) => line.facts.message?.text)).toEqual(["one"]);
     fs.appendFileSync(f, `${JSON.stringify({ role: "agent", text: "two" })}\n${JSON.stringify({ role: "you", text: "unfinished" })}`);
     const next = scanFile(f, READER, first.end, first.identity)!;
     expect(next.reset).toBe(false);
-    expect(next.facts.map((facts) => facts.message?.text)).toEqual(["two"]);
+    expect(next.lines.map((line) => line.facts.message?.text)).toEqual(["two"]);
     // The unfinished line is read again next time, once it ends.
     expect(next.end).toBeLessThan(next.size);
     // Nothing new.
-    expect(scanFile(f, READER, next.end, next.identity)?.facts).toEqual([]);
+    expect(scanFile(f, READER, next.end, next.identity)?.lines).toEqual([]);
     fs.writeFileSync(f, `${JSON.stringify({ role: "you", text: "short" })}\n`);
     const cut = scanFile(f, READER, next.end, next.identity)!;
     expect(cut.reset).toBe(true);
-    expect(cut.facts.map((facts) => facts.message?.text)).toEqual(["short"]);
+    expect(cut.lines.map((line) => line.facts.message?.text)).toEqual(["short"]);
     expect(scanFile(path.join(tempConfigDir(), "missing.jsonl"), READER, 0, "")).toBeUndefined();
   });
 });
