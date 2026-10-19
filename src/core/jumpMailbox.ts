@@ -25,14 +25,25 @@ export interface JumpReply {
   at: number;
 }
 
+/** From one window to the one that hosts these sessions: the user marked their finished turns seen there. */
+export interface SeenNote {
+  ids: string[];
+  /** Extension host pid of the window that sends it. */
+  fromPid: number;
+  at: number;
+}
+
 const REQUEST = /^jump-(\d+)-(\d+)\.json$/;
 const REPLY = /^jumped-(\d+)-(\d+)\.json$/;
+const SEEN = /^seen-(\d+)-(\d+)\.json$/;
 
 /**
  * Jumps between the VS Code windows on one host, as files in the directory
  * their registry shares: `jump-<pid>-<time>.json` asks the window whose
  * extension host has that pid to bring a session to the front, and
- * `jumped-<pid>-<time>.json` tells the asking window how it went. Each file
+ * `jumped-<pid>-<time>.json` tells the asking window how it went, and
+ * `seen-<pid>-<time>.json` tells the window that hosts some sessions that the
+ * user marked their finished turns seen in another window. Each file
  * is created exclusively and taken once; mail older than ten seconds is
  * ignored and removed by whoever reads the directory.
  */
@@ -47,6 +58,11 @@ export class JumpMailbox {
   /** Tells window `toPid` how its request went. */
   reply(toPid: number, reply: Omit<JumpReply, "at">, now: number): boolean {
     return this.post("jumped", toPid, { ...reply, at: now }, now) !== undefined;
+  }
+
+  /** Tells window `toPid` that the user marked some of its sessions seen. */
+  sendSeen(toPid: number, note: Omit<SeenNote, "at">, now: number): boolean {
+    return this.post("seen", toPid, { ...note, at: now }, now) !== undefined;
   }
 
   /** Takes back a letter nobody took: the window that sent it stopped waiting. */
@@ -76,7 +92,14 @@ export class JumpMailbox {
     );
   }
 
-  private post(kind: "jump" | "jumped", toPid: number, body: object, now: number): string | undefined {
+  /** The notes for window `selfPid`, oldest first, each taken once. */
+  takeSeen(selfPid: number, now: number): SeenNote[] {
+    return this.take(SEEN, selfPid, now, (raw) =>
+      Array.isArray(raw.ids) && typeof raw.fromPid === "number" && typeof raw.at === "number" ? { ids: raw.ids.filter((id): id is string => typeof id === "string"), fromPid: raw.fromPid, at: raw.at } : undefined,
+    );
+  }
+
+  private post(kind: "jump" | "jumped" | "seen", toPid: number, body: object, now: number): string | undefined {
     try {
       fs.mkdirSync(this.dir, { recursive: true });
     } catch {
@@ -109,7 +132,7 @@ export class JumpMailbox {
     }
     const taken: { time: number; letter: T }[] = [];
     for (const name of names) {
-      const match = REQUEST.exec(name) ?? REPLY.exec(name);
+      const match = REQUEST.exec(name) ?? REPLY.exec(name) ?? SEEN.exec(name);
       if (!match) continue;
       const file = path.join(this.dir, name);
       const time = Number(match[2]);

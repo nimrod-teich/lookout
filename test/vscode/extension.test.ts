@@ -744,4 +744,54 @@ describe("the extension", () => {
     activate(context());
     await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
   }, 60_000);
+
+  it("publishes its finished marks to the other windows, and clears one another window marks seen", async () => {
+    saved["lookout.done"] = [SESSION];
+    // Something sent: once seen, the session stays on the board, idle.
+    writeTranscript();
+    writeSession({ status: "idle", statusUpdatedAt: Date.now() });
+    activate(context());
+    await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
+    const windows = path.join(configDir, "global-storage", "windows");
+    const record = () => JSON.parse(fs.readFileSync(path.join(windows, `${process.pid}.json`), "utf8")) as { done?: string[] };
+    expect(record().done).toEqual([SESSION]);
+    new JumpMailbox(windows).sendSeen(process.pid, { ids: [SESSION], fromPid: 4242 }, Date.now());
+    await vi.waitFor(() => expect(boardStates()).toBe("idle 1"), WAIT);
+    expect(record().done).toBeUndefined();
+    expect(saved["lookout.done"]).toEqual([]);
+  }, 60_000);
+
+  it("shows another window's finished session as finished, and sends its check and mark all seen to that window", async () => {
+    // The other window, as in the jump test: the test runner's parent, with a shell of its terminals running the session.
+    const other = process.ppid;
+    const shell = spawn(process.execPath, ["-e", 'const c = require("child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(c.pid); setInterval(() => {}, 1000);'], { stdio: ["ignore", "pipe", "ignore"] });
+    try {
+      const sessionPid = await new Promise<number>((resolve) => shell.stdout!.once("data", (chunk: Buffer) => resolve(Number(String(chunk).trim()))));
+      const windows = path.join(configDir, "global-storage", "windows");
+      fs.mkdirSync(windows, { recursive: true });
+      const publish = (done: string[]) => fs.writeFileSync(path.join(windows, `${other}.json`), JSON.stringify({ pid: other, label: "api", terminals: [shell.pid], ...(done.length ? { done } : {}) }));
+      publish([SESSION]);
+      writeTranscript();
+      const record = { pid: sessionPid, sessionId: SESSION, cwd: "/work/app", startedAt: Date.now(), kind: "interactive", entrypoint: "cli", status: "idle", statusUpdatedAt: Date.now() };
+      fs.writeFileSync(path.join(configDir, "sessions", `${sessionPid}.json`), JSON.stringify(record));
+      activate(context());
+      try {
+        await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
+        // This window keeps no mark of its own for it: the other window does.
+        expect(saved["lookout.done"] ?? []).toEqual([]);
+        const mail = new JumpMailbox(windows);
+        statesBoard!.receive({ type: "seen", id: SESSION });
+        expect(mail.takeSeen(other, Date.now())).toEqual([expect.objectContaining({ ids: [SESSION], fromPid: process.pid })]);
+        await stub.commands.get("lookout.markAllSeen")!();
+        expect(mail.takeSeen(other, Date.now())).toEqual([expect.objectContaining({ ids: [SESSION], fromPid: process.pid })]);
+        // The other window takes the mark away: the session is idle here too.
+        publish([]);
+        await vi.waitFor(() => expect(boardStates()).toBe("idle 1"), WAIT);
+      } finally {
+        process.kill(sessionPid);
+      }
+    } finally {
+      shell.kill();
+    }
+  }, 60_000);
 });

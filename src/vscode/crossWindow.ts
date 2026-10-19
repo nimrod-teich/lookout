@@ -97,6 +97,8 @@ export interface CrossWindowHost {
   raise(): Promise<boolean>;
   /** A window's registry record changed: the other windows and their terminals are read again. */
   registryChanged?(): void;
+  /** The user marked these sessions of this window seen in another window. */
+  seen?(ids: readonly string[]): void;
   log: Log;
 }
 
@@ -105,7 +107,8 @@ export interface CrossWindowHost {
  * answers theirs: a window asks the one that hosts a session to bring it
  * forward, through a mailbox in the directory they share. The window that
  * answers reveals the session's tab or terminal, comes to the front itself,
- * and says how it went.
+ * and says how it went. A finished turn the user marks seen in one window is
+ * sent the same way to the window that hosts the session, which keeps the mark.
  */
 export class CrossWindowJumps implements vscode.Disposable {
   private readonly mailbox: JumpMailbox;
@@ -146,6 +149,14 @@ export class CrossWindowJumps implements vscode.Disposable {
     return asking;
   }
 
+  /** Tells the windows that host these sessions that the user marked them seen here; one note per window. */
+  markSeen(views: readonly SessionView[]): void {
+    if (this.disposed) return;
+    const byWindow = new Map<number, string[]>();
+    for (const view of views) if (view.windowPid !== undefined) byWindow.set(view.windowPid, [...(byWindow.get(view.windowPid) ?? []), view.id]);
+    for (const [to, ids] of byWindow) this.mailbox.sendSeen(to, { ids, fromPid: this.host.pid }, Date.now());
+  }
+
   private async ask(to: number, sessionId: string, key: string): Promise<CrossWindowOutcome> {
     const letter = this.mailbox.send(to, { sessionId, fromPid: this.host.pid }, Date.now());
     if (letter === undefined) return "not sent";
@@ -175,6 +186,7 @@ export class CrossWindowJumps implements vscode.Disposable {
     const look = async () => {
       const now = Date.now();
       for (const answer of this.mailbox.takeReplies(this.host.pid, now)) this.waiting.get(`${answer.fromPid}:${answer.sessionId}`)?.(answer);
+      for (const note of this.mailbox.takeSeen(this.host.pid, now)) this.host.seen?.(note.ids);
       // A request older than this was sent by a window that gives up on it before this one could answer.
       for (const request of this.mailbox.takeRequests(this.host.pid, now, REQUEST_FRESH_MS)) await this.answer(request);
     };

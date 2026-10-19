@@ -35,6 +35,19 @@ describe("JumpMailbox", () => {
     expect(a.takeReplies(100, T + 1)).toEqual([]);
   });
 
+  it("delivers a note that sessions were seen to the window that hosts them, once", () => {
+    const { dir, a, b } = setup();
+    expect(a.sendSeen(200, { ids: ["s1", "s2"], fromPid: 100 }, T)).toBe(true);
+    expect(fs.readdirSync(dir)).toEqual([`seen-200-${T}.json`]);
+    expect(b.takeRequests(200, T + 1)).toEqual([]);
+    expect(b.takeSeen(100, T + 1)).toEqual([]);
+    expect(b.takeSeen(200, T + 1)).toEqual([{ ids: ["s1", "s2"], fromPid: 100, at: T }]);
+    expect(b.takeSeen(200, T + 1)).toEqual([]);
+    a.sendSeen(200, { ids: ["old"], fromPid: 100 }, T);
+    expect(b.takeSeen(200, T + MAIL_TTL_MS + 1)).toEqual([]);
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+
   it("ignores and removes mail older than ten seconds, whoever it is for", () => {
     const { dir, a, b } = setup();
     a.send(200, { sessionId: "old", fromPid: 100 }, T);

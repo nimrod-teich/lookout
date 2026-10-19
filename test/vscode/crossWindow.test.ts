@@ -79,6 +79,24 @@ describe("CrossWindowJumps, answering", () => {
   });
 });
 
+describe("CrossWindowJumps, seen", () => {
+  it("tells each window that hosts sessions the user marked seen here, in one note per window", () => {
+    const jumps_ = window();
+    jumps_.markSeen([view({ id: "s1", host: "window", windowPid: OTHER }), view({ id: "s2", host: "window", windowPid: 300 }), view({ id: "s3", host: "window", windowPid: OTHER }), view({ id: "s4", host: "window" })]);
+    const mail = new JumpMailbox(dir);
+    expect(mail.takeSeen(OTHER, Date.now())).toEqual([expect.objectContaining({ ids: ["s1", "s3"], fromPid: SELF })]);
+    expect(mail.takeSeen(300, Date.now())).toEqual([expect.objectContaining({ ids: ["s2"], fromPid: SELF })]);
+  });
+
+  it("hands the sessions another window marked seen to this window, which keeps their marks", async () => {
+    const seen: (readonly string[])[] = [];
+    window({ seen: (ids) => seen.push(ids) });
+    new JumpMailbox(dir).sendSeen(SELF, { ids: ["s1"], fromPid: OTHER }, Date.now());
+    await vi.waitFor(() => expect(seen).toEqual([["s1"]]), WAIT);
+    expect(fs.readdirSync(dir).filter((name) => name.startsWith("seen-"))).toEqual([]);
+  });
+});
+
 describe("CrossWindowJumps, asking", () => {
   /** Plays the other window: takes its requests and answers them. */
   function answerAs(pid: number, answer: { found: boolean; raised: boolean }): () => void {

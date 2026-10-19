@@ -190,12 +190,12 @@ export class Controller implements vscode.Disposable {
   ) {
     this.proc.onDidUpdate = () => this.poll();
     this.windows = new WindowRegistry(host.sharedDir, this.proc);
-    this.windows.register(host.pid, host.label, terminals.pids, host.workspaceFolders());
-    // The other windows find this one's terminal sessions by their shells.
-    this.terminalsChanged = terminals.onDidChange(() => this.windows.register(host.pid, host.label, terminals.pids, host.workspaceFolders()));
     const done = host.state.get<string[]>(DONE_KEY, []);
     this.attention.restore(done);
     this.savedDone = done.join("\n");
+    this.register();
+    // The other windows find this one's terminal sessions by their shells.
+    this.terminalsChanged = terminals.onDidChange(() => this.register());
     this.earlierScope = host.state.get<string>(EARLIER_SCOPE_KEY) === "all" ? "all" : "folders";
     const dismissed = host.state.get<Record<string, string>>(DISMISSED_KEY, {});
     this.attention.restoreDismissals(dismissed);
@@ -425,27 +425,36 @@ export class Controller implements vscode.Disposable {
 
   /** The window's folders changed: other windows place the sessions VS Code runs in them by its folders. */
   foldersChanged(): void {
-    this.windows.register(this.host.pid, this.host.label, this.terminals.pids, this.host.workspaceFolders());
+    this.register();
     this.poll();
+  }
+
+  /** Records this window for the others: its name, terminals, folders, and the sessions it marked finished. */
+  private register(): void {
+    this.windows.register(this.host.pid, this.host.label, this.terminals.pids, this.host.workspaceFolders(), this.attention.snapshot());
   }
 
   /** Reads the sessions now, without waiting for the next tick. */
   poll(): void {
     if (!this.monitor) return;
     let views: SessionView[];
+    const windows = this.windows.read(this.host.pid);
     try {
       views = this.monitor.poll({
         hostPid: this.host.pid,
         terminalPids: this.terminals.pids,
         folders: this.host.workspaceFolders(),
-        windows: this.windows.read(this.host.pid),
+        windows,
       });
     } catch (err) {
       this.log.errorOnce(`Poll failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
       return;
     }
     this.notePrompts(views);
-    const update = this.attention.update(views, (view) => isWatched(view, this.terminals), { typedQuestions: this.typedQuestions });
+    const update = this.attention.update(views, (view) => isWatched(view, this.terminals), {
+      typedQuestions: this.typedQuestions,
+      doneElsewhere: (view) => view.windowPid !== undefined && (windows.get(view.windowPid)?.done?.includes(view.id) ?? false),
+    });
     const exclude = new Set<string>([...update.views.map((view) => view.id), ...this.archived.read()]);
     // A session that runs again leaves the archive.
     let archive = this.archiveIds();
@@ -713,6 +722,13 @@ export class Controller implements vscode.Disposable {
     if (this.attention.markAllSeen()) this.poll();
   }
 
+  /** The user marked these sessions of this window seen in another window. */
+  seenElsewhere(ids: readonly string[]): void {
+    let any = false;
+    for (const id of ids) if (this.attention.markSeen(id)) any = true;
+    if (any) this.poll();
+  }
+
   /** The user dismissed the question a session's last message asks. */
   dismiss(id: string): void {
     if (this.attention.dismiss(id)) this.poll();
@@ -793,6 +809,8 @@ export class Controller implements vscode.Disposable {
     if (key !== this.savedDone) {
       this.savedDone = key;
       void this.host.state.update(DONE_KEY, done);
+      // The other windows show this window's finished sessions as it marks them.
+      this.register();
     }
     const dismissed = this.attention.dismissals();
     const dismissedKey = JSON.stringify(dismissed);
