@@ -21,4 +21,6 @@ Every agent also has a row in the catalog, `src/core/agents/catalog.ts`: its id,
 
 Set the version in `package.json`, add its section to `CHANGELOG.md`, and push a tag `v<version>`. The release workflow publishes a GitHub Release with the `.vsix` attached.
 
-The same workflow then publishes the `.vsix` to the Visual Studio Marketplace and to Open VSX when the repository holds the secrets `VSCE_PAT` (a Marketplace-scoped Azure DevOps token for publisher `nimrod-teich`) and `OVSX_PAT` (an Open VSX access token for the same namespace); a missing secret skips that registry, and the `.vsix` on the Release can be uploaded by hand instead.
+Then the Publish workflow (`publish.yml`) sends that Release's `.vsix` to the Visual Studio Marketplace and to Open VSX, each in a job of its own, so a registry that refuses leaves the other alone. It needs the secrets `VSCE_PAT` (an Azure DevOps token created by an account that is a member of publisher `nimrod-teich`, with **Organization: All accessible organizations** and the scope **Marketplace → Manage**; a token for one organization is refused with "Access Denied … needs the following permission(s)") and `OVSX_PAT` (an Open VSX access token for the same namespace). A missing secret skips that registry with a warning.
+
+To finish a release a registry refused, fix its secret and run Publish by hand: Actions → Publish → Run workflow, with the tag (`v0.1.1`), or `gh workflow run publish.yml -f tag=v0.1.1`. A registry that already has the version is skipped, so the run can be repeated.

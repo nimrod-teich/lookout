@@ -1,10 +1,9 @@
 name: Release
 
-# Pushing a tag like v0.1.0 builds the extension, publishes a GitHub Release with the .vsix
-# attached and that version's changelog as its notes, then publishes the same .vsix to the
-# Visual Studio Marketplace (secret VSCE_PAT, a Marketplace-scoped Azure DevOps token; switch to
-# `vsce publish --azure-credential` with Entra ID when that token type retires) and to Open VSX
-# (secret OVSX_PAT). A missing secret skips that registry.
+# Pushing a tag like v0.1.0 builds the extension and publishes a GitHub Release with the .vsix
+# attached and that version's changelog as its notes; then Publish (publish.yml) sends the same
+# .vsix to the Visual Studio Marketplace and to Open VSX, each on its own. A registry that
+# refuses can be finished later by running Publish by hand with the tag.
 on:
   push:
     tags: ["v*"]
@@ -48,13 +47,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" "lookout-$VERSION.vsix" --title "Lookout $VERSION" --notes-file release-notes.md
-      - name: Publish to the Visual Studio Marketplace
-        if: env.VSCE_PAT != ''
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx @vscode/vsce publish --packagePath "lookout-$VERSION.vsix" -p "$VSCE_PAT"
-      - name: Publish to Open VSX
-        if: env.OVSX_PAT != ''
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx ovsx publish "lookout-$VERSION.vsix" -p "$OVSX_PAT"
+
+  publish:
+    needs: release
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

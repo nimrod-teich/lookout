@@ -1,0 +1,74 @@
+name: Publish
+
+# Publishes a GitHub Release's .vsix to the Visual Studio Marketplace (secret VSCE_PAT, a token
+# with the Marketplace "Manage" scope for "All accessible organizations") and to Open VSX (secret
+# OVSX_PAT). Each registry is a job of its own, so one that fails leaves the other alone, and each
+# skips a version it already has, so a run can be repeated. Release calls it after creating the
+# GitHub Release; run it by hand (Actions → Publish → Run workflow) to finish a release a registry
+# refused, once its token is fixed. A missing secret skips that registry with a warning.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    secrets:
+      VSCE_PAT:
+        required: false
+      OVSX_PAT:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release to publish, e.g. v0.1.1"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  marketplace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the release's package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "*.vsix"
+      - name: Publish to the Visual Studio Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then echo "::warning::No VSCE_PAT secret: the Marketplace is skipped"; exit 0; fi
+          vsix="$(ls ./*.vsix)"
+          # The ${...} is a JavaScript template literal, for node, not the shell.
+          # shellcheck disable=SC2016
+          id="$(unzip -p "$vsix" extension/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0, "utf8")); `${p.publisher}.${p.name}@${p.version}`')"
+          if npx --yes @vscode/vsce show "${id%@*}" --json 2>/dev/null | node -e 'const v = JSON.parse(require("fs").readFileSync(0, "utf8")).versions.map((x) => x.version); process.exit(v.includes(process.argv[1]) ? 0 : 1)' "${id#*@}"; then
+            echo "The Marketplace already has $id"
+            exit 0
+          fi
+          npx --yes @vscode/vsce publish --packagePath "$vsix" -p "$VSCE_PAT"
+
+  openvsx:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the release's package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "*.vsix"
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then echo "::warning::No OVSX_PAT secret: Open VSX is skipped"; exit 0; fi
+          vsix="$(ls ./*.vsix)"
+          # The ${...} is a JavaScript template literal, for node, not the shell.
+          # shellcheck disable=SC2016
+          path="$(unzip -p "$vsix" extension/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0, "utf8")); `${p.publisher}/${p.name}/${p.version}`')"
+          if [ "$(curl -s -o /dev/null -w "%{http_code}" "https://open-vsx.org/api/$path")" = "200" ]; then
+            echo "Open VSX already has $path"
+            exit 0
+          fi
+          npx --yes ovsx publish "$vsix" -p "$OVSX_PAT"
