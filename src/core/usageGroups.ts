@@ -14,6 +14,8 @@ export interface UsageGroup {
   meters: UsageMeter[];
   /** Lookout can have the agent fetch fresh numbers. */
   canRefresh?: boolean;
+  /** Why there are no numbers, when Lookout knows: said in place of "No usage reported". */
+  note?: string;
 }
 
 /** Which agent's bar the status bar shows: `auto`, or an agent's key (`claude`, `codex`, `copilot`). */

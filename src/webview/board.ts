@@ -547,7 +547,7 @@ function renderMeters(): void {
     meterRows.delete(id);
   }
   usageRows.querySelector(".none")?.remove();
-  if (chosen.fetchedAt === undefined || chosen.meters.length === 0) usageRows.append(el("div", "none", "No usage reported"));
+  if (chosen.fetchedAt === undefined || chosen.meters.length === 0) usageRows.append(el("div", "none", chosen.note ?? "No usage reported"));
 }
 
 /**

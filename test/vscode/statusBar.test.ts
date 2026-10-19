@@ -151,6 +151,13 @@ describe("StatusBar", () => {
     expect(tip).not.toContain("Refresh Usage");
   });
 
+  it("says why there are no numbers when the group knows", () => {
+    bar.render(input({ usage: undefined, usageGroups: [{ agent: "claude-code", stale: false, meters: [], canRefresh: true, note: "Too many usage checks; next at 14:05" }] }), 0);
+    const tip = (lastSet("tooltip") as { value: string }).value;
+    expect(tip).toContain("Too many usage checks; next at 14:05");
+    expect(tip).not.toContain("No usage reported");
+  });
+
   it("writes nothing when the same input is rendered again, and only what changed otherwise", () => {
     bar.render(input({ usage: usage() }), 0);
     stub.ops.length = 0;

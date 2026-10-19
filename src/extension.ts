@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { agentInfo, boardAgents, canJump, canRename, canResume, markersShown, unreachable } from "./core/agents/catalog";
-import { describeAlert, noticeBody } from "./core/format";
+import { clockTime, describeAlert, noticeBody } from "./core/format";
 import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
@@ -302,6 +302,8 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const outcome = await controller.refreshUsage(true);
       if (outcome === "failed") void vscode.window.showWarningMessage("Lookout: Claude Code gave no new usage numbers. Check the Lookout output log.");
+      else if (outcome === "rate-limited") void vscode.window.showInformationMessage(`Lookout: Anthropic's usage endpoint asked for no more checks before ${clockTime(controller.refreshHeldUntil)}.`);
+      else if (outcome === "no plan limits") void vscode.window.showInformationMessage("Lookout: Claude Code reports no plan limits for its sign-in (an API key, Bedrock or Vertex, or a long-lived token).");
     }),
   );
 

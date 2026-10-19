@@ -13,6 +13,8 @@ export interface BoardUsage {
   meters: UsageMeter[];
   /** The extension can fetch fresh numbers. */
   canRefresh: boolean;
+  /** Why there are no numbers, when the extension knows: said in place of "No usage reported". */
+  note?: string;
 }
 
 /** Which earlier sessions are listed and searched: this window's folders, or every project. */

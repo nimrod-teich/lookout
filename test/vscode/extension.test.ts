@@ -399,10 +399,11 @@ describe("the extension", () => {
   describe.skipIf(process.platform === "win32")("with a Claude Code binary to refresh usage", () => {
     /**
      * A stand-in for the binary the Claude Code extension ships: it answers
-     * get_usage with 18%, counts its runs, and, when told to, rewrites the
-     * cache in the config directory it was given with 44%.
+     * get_usage with 18% (or `payload`), counts its runs, writes `debugLog`
+     * to the debug log it is given, and, when told to, rewrites the cache in
+     * the config directory it was given with 44%.
      */
-    function fakeClaude(rewritesCache: boolean): () => number {
+    function fakeClaude(rewritesCache: boolean, { debugLog = "", payload = { rate_limits: { five_hour: { utilization: 18 } } } }: { debugLog?: string; payload?: object } = {}): () => number {
       const ext = path.join(configDir, "claude-ext");
       const dir = path.join(ext, "resources", "native-binaries", `${process.platform}-${process.arch}`);
       fs.mkdirSync(dir, { recursive: true });
@@ -412,13 +413,15 @@ describe("the extension", () => {
         script,
         `const fs = require("fs"), path = require("path");
         fs.appendFileSync(${JSON.stringify(runs)}, "x");
+        const debugFile = process.argv[process.argv.indexOf("--debug-file") + 1];
+        if (process.argv.includes("--debug-file")) fs.writeFileSync(debugFile, ${JSON.stringify(debugLog)});
         process.stdin.resume();
         process.stdin.on("end", () => {
           if (${rewritesCache}) {
             const utilization = { five_hour: { utilization: 44 }, seven_day: { utilization: 31 } };
             fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, ".claude.json"), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now(), utilization } }));
           }
-          const answer = { type: "control_response", response: { subtype: "success", request_id: "lookout-usage", response: { rate_limits: { five_hour: { utilization: 18 } } } } };
+          const answer = { type: "control_response", response: { subtype: "success", request_id: "lookout-usage", response: ${JSON.stringify(payload)} } };
           process.stdout.write(JSON.stringify(answer) + "\\n");
           process.exit(0);
         });`,
@@ -450,6 +453,34 @@ describe("the extension", () => {
       expect(infoMessages()).toHaveLength(said);
       expect(runs()).toBe(1);
       expect(tooltip()).not.toContain("failed");
+    }, 60_000);
+
+    it("waits as long as the usage endpoint's 429 asks, the user's refresh too, and says why there are no numbers", async () => {
+      const runs = fakeClaude(false, {
+        debugLog: "t [DEBUG] fetchUtilization: 429 remembered for this bearer; not asking again for 900s\n",
+        payload: { subscription_type: "max", rate_limits_available: true, rate_limits: null },
+      });
+      activate(context());
+      // No numbers: the automatic refresh runs at once, and meets the 429.
+      await vi.waitFor(() => expect(tooltip()).toContain("Too many usage checks; next at "), WAIT);
+      expect(runs()).toBe(1);
+      // Every window on the host sees the hold: it is on file with the refreshes.
+      const ledger = path.join(configDir, "global-storage", "usage", "refresh");
+      const holdFile = fs.readdirSync(ledger).find((name) => name.startsWith("hold-"))!;
+      const wait = Number(fs.readFileSync(path.join(ledger, holdFile), "utf8")) - Date.now();
+      expect(wait).toBeGreaterThan(890_000);
+      expect(wait).toBeLessThanOrEqual(900_000);
+      await stub.commands.get("lookout.refreshUsage")!();
+      expect(infoMessages().at(-1)).toMatch(/^Lookout: Anthropic's usage endpoint asked for no more checks before (\w{3} )?\d\d:\d\d\.$/);
+      expect(runs()).toBe(1);
+    }, 60_000);
+
+    it("says when plan limits do not apply to Claude Code's sign-in", async () => {
+      const runs = fakeClaude(false, { payload: { subscription_type: null, rate_limits_available: false, rate_limits: null } });
+      activate(context());
+      // The hover is Markdown, with the text's hyphen escaped.
+      await vi.waitFor(() => expect(tooltip().replace(/\\/g, "")).toContain("No plan limits for this sign-in"), WAIT);
+      expect(runs()).toBe(1);
     }, 60_000);
 
     it("starts no refresh while Claude Code's settings switch nonessential traffic off, and notices when they no longer do", async () => {

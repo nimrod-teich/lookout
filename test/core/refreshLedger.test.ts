@@ -53,6 +53,32 @@ describe("RefreshLedger", () => {
     expect(ledger.nextAt("s-2", false)).toBe(now + MIN_REFRESH_GAP_MS);
   });
 
+  it("holds off every refresh of one source until the time the endpoint asked for, in every window", () => {
+    const dir = path.join(tempConfigDir(), "refresh");
+    const a = new RefreshLedger(dir);
+    const b = new RefreshLedger(dir);
+    expect(b.heldUntil("acct")).toBe(-Infinity);
+    a.hold("acct", T + 600_000);
+    expect(b.heldUntil("acct")).toBe(T + 600_000);
+    // Another config directory's numbers are not held.
+    expect(b.heldUntil("other")).toBe(-Infinity);
+    // A later 429 replaces the wait; a hold that does not parse holds nothing.
+    a.hold("acct", T + 60_000);
+    expect(b.heldUntil("acct")).toBe(T + 60_000);
+    fs.writeFileSync(path.join(dir, "hold-acct"), "soon");
+    expect(b.heldUntil("acct")).toBe(-Infinity);
+  });
+
+  it("forgets holds that are over", () => {
+    const dir = path.join(tempConfigDir(), "refresh");
+    const ledger = new RefreshLedger(dir);
+    ledger.hold("done", T);
+    ledger.hold("running", T + 60_000);
+    ledger.prune(T);
+    expect(fs.readdirSync(dir).sort()).toEqual(["hold-running"]);
+    expect(ledger.heldUntil("running")).toBe(T + 60_000);
+  });
+
   it("forgets attempts at numbers long gone, and survives a missing folder", () => {
     const dir = path.join(tempConfigDir(), "refresh");
     const ledger = new RefreshLedger(dir);

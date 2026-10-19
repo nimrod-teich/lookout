@@ -7,6 +7,8 @@ export const MIN_REFRESH_GAP_MS = 180_000;
 export const MAX_BACKOFF_MS = 30 * 60_000;
 /** The file every attempt touches, for the gap. */
 const LAST = "last";
+/** The prefix of the files that hold off one source's refreshes, each holding the epoch ms it lasts until. */
+const HOLD = "hold-";
 
 export interface Attempts {
   /** Attempts made at these numbers; each one that left them in place failed. */
@@ -22,7 +24,9 @@ export interface Attempts {
  * `fetch-<key>-<n>`, created exclusively, so exactly one window makes it. A
  * successful refresh brings numbers with another fetch time, which have no
  * attempts yet; the attempts still on file for the numbers shown are the
- * failures, and each one doubles the wait for the next.
+ * failures, and each one doubles the wait for the next. When the usage
+ * endpoint asks for a wait, `hold-<scope>` holds off every refresh of that
+ * source's numbers until then.
  */
 export class RefreshLedger {
   constructor(private readonly dir: string) {}
@@ -37,6 +41,38 @@ export class RefreshLedger {
 
   private static file(key: string, n: number): string {
     return `fetch-${key.replace(/[^\w.-]/g, "_")}-${n}`;
+  }
+
+  private static holdFile(scope: string): string {
+    return `${HOLD}${scope.replace(/[^\w.-]/g, "_")}`;
+  }
+
+  /**
+   * Holds off every refresh of the numbers from `scope`, the ones the user
+   * asks for too, until `until`: the usage endpoint asked for the wait. A
+   * later hold replaces it.
+   */
+  hold(scope: string, until: number): void {
+    const file = path.join(this.dir, RefreshLedger.holdFile(scope));
+    const written = `${file}.${process.pid}`;
+    try {
+      fs.mkdirSync(this.dir, { recursive: true });
+      // Renamed into place, so no window reads half of it.
+      fs.writeFileSync(written, String(until));
+      fs.renameSync(written, file);
+    } catch {
+      // Not on file: the backoff still spaces out the next attempts.
+    }
+  }
+
+  /** Epoch ms until which refreshes of the numbers from `scope` are held off; -Infinity when they are not. */
+  heldUntil(scope: string): number {
+    try {
+      const until = Number(fs.readFileSync(path.join(this.dir, RefreshLedger.holdFile(scope)), "utf8"));
+      return Number.isFinite(until) ? until : -Infinity;
+    } catch {
+      return -Infinity;
+    }
   }
 
   /** The attempts at the numbers named `key`. */
@@ -93,7 +129,7 @@ export class RefreshLedger {
     return true;
   }
 
-  /** Forgets attempts at numbers long gone. */
+  /** Forgets attempts at numbers long gone, and holds that are over. */
   prune(now: number, keepMs: number = 24 * 3_600_000): void {
     let names: string[];
     try {
@@ -102,9 +138,10 @@ export class RefreshLedger {
       return;
     }
     for (const name of names) {
-      if (!name.startsWith("fetch-")) continue;
+      const over = name.startsWith(HOLD) ? this.heldUntil(name.slice(HOLD.length)) <= now : name.startsWith("fetch-") && now - (this.mtime(name) ?? now) > keepMs;
+      if (!over) continue;
       try {
-        if (now - fs.statSync(path.join(this.dir, name)).mtimeMs > keepMs) fs.rmSync(path.join(this.dir, name), { force: true });
+        fs.rmSync(path.join(this.dir, name), { force: true });
       } catch {
         // Another window removed it first.
       }

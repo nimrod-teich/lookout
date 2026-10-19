@@ -125,7 +125,7 @@ function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
           md.appendMarkdown("  \n");
         }
       } else {
-        md.appendText(`No usage reported${group.canRefresh ? "; run Lookout: Refresh Usage" : ""}`);
+        md.appendText(group.note ?? `No usage reported${group.canRefresh ? "; run Lookout: Refresh Usage" : ""}`);
       }
       md.appendMarkdown("\n\n");
     }
