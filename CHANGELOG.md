@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- **Usage refresh waits when Anthropic asks.** When the usage endpoint answers 429, as it does when another app polls it for the same account, Lookout starts no refresh before the wait its `Retry-After` asks, in any window and `Lookout: Refresh Usage` included, and with no numbers to show the board and the status bar's hover say "Too many usage checks; next at 14:05".
+- **Why there are no numbers.** A sign-in without plan limits (an API key, Bedrock or Vertex, or a long-lived token) says "No plan limits for this sign-in". A refresh that brings nothing logs why: the binary's own reason, the end of what it wrote to stderr, or that it gave no answer within 20 seconds.
+
 ## 0.1.0
 
 First release.

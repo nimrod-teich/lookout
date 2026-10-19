@@ -10,6 +10,7 @@ import { chatStorageRoots, LocalChats } from "../core/agents/copilot/localChats"
 import { CopilotProvider } from "../core/agents/copilot/provider";
 import type { HistoryMessage, SnippetSize } from "../core/history";
 import { Attention } from "../core/attention";
+import { clockTime } from "../core/format";
 import { buildPastView, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
 import { Monitor } from "../core/monitor";
 import { createProcessFinder, createProcessTable, type ProcessTable } from "../core/proc";
@@ -19,7 +20,7 @@ import { hasFilters, parseQuery } from "../core/terms";
 import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
 import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../core/usageAlerts";
 import type { UsageGroup } from "../core/usageGroups";
-import { refreshEnv, refreshUsage } from "../core/usageRefresh";
+import { refreshEnv, refreshUsage, type RefreshResult } from "../core/usageRefresh";
 import { WindowRegistry } from "../core/windows";
 import type { Config } from "./config";
 import type { Log } from "./log";
@@ -96,8 +97,11 @@ export interface Usage extends UsageSnapshot {
 /** Which earlier sessions are listed and searched. */
 export type EarlierScope = "folders" | "all";
 
-/** How a request for fresh usage numbers went. */
-export type RefreshOutcome = "fetched" | "failed" | "too soon" | "unavailable";
+/**
+ * How a request for fresh usage numbers went. `rate-limited`: the usage
+ * endpoint answered 429, now or before, and its wait is not over.
+ */
+export type RefreshOutcome = "fetched" | "failed" | "too soon" | "unavailable" | "rate-limited" | "no plan limits";
 
 /** Polls the sessions on this host and announces when what the UI shows changes. */
 export class Controller implements vscode.Disposable {
@@ -165,6 +169,10 @@ export class Controller implements vscode.Disposable {
   private readonly ledger: RefreshLedger;
   /** The numbers the UI last got were stale. */
   private shownStale = false;
+  /** The note the UI last got for Claude's group. */
+  private shownNote: string | undefined;
+  /** The last refresh found that plan limits do not apply to Claude Code's sign-in. */
+  private noPlanLimits = false;
   private refreshing: Promise<RefreshOutcome> | undefined;
   /** The source of the numbers shown, named for the refreshes and the alerts. */
   private scope = "";
@@ -303,7 +311,8 @@ export class Controller implements vscode.Disposable {
   get usageGroups(): UsageGroup[] {
     const usage = this.usage;
     const now = Date.now();
-    const claude: UsageGroup = { agent: CLAUDE_CODE, fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: (usage?.meters ?? []).map((meter) => ({ ...meter, agent: CLAUDE_CODE })), canRefresh: this.canRefreshUsage };
+    const note = this.claudeNote;
+    const claude: UsageGroup = { agent: CLAUDE_CODE, fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: (usage?.meters ?? []).map((meter) => ({ ...meter, agent: CLAUDE_CODE })), canRefresh: this.canRefreshUsage, ...(note ? { note } : {}) };
     // The others' numbers come with their sessions' records; Lookout cannot fetch them anew.
     const others = [...this.agentUsage].map(([agent, snapshot]): UsageGroup => ({ agent, fetchedAt: snapshot.fetchedAt, stale: isStale(snapshot, now), meters: snapshot.meters.map((meter) => ({ ...meter, agent })), canRefresh: false }));
     return this.claudeOn ? [claude, ...others] : others;
@@ -317,6 +326,20 @@ export class Controller implements vscode.Disposable {
   /** Lookout can ask the agent for fresh usage numbers. */
   get canRefreshUsage(): boolean {
     return this.claudeOn && this.usageMode !== "off" && !this.refreshDisabled && this.host.claudeBinary() !== undefined;
+  }
+
+  /** Epoch ms until which the usage endpoint asked for no more requests from this account; -Infinity when it did not. */
+  get refreshHeldUntil(): number {
+    return this.ledger.heldUntil(this.scope);
+  }
+
+  /** Why Claude's group has no numbers, when Lookout knows: the usage endpoint asked for a wait, or plan limits do not apply. */
+  private get claudeNote(): string | undefined {
+    if (this.usageRead.snapshot) return undefined;
+    const held = this.refreshHeldUntil;
+    if (held > Date.now()) return `Too many usage checks; next at ${clockTime(held)}`;
+    if (this.noPlanLimits) return "No plan limits for this sign-in";
+    return undefined;
   }
 
   /** Names the numbers shown, for the refreshes on file. */
@@ -370,6 +393,7 @@ export class Controller implements vscode.Disposable {
     // Claude's usage is read from what Claude Code cached, only while Claude is watched.
     this.usageCache = config.claudeEnabled ? new UsageCache(cacheFile) : undefined;
     this.usageRead = { snapshot: undefined, why: "missing" };
+    this.noPlanLimits = false;
     this.scope = scopeOf(cacheFile);
     this.settingsEnv = new ClaudeSettingsEnv(path.join(config.claudeConfigDir, "settings.json"));
     this.refreshEnvironment = refreshEnv(process.env, config.claudeConfigDir, path.join(os.homedir(), ".claude"));
@@ -540,7 +564,7 @@ export class Controller implements vscode.Disposable {
     const before = this.usageRead;
     const news = read.snapshot ? before.snapshot === undefined || read.snapshot.fetchedAt > before.snapshot.fetchedAt : before.snapshot !== undefined || read.why !== before.why;
     if (news) this.acceptUsage(read);
-    else if ((this.usage?.stale ?? false) !== this.shownStale) this.fireUsage();
+    else if ((this.usage?.stale ?? false) !== this.shownStale || this.claudeNote !== this.shownNote) this.fireUsage();
   }
 
   private acceptUsage(read: UsageRead): void {
@@ -553,6 +577,7 @@ export class Controller implements vscode.Disposable {
   private fireUsage(): void {
     const usage = this.usage;
     this.shownStale = usage?.stale ?? false;
+    this.shownNote = this.claudeNote;
     this.usageChanged.fire(usage);
   }
 
@@ -600,10 +625,12 @@ export class Controller implements vscode.Disposable {
 
   /**
    * Has the agent fetch fresh usage numbers: at most once every 180 s on the
-   * host, and less often after failures unless the user asks (`manual`). The
-   * numbers then come from the cache the agent rewrote, with its account
-   * check, not from its answer; a refresh that leaves the cache as it was
-   * failed. One fetch runs at a time; a call during a fetch waits for it.
+   * host, and less often after failures unless the user asks (`manual`);
+   * after the usage endpoint answered 429, not before the wait its
+   * Retry-After asks, the user's request neither. The numbers then come from
+   * the cache the agent rewrote, with its account check, not from its
+   * answer; a refresh that leaves the cache as it was failed. One fetch runs
+   * at a time; a call during a fetch waits for it.
    */
   refreshUsage(manual = false): Promise<RefreshOutcome> {
     if (this.refreshing) return this.refreshing;
@@ -611,19 +638,28 @@ export class Controller implements vscode.Disposable {
     const cache = this.usageCache;
     if (!binary || !cache || !this.canRefreshUsage) return Promise.resolve("unavailable");
     const now = Date.now();
+    if (now < this.refreshHeldUntil) return Promise.resolve("rate-limited");
     const key = this.ledgerKey;
+    const scope = this.scope;
     const before = this.usageRead.snapshot?.fetchedAt;
     if (!this.ledger.claim(key, now, manual)) return Promise.resolve("too soon");
     const refreshing: Promise<RefreshOutcome> = refreshUsage({ binary, env: this.refreshEnvironment })
-      .then((answer): RefreshOutcome => {
+      .then((result): RefreshOutcome => {
         this.refreshing = undefined;
         if (this.disposed || cache !== this.usageCache) return "failed";
+        this.noPlanLimits = result.answer?.kind === "no plan limits";
+        if (result.retryAfterMs !== undefined) {
+          const until = Date.now() + result.retryAfterMs;
+          this.ledger.hold(scope, until);
+          this.log.info(`Usage refresh: the usage endpoint answered 429 (too many requests); no refresh before ${clockTime(until)}, the wait its Retry-After asks`);
+        }
         this.consider(cache.readWithReason());
         const after = this.usageRead.snapshot?.fetchedAt;
         if (after !== undefined && (before === undefined || after > before)) return "fetched";
-        this.log.errorOnce(answer ? "Usage refresh: Claude Code answered, but its cache did not change" : "Usage refresh: the Claude Code binary gave no usage numbers");
+        if (result.retryAfterMs === undefined) this.log.errorOnce(refreshFailure(result));
         this.fireUsage();
-        return "failed";
+        if (result.retryAfterMs !== undefined) return "rate-limited";
+        return this.noPlanLimits ? "no plan limits" : "failed";
       })
       .finally(() => {
         if (this.refreshing === refreshing) this.refreshing = undefined;
@@ -634,7 +670,7 @@ export class Controller implements vscode.Disposable {
 
   /** When a refresh may start again, automatic or asked for. */
   nextRefreshAt(manual: boolean): number {
-    return this.ledger.nextAt(this.ledgerKey, manual);
+    return Math.max(this.ledger.nextAt(this.ledgerKey, manual), this.refreshHeldUntil);
   }
 
   /**
@@ -786,5 +822,18 @@ export class Controller implements vscode.Disposable {
     this.thresholdReached.dispose();
     this.finished.dispose();
     this.waiting.dispose();
+  }
+}
+
+/** What the log says about a refresh that brought no new numbers. */
+function refreshFailure(result: RefreshResult): string {
+  const why = result.failure ? `: ${result.failure}` : "";
+  switch (result.answer?.kind) {
+    case "no plan limits":
+      return "Usage refresh: Claude Code reports no plan limits for its sign-in (an API key, Bedrock or Vertex, or a token without the profile scope)";
+    case "numbers":
+      return `Usage refresh: Claude Code answered, but its cache did not change${why}`;
+    default:
+      return `Usage refresh: the Claude Code binary gave no usage numbers${why}`;
   }
 }
