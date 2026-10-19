@@ -745,6 +745,49 @@ describe("the extension", () => {
     await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
   }, 60_000);
 
+  it("parks a session from its card, brings it back, and lets it leave Parked when it works again", async () => {
+    writeTranscript();
+    writeSession({ status: "idle", statusUpdatedAt: Date.now() });
+    activate(context());
+    const board = stub.webviewProviders.get("lookout.board") as { resolveWebviewView(view: unknown): void };
+    const boardView = createWebviewView();
+    board.resolveWebviewView(boardView);
+    const shown = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions?: { id: string; state: string; parked?: boolean }[] } | undefined)?.sessions?.[0];
+    await vi.waitFor(() => expect(shown()).toMatchObject({ id: SESSION, state: "idle" }), WAIT);
+    expect(shown()?.parked).toBeUndefined();
+    boardView.receive({ type: "park", id: SESSION });
+    await vi.waitFor(() => expect(shown()?.parked).toBe(true), WAIT);
+    expect(savedGlobal["lookout.parking"]).toEqual({ parked: [SESSION], kept: [] });
+    boardView.receive({ type: "park", id: SESSION });
+    await vi.waitFor(() => expect(shown()?.parked).toBeUndefined(), WAIT);
+    expect(savedGlobal["lookout.parking"]).toEqual({ parked: [], kept: [SESSION] });
+    boardView.receive({ type: "park", id: SESSION });
+    await vi.waitFor(() => expect(shown()?.parked).toBe(true), WAIT);
+    // It works again: out of Parked, and parked no more.
+    writeSession({ status: "busy", statusUpdatedAt: Date.now() });
+    await vi.waitFor(() => expect(shown()).toMatchObject({ state: "working" }), WAIT);
+    expect(shown()?.parked).toBeUndefined();
+    expect(savedGlobal["lookout.parking"]).toEqual({ parked: [], kept: [] });
+    // An unknown id parks nothing.
+    boardView.receive({ type: "park", id: "nope" });
+    expect(savedGlobal["lookout.parking"]).toEqual({ parked: [], kept: [] });
+  }, 60_000);
+
+  it("parks a session idle longer than lookout.parkAfterHours on its own, and drops its finished mark", async () => {
+    saved["lookout.done"] = [SESSION];
+    writeTranscript();
+    writeSession({ status: "idle", statusUpdatedAt: Date.now() - 25 * 3_600_000 });
+    stub.config["lookout.parkAfterHours"] = 0;
+    activate(context());
+    await vi.waitFor(() => expect(boardStates()).toBe("done 1"), WAIT);
+    stub.config["lookout.parkAfterHours"] = 24;
+    stub.configChange.fire({ affectsConfiguration: () => true });
+    await vi.waitFor(() => expect(boardStates()).toBe("idle 1"), WAIT);
+    const last = statesBoard!.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions: { parked?: boolean }[] };
+    expect(last.sessions[0]?.parked).toBe(true);
+    expect(saved["lookout.done"]).toEqual([]);
+  }, 60_000);
+
   it("publishes its finished marks to the other windows, and clears one another window marks seen", async () => {
     saved["lookout.done"] = [SESSION];
     // Something sent: once seen, the session stays on the board, idle.

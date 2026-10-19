@@ -92,6 +92,8 @@ export interface SessionView {
   empty?: boolean;
   /** Its agent tab is open but the session is not started: restored after a window reload. */
   restored?: boolean;
+  /** Out of the way under Parked: the user parked it, or it rested longer than `lookout.parkAfterHours`. */
+  parked?: boolean;
   /** The reasoning effort the model last answered with. */
   effort?: string;
   /** Tokens in the context window at the last model call. */

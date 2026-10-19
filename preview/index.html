@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups. -->
+<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked. -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -64,7 +64,7 @@
         post(earlierScope);
       }
     },
-    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), folded: (params.get("fold") ?? "").split(",").filter(Boolean), earlier: params.get("earlier") === "1", archive: params.get("archiveOpen") === "1", agents: (params.get("hideAgents") ?? "").split(",").filter(Boolean) }),
+    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), folded: (params.get("fold") ?? "").split(",").filter(Boolean), parked: params.get("parkedOpen") === "1", earlier: params.get("earlier") === "1", archive: params.get("archiveOpen") === "1", agents: (params.get("hideAgents") ?? "").split(",").filter(Boolean) }),
     setState: () => {},
   });
   window.addEventListener("load", async () => {
@@ -72,7 +72,13 @@
     const now = Date.now();
     // Times below 1e9 are "this many ms ago".
     const ago = (t) => (typeof t === "number" && t < 1e9 ? now - t : t);
+    // &park=a,b: those sessions are parked, as the extension marks them.
+    const parkIds = (params.get("park") ?? "").split(",").filter(Boolean);
     for (const s of fixture.sessions) {
+      if (parkIds.includes(s.id)) {
+        s.parked = true;
+        if (s.state === "done") s.state = "idle";
+      }
       s.since = ago(s.since);
       s.lastWriteAt = ago(s.lastWriteAt);
       if (s.evidence) s.evidence.at = ago(s.evidence.at);

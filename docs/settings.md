@@ -15,6 +15,7 @@ Every `lookout.*` setting, with its default. The settings come in two sections, 
 | `lookout.notifications.sound` | `false` | Play a short system sound with each desktop notification. |
 | `lookout.notifications.cooldownSeconds` | `30` | A session gets at most one desktop notification per event in this time. While three or more sessions need you, one notification sums them up. |
 | `lookout.state.typedQuestions` | `true` | Count an idle session as needing you when its last reply asks you something. Off: such sessions are Finished or Idle like any other. |
+| `lookout.parkAfterHours` | `24` | A running session idle or finished this many hours goes under **Parked**, folded at the bottom of the board, and comes back when it works again. `0`: only the sessions you park yourself. |
 | `lookout.statusBar.usageAgent` | `auto` | Whose usage the status bar's bar shows when more than one agent reports usage: `auto`, the window under the most pressure (the highest share used, fresh numbers first), or `claude`, `codex`, `copilot`. A pinned agent that reports none leaves the bar to `auto`. |
 | `lookout.agentMarkers` | `auto` | When to tell agents apart by colour and boat: `auto` once the board shows two or more agents (running, earlier or in the usage), `always`, or `never`. |
 | `lookout.agents.claude` | `true` | Watch Claude Code: its panel and `claude` in terminals, with its usage. Off: none of its sessions, earlier sessions, search matches or usage, none of its files read, and Claude Code never run to refresh the usage. |
