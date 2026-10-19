@@ -67,6 +67,17 @@ export function peakMeter(meters: readonly UsageMeter[]): UsageMeter | undefined
   return meters.reduce<UsageMeter | undefined>((peak, meter) => (peak === undefined || meter.percent > peak.percent ? meter : peak), undefined);
 }
 
+/**
+ * What an agent's usage tab says: the limit that runs out first, the one the
+ * status bar's bar shows (the session window for Claude and Codex); and, for
+ * its hover, another limit when that one is closer to its end.
+ */
+export function tabMeters(meters: readonly UsageMeter[]): { shown?: UsageMeter; closest?: UsageMeter } {
+  const shown = barMeter(meters);
+  const peak = peakMeter(meters);
+  return { shown, closest: shown && peak && peak.percent > shown.percent ? peak : undefined };
+}
+
 /** The group whose limits the board lists: the one picked last, else the one the status bar's bar shows, else the first. */
 export function chosenGroup<T extends { agent: string }>(groups: readonly T[], picked?: string, bar?: string): T | undefined {
   return groups.find((group) => group.agent === picked) ?? groups.find((group) => group.agent === bar) ?? groups[0];

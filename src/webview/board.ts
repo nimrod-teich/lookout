@@ -3,7 +3,7 @@ import { AGENTS, agentInfo, canJump, canRename, canResume, unreachable } from ".
 import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import type { PastView, SessionView } from "../core/types";
-import { barMeter, chosenGroup, groupHeading, peakMeter, pickBar, sortGroups } from "../core/usageGroups";
+import { barMeter, chosenGroup, groupHeading, pickBar, sortGroups, tabMeters } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
 import { Harbour } from "./harbour";
 import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isFoldKey, isGroupKey, pageOf, pulseBars, secondLine, type Chip, type FoldKey, type GroupKey } from "./model";
@@ -464,8 +464,8 @@ function tidePercent(): number | undefined {
   return pickBar(groups)?.meter.percent;
 }
 
-// Usage, under the beam: a tab per agent naming the limit it is closest to
-// running out of, and the chosen agent's limits below it, one line each.
+// Usage, under the beam: a tab per agent with its session window, the limit
+// that runs out first, and the chosen agent's limits below it, one line each.
 
 const meters = el("div", "meters");
 const usageTabs = el("div", "usage-tabs");
@@ -512,7 +512,7 @@ function renderMeters(): void {
       const glyph = agentGlyph(agent, 11);
       // The tab's name says the agent already.
       glyph.setAttribute("aria-hidden", "true");
-      tab.append(glyph, el("span", "name", agentInfo(agent).label), el("span", "peak"));
+      tab.append(glyph, el("span", "name", agentInfo(agent).label), el("span", "share"));
       tab.addEventListener("click", () => {
         usageTab = agent;
         saveState();
@@ -520,12 +520,14 @@ function renderMeters(): void {
       });
       usageTabEls.set(agent, tab);
     }
-    const peak = peakMeter(group.meters);
+    const { shown, closest } = tabMeters(group.meters);
     const label = agentInfo(group.agent).label;
-    const peakEl = tab.querySelector<HTMLElement>(".peak")!;
-    peakEl.textContent = peak ? `${Math.floor(peak.percent)}%` : "—";
-    peakEl.className = `peak ${peak ? meterLevel(peak.percent) : ""}`;
-    tab.title = peak ? `${groupHeading(group.agent)}: ${peak.label} is the closest to its limit, at ${Math.floor(peak.percent)}%` : `${label}: no usage reported`;
+    const shareEl = tab.querySelector<HTMLElement>(".share")!;
+    shareEl.textContent = shown ? `${Math.floor(shown.percent)}%` : "—";
+    shareEl.className = `share ${shown ? meterLevel(shown.percent) : ""}`;
+    tab.title = shown
+      ? `${groupHeading(group.agent)}: ${shown.label} at ${Math.floor(shown.percent)}%${closest ? `; ${closest.label} is the closest to its limit, at ${Math.floor(closest.percent)}%` : ""}`
+      : `${label}: no usage reported`;
     tab.classList.toggle("stale", group.stale);
     tab.setAttribute("aria-selected", String(group.agent === chosen.agent));
     const at = previous ? previous.nextSibling : usageTabs.firstChild;
