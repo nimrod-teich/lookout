@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { inRange, matchesAll, matchRanges, termsOf, type TimeRange } from "./terms";
+import { inRange, matchRanges, termsOf, type TimeRange } from "./terms";
 
 export { termsOf, type TimeRange };
 
@@ -9,7 +9,27 @@ export interface LineFacts {
   paths?: string[];
 }
 
+/**
+ * How an agent's conversation files are read for the search. Most of a
+ * file's bytes are lines that hold neither a message nor a path: requests,
+ * tool output, attachments. `mayHold` rules those out on their raw bytes, so
+ * they are never decoded nor parsed.
+ */
+export interface LineReader {
+  /** The line can hold facts: false only for a line `facts` would find nothing in. */
+  mayHold(line: Buffer): boolean;
+  /** What a line holds. */
+  facts(line: string): LineFacts | undefined;
+}
+
+/** A reader for files whose lines with facts each contain one of the needles. */
+export function readerOf(needles: readonly string[], facts: (line: string) => LineFacts | undefined): LineReader {
+  const bytes = needles.map((needle) => Buffer.from(needle));
+  return { mayHold: (line) => bytes.some((needle) => line.includes(needle)), facts };
+}
+
 const NEWLINE = 0x0a;
+const CHUNK_BYTES = 1024 * 1024;
 
 /** One message of a conversation, as the search sees it. */
 export interface HistoryMessage {
@@ -68,29 +88,60 @@ export function snippetOf(text: string, terms: string[], size: SnippetSize = CAR
 }
 
 /**
- * Hands every complete line from `from` to `onLine`, reading in chunks so a
- * large file never sits in memory whole. Returns the offset after the last
- * complete line; an unfinished last line is read again next time.
+ * Hands the facts of every complete line from `from` to `onFacts`, reading
+ * in chunks so a large file never sits in memory whole; a line the reader
+ * rules out is skipped undecoded. Returns the offset after the last complete
+ * line; an unfinished last line is read again next time.
  */
-function readLines(file: string, from: number, onLine: (line: string) => void): number {
+function readLines(file: string, from: number, reader: LineReader, onFacts: (facts: LineFacts) => void): number {
+  const take = (line: Buffer) => {
+    if (!reader.mayHold(line)) return;
+    let facts: LineFacts | undefined;
+    try {
+      facts = reader.facts(line.toString("utf8"));
+    } catch {
+      // A line the reader cannot take is skipped, not the rest of the file.
+      return;
+    }
+    if (facts) onFacts(facts);
+  };
   const fd = fs.openSync(file, "r");
   try {
-    const chunk = Buffer.alloc(1024 * 1024);
+    const chunk = Buffer.alloc(CHUNK_BYTES);
     let offset = from;
-    let carry: Buffer = Buffer.alloc(0);
+    // The start of a line that runs on past the chunks read: copies, since the chunk is read into again.
+    let carried: Buffer[] = [];
+    let carriedBytes = 0;
     for (;;) {
       const got = fs.readSync(fd, chunk, 0, chunk.length, offset);
       if (got === 0) break;
-      const data = carry.length ? Buffer.concat([carry, chunk.subarray(0, got)]) : Buffer.from(chunk.subarray(0, got));
+      offset += got;
+      const data = chunk.subarray(0, got);
       let lineStart = 0;
-      for (let nl = data.indexOf(NEWLINE); nl >= 0; nl = data.indexOf(NEWLINE, lineStart)) {
-        onLine(data.toString("utf8", lineStart, nl));
+      let nl = data.indexOf(NEWLINE);
+      if (carriedBytes > 0) {
+        if (nl < 0) {
+          carried.push(Buffer.from(data));
+          carriedBytes += got;
+          continue;
+        }
+        // Only the line that began in an earlier chunk is put together; the rest is read where it lies.
+        take(Buffer.concat([...carried, data.subarray(0, nl)]));
+        carried = [];
+        carriedBytes = 0;
+        lineStart = nl + 1;
+        nl = data.indexOf(NEWLINE, lineStart);
+      }
+      for (; nl >= 0; nl = data.indexOf(NEWLINE, lineStart)) {
+        take(data.subarray(lineStart, nl));
         lineStart = nl + 1;
       }
-      carry = Buffer.from(data.subarray(lineStart));
-      offset += got;
+      if (lineStart < got) {
+        carried = [Buffer.from(data.subarray(lineStart))];
+        carriedBytes = got - lineStart;
+      }
     }
-    return offset - carry.length;
+    return offset - carriedBytes;
   } finally {
     fs.closeSync(fd);
   }
@@ -103,6 +154,8 @@ function readLines(file: string, from: number, onLine: (line: string) => void): 
  */
 export class HistoryIndex {
   readonly messages: HistoryMessage[] = [];
+  /** Each message's text lowercased, once, for matching. */
+  private readonly lowered: string[] = [];
   /** The paths the conversation's tool calls worked on, lowercased, with forward slashes. */
   readonly paths = new Set<string>();
   private offset = 0;
@@ -110,8 +163,7 @@ export class HistoryIndex {
 
   constructor(
     private readonly file: string,
-    /** What one line holds, or nothing. */
-    private readonly read: (line: string) => LineFacts | undefined,
+    private readonly reader: LineReader,
   ) {}
 
   /** The file was read at least once; before that a refresh reads it whole. */
@@ -129,21 +181,32 @@ export class HistoryIndex {
     }
     const identity = `${st.ino}:${st.birthtimeMs}`;
     if (identity !== this.identity || st.size < this.offset) {
-      this.messages.length = 0;
+      this.replaceMessages([]);
       this.paths.clear();
       this.offset = 0;
       this.identity = identity;
     }
     if (st.size === this.offset) return;
     try {
-      this.offset = readLines(this.file, this.offset, (line) => {
-        const facts = this.read(line);
-        if (facts?.message) this.messages.push(facts.message);
-        for (const p of facts?.paths ?? []) this.paths.add(p.toLowerCase().replace(/\\/g, "/"));
+      this.offset = readLines(this.file, this.offset, this.reader, (facts) => {
+        if (facts.message) this.add(facts.message);
+        for (const p of facts.paths ?? []) this.paths.add(p.toLowerCase().replace(/\\/g, "/"));
       });
     } catch {
       // Read again next time.
     }
+  }
+
+  /** Holds these messages instead of the ones it held. */
+  protected replaceMessages(messages: readonly HistoryMessage[]): void {
+    this.messages.length = 0;
+    this.lowered.length = 0;
+    for (const message of messages) this.add(message);
+  }
+
+  private add(message: HistoryMessage): void {
+    this.messages.push(message);
+    this.lowered.push(message.text.toLowerCase());
   }
 
   /** The messages containing every term, written within `range`, newest first; `limit` of them cut into snippets. */
@@ -153,7 +216,9 @@ export class HistoryIndex {
     const hits: SearchHit[] = [];
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const message = this.messages[i]!;
-      if (!inRange(message.at, range) || !matchesAll(message.text, terms)) continue;
+      if (!inRange(message.at, range)) continue;
+      const lower = this.lowered[i]!;
+      if (!terms.every((term) => lower.includes(term))) continue;
       count++;
       if (hits.length < limit) hits.push({ index: i, role: message.role, at: message.at, ...snippetOf(message.text, terms, size) });
     }
@@ -169,5 +234,31 @@ export class HistoryIndex {
   touched(parts: readonly string[]): boolean {
     for (const p of this.paths) if (parts.some((part) => p.includes(part))) return true;
     return false;
+  }
+}
+
+/**
+ * An agent's conversation indexes, one per file, whether its session runs or
+ * not: a session that ends or is resumed keeps what was read of it.
+ */
+export class HistoryIndexes {
+  private readonly byFile = new Map<string, HistoryIndex>();
+
+  constructor(private readonly reader: LineReader) {}
+
+  /** The file's index, made on first use. */
+  of(file: string): HistoryIndex {
+    let index = this.byFile.get(file);
+    if (!index) {
+      index = new HistoryIndex(file, this.reader);
+      this.byFile.set(file, index);
+    }
+    return index;
+  }
+
+  /** Forgets every index but those of these files: the sessions running or listed. */
+  keepOnly(files: Iterable<string>): void {
+    const kept = new Set(files);
+    for (const file of [...this.byFile.keys()]) if (!kept.has(file)) this.byFile.delete(file);
   }
 }

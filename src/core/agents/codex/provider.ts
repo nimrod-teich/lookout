@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import type { AgentHostSessions } from "../../agentHost";
 import { questionIn, quoteAsk } from "../../asks";
 import { branchAt } from "../../git";
-import { HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
+import { HistoryIndexes, type HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
 import { findLastLine, JsonlTail, readLineAt } from "../../jsonlTail";
 import type { NamedProcess, ProcessFinder } from "../../proc";
 import { pulseBins } from "../../pulse";
@@ -11,7 +11,7 @@ import type { Query } from "../../terms";
 import type { Evidence } from "../../types";
 import type { UsageSnapshot } from "../../usage";
 import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, PastSession, ResumeCommand, SearchOutcome, SessionSpend } from "../agent";
-import { factsOf } from "./history";
+import { ROLLOUT_LINES } from "./history";
 import { PastRollouts, type PastRollout } from "./past";
 import { fromTerminal, matchRollouts, type LiveProcess, type RolloutInfo } from "./match";
 import { CODEX, lockedThread, sessionIndexFile, sessionsDir, ThreadNames } from "./paths";
@@ -45,8 +45,6 @@ interface Held {
 interface Tracked {
   tail: JsonlTail;
   state: RolloutState;
-  /** Its messages, built on the first search. */
-  history?: HistoryIndex;
   /** The file's mtime at the last look, to tell which rollouts moved since. */
   mtimeMs?: number;
   /** The last read failed. */
@@ -76,7 +74,8 @@ export class CodexProvider implements AgentProvider {
   private readonly pastRollouts: PastRollouts;
   /** The past sessions last listed, by id. */
   private pastListed = new Map<string, PastRollout>();
-  private readonly pastIndexes = new Map<string, HistoryIndex>();
+  /** The threads' messages, by rollout, built on the first search: a thread that ends or resumes keeps its own. */
+  private readonly indexes = new HistoryIndexes(ROLLOUT_LINES);
 
   constructor(
     private readonly home: string,
@@ -181,7 +180,7 @@ export class CodexProvider implements AgentProvider {
   past(scope: PastScope, exclude: ReadonlySet<string>): PastList {
     const { rollouts, capped, incomplete, also, compressed } = this.pastRollouts.list(scope, exclude);
     this.pastListed = new Map([...rollouts, ...also].map((r) => [r.id, r]));
-    for (const id of [...this.pastIndexes.keys()]) if (!this.pastListed.has(id)) this.pastIndexes.delete(id);
+    this.indexes.keepOnly([...[...this.pastListed.values()].map((r) => r.file), ...this.tracked.keys()]);
     const session = (r: PastRollout): PastSession => {
       const base: PastSession = { agent: this.id, id: r.id, cwd: r.cwd, title: r.title, resumable: r.inFolders, modifiedAt: r.modifiedAt };
       if (!editorThread(r.originator)) return base;
@@ -231,20 +230,9 @@ export class CodexProvider implements AgentProvider {
 
   private indexFor(id: string): HistoryIndex | undefined {
     const live = this.liveFiles.get(id);
-    if (live) {
-      const tracked = this.tracked.get(live);
-      if (!tracked) return undefined;
-      tracked.history ??= new HistoryIndex(live, factsOf);
-      return tracked.history;
-    }
+    if (live) return this.tracked.has(live) ? this.indexes.of(live) : undefined;
     const past = this.pastListed.get(id);
-    if (!past) return undefined;
-    let index = this.pastIndexes.get(id);
-    if (!index) {
-      index = new HistoryIndex(past.file, factsOf);
-      this.pastIndexes.set(id, index);
-    }
-    return index;
+    return past ? this.indexes.of(past.file) : undefined;
   }
 
   /** A session with nothing sent yet: Codex writes its rollout with the first prompt. */

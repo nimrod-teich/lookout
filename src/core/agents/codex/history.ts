@@ -1,6 +1,6 @@
 // What a rollout line holds for the search and the conversation tab: what you
 // wrote, what Codex replied, and the files its commands read or changed.
-import type { LineFacts } from "../../history";
+import { readerOf, type LineFacts } from "../../history";
 import { isContext } from "./rollout";
 
 interface Part {
@@ -16,6 +16,10 @@ function textOf(content: unknown, kind: "input_text" | "output_text"): string {
     .join("\n");
 }
 
+const MESSAGE = '"type":"message"';
+const FILE_CHANGE = '"FileChange"';
+const COMMAND = '"CommandExecution"';
+
 /**
  * The message or the paths a rollout line holds. Messages are the
  * `response_item` messages: yours (without the context Codex adds, such as
@@ -26,9 +30,9 @@ function textOf(content: unknown, kind: "input_text" | "output_text"): string {
  */
 export function factsOf(line: string): LineFacts | undefined {
   // Cheap gates before parsing: most of a rollout's bytes are context, tool calls and their output.
-  const message = line.includes('"type":"message"');
-  const change = line.includes('"FileChange"');
-  const command = line.includes('"CommandExecution"');
+  const message = line.includes(MESSAGE);
+  const change = line.includes(FILE_CHANGE);
+  const command = line.includes(COMMAND);
   if (!message && !change && !command) return undefined;
   let record: { timestamp?: unknown; type?: unknown; payload?: Record<string, unknown> };
   try {
@@ -60,3 +64,6 @@ export function factsOf(line: string): LineFacts | undefined {
   }
   return paths.length ? { paths } : undefined;
 }
+
+/** How the search reads a rollout: a line without one of `factsOf`'s needles is never decoded. */
+export const ROLLOUT_LINES = readerOf([MESSAGE, FILE_CHANGE, COMMAND], factsOf);

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- **A quicker search.** Each conversation is read once and kept when its session ends or is resumed, instead of being read again whole. The lines that can hold no message and no path, most of a transcript (request records, tool output, attachments, replies that only think or run a command), are skipped without being decoded, so a long history is read in about half the time. Each message is lowercased once rather than on every search, and a search starts 100 ms after the last keystroke instead of 250 ms.
+
 ## 0.1.1
 
 Ways to organise the board, Finished across windows, and usage numbers that say why they are missing.

@@ -413,6 +413,8 @@ search.append(field, clear, summary, pickers);
 beam.append(search);
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
+/** A search starts this long after the last keystroke: answering one takes milliseconds. */
+const TYPING_PAUSE_MS = 100;
 
 /** Asks for the current query's results; the days it names go by this board's time zone. */
 function askSearch(): void {
@@ -443,7 +445,7 @@ function runSearch(): void {
 
 input.addEventListener("input", () => {
   if (searchTimer) clearTimeout(searchTimer);
-  searchTimer = setTimeout(runSearch, 250);
+  searchTimer = setTimeout(runSearch, TYPING_PAUSE_MS);
 });
 input.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {

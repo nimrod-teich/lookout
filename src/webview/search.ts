@@ -71,9 +71,11 @@ function run(): void {
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
+/** A search starts this long after the last keystroke: answering one takes milliseconds. */
+const TYPING_PAUSE_MS = 100;
 input.addEventListener("input", () => {
   if (timer) clearTimeout(timer);
-  timer = setTimeout(run, 250);
+  timer = setTimeout(run, TYPING_PAUSE_MS);
 });
 input.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {

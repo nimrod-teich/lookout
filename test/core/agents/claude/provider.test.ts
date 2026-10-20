@@ -313,6 +313,32 @@ describe("ClaudeProvider", () => {
     expect(provider.history(old)).toBeUndefined();
   });
 
+  it("keeps what it read of a conversation when its session ends and when it is resumed", () => {
+    const { configDir, proc, provider } = setup();
+    const id = sessionId(1);
+    const scope = { folders: ["/work/app"], all: false, limit: 500 };
+    writeSession(configDir, proc, { pid: 11, sessionId: id, cwd: "/work/app" });
+    appendEntries(transcriptPath(configDir, "/work/app", id), [
+      { type: "ai-title", aiTitle: "Billing" },
+      { type: "user", message: { content: "Fix the billing webhook" } },
+    ]);
+    provider.poll(0);
+    provider.past(scope, new Set([id]));
+    const read = provider.history(id);
+    expect(read?.map((m) => m.text)).toEqual(["Fix the billing webhook"]);
+    // Ended: an earlier session now, with the messages already read.
+    proc.procs.delete(11);
+    provider.poll(0);
+    expect(provider.past(scope, new Set()).sessions.map((p) => p.id)).toEqual([id]);
+    expect(provider.history(id)).toBe(read);
+    // Resumed: live again, still the same.
+    writeSession(configDir, proc, { pid: 12, sessionId: id, cwd: "/work/app" });
+    provider.poll(0);
+    provider.past(scope, new Set([id]));
+    expect(provider.history(id)).toBe(read);
+    expect(provider.search(parseQuery("billing"), 3, 0).results.map((r) => r.id)).toEqual([id]);
+  });
+
   it("narrows a search by time, project, branch and the files the tool calls worked on", () => {
     const { configDir, proc, provider } = setup();
     const day = 86_400_000;

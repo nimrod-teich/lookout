@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { factsOf } from "../../../../src/core/agents/codex/history";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { factsOf, ROLLOUT_LINES } from "../../../../src/core/agents/codex/history";
 import { EDITED, fixtureFile, fixtureLines, IDLE } from "./fixtures";
+
+/** Every rollout under the fixtures. */
+function rollouts(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    return entry.isDirectory() ? rollouts(full) : entry.name.endsWith(".jsonl") ? [full] : [];
+  });
+}
 
 describe("the facts of a Codex rollout line", () => {
   it("are what you wrote and what Codex replied, without the context Codex adds", () => {
@@ -29,5 +39,20 @@ describe("the facts of a Codex rollout line", () => {
     expect(factsOf('{"type":"event_msg","payload":{"type":"token_count"}}')).toBeUndefined();
     expect(factsOf('{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"x"}]}}')).toBeUndefined();
     expect(factsOf("{broken")).toBeUndefined();
+  });
+});
+
+describe("the search's reader of a rollout", () => {
+  it("never rules out a line factsOf takes something from, in any fixture rollout", () => {
+    let taken = 0;
+    for (const file of rollouts(path.join(__dirname, "../../../fixtures/codex"))) {
+      for (const text of fs.readFileSync(file, "utf8").split("\n")) {
+        if (text === "" || factsOf(text) === undefined) continue;
+        taken++;
+        expect(ROLLOUT_LINES.mayHold(Buffer.from(text)), `${path.basename(file)}: ${text.slice(0, 80)}`).toBe(true);
+      }
+    }
+    expect(taken).toBeGreaterThan(20);
+    expect(ROLLOUT_LINES.mayHold(Buffer.from('{"type":"event_msg","payload":{"type":"token_count"}}'))).toBe(false);
   });
 });
