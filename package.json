@@ -2,7 +2,7 @@
   "name": "lookout",
   "displayName": "Lookout",
   "description": "See every AI coding agent session at a glance: what is working, what needs you, and where. Works with Claude Code, Codex and Copilot CLI.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "nimrod-teich",
   "license": "MIT",
   "repository": {
