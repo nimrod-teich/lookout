@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=nimrod-teich.lookout"><img src="https://badgen.net/vs-marketplace/v/nimrod-teich.lookout?label=Marketplace&color=FFB000&labelColor=0A2436" alt="Version on the Visual Studio Marketplace"></a>
-  <a href="https://open-vsx.org/extension/nimrod-teich/lookout"><img src="https://img.shields.io/open-vsx/v/nimrod-teich/lookout?style=flat-square&labelColor=0A2436&color=FFB000&label=Open%20VSX" alt="Version on Open VSX"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=nimrod-teich.lookout"><img src="https://badgen.net/vs-marketplace/v/nimrod-teich.lookout?label=Marketplace&color=FFB000&labelColor=0A2436&cache=300" alt="Version on the Visual Studio Marketplace"></a>
+  <a href="https://open-vsx.org/extension/nimrod-teich/lookout"><img src="https://img.shields.io/open-vsx/v/nimrod-teich/lookout?style=flat-square&labelColor=0A2436&color=FFB000&label=Open%20VSX&cacheSeconds=300" alt="Version on Open VSX"></a>
   <img src="https://img.shields.io/badge/VS%20Code-1.94%2B-17607F?style=flat-square&labelColor=0A2436" alt="VS Code 1.94 or newer">
   <img src="https://img.shields.io/badge/works%20with-Claude%20Code%20%7C%20Codex%20%7C%20Copilot-17607F?style=flat-square&labelColor=0A2436" alt="Works with Claude Code, Codex and Copilot">
   <img src="https://img.shields.io/badge/runs%20on-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL%20%7C%20remotes-17607F?style=flat-square&labelColor=0A2436" alt="Runs on Linux, macOS, Windows, WSL and remote hosts">
