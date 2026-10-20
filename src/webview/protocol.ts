@@ -61,8 +61,8 @@ export type ToBoard =
       /** How the board makes its sections: by state, or by what the sessions share. */
       group?: GroupBy;
     }
-  /** `pending` sessions were not read yet; the board asks again. */
-  | { type: "search"; query: string; results: SearchResult[]; pending: number };
+  /** `pending` sessions were not read yet: the board asks again, unless `follows`, when the extension sends the results again as they are read. */
+  | { type: "search"; query: string; results: SearchResult[]; pending: number; follows?: boolean };
 
 /** Webview → extension. */
 export type FromBoard =

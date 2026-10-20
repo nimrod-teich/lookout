@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { HistoryIndex, HistoryIndexes, PAGE_SNIPPET, readerOf, snippetOf, type HistoryMessage, type LineFacts, type LineReader } from "../../src/core/history";
+import { HistoryIndex, HistoryIndexes, PAGE_SNIPPET, readerOf, scanFile, snippetOf, type HistoryMessage, type LineFacts, type LineReader } from "../../src/core/history";
 import { tempConfigDir } from "./helpers";
 
 /** The test file format: one `{ role, text, at?, paths? }` per line. */
@@ -192,7 +192,7 @@ describe("HistoryIndex", () => {
 
 describe("readerOf", () => {
   it("lets through the lines with any of its needles", () => {
-    const reader = readerOf(['"type":"message"', '"FileChange"'], () => undefined);
+    const reader = readerOf("test", ['"type":"message"', '"FileChange"'], () => undefined);
     expect(reader.mayHold(Buffer.from('{"type":"message","text":"hi"}'))).toBe(true);
     expect(reader.mayHold(Buffer.from('{"item":"FileChange"}'))).toBe(true);
     expect(reader.mayHold(Buffer.from('{"type":"token_count"}'))).toBe(false);
@@ -213,5 +213,43 @@ describe("HistoryIndexes", () => {
     const again = indexes.of(a);
     expect(again).not.toBe(first);
     expect(again.ready).toBe(false);
+  });
+});
+
+describe("scanFile", () => {
+  it("reads from where the last read stopped, and from the start when the file was replaced or cut short", () => {
+    const f = file([{ role: "you", text: "one" }]);
+    const first = scanFile(f, READER, 0, "")!;
+    expect(first).toMatchObject({ reset: true, end: fs.statSync(f).size });
+    expect(first.facts.map((facts) => facts.message?.text)).toEqual(["one"]);
+    fs.appendFileSync(f, `${JSON.stringify({ role: "agent", text: "two" })}\n${JSON.stringify({ role: "you", text: "unfinished" })}`);
+    const next = scanFile(f, READER, first.end, first.identity)!;
+    expect(next.reset).toBe(false);
+    expect(next.facts.map((facts) => facts.message?.text)).toEqual(["two"]);
+    // The unfinished line is read again next time, once it ends.
+    expect(next.end).toBeLessThan(next.size);
+    // Nothing new.
+    expect(scanFile(f, READER, next.end, next.identity)?.facts).toEqual([]);
+    fs.writeFileSync(f, `${JSON.stringify({ role: "you", text: "short" })}\n`);
+    const cut = scanFile(f, READER, next.end, next.identity)!;
+    expect(cut.reset).toBe(true);
+    expect(cut.facts.map((facts) => facts.message?.text)).toEqual(["short"]);
+    expect(scanFile(path.join(tempConfigDir(), "missing.jsonl"), READER, 0, "")).toBeUndefined();
+  });
+});
+
+describe("HistoryIndex.apply", () => {
+  it("takes in a read only from where the index stands", () => {
+    const f = file([{ role: "you", text: "one" }, { role: "agent", text: "two" }]);
+    const index = new HistoryIndex(f, { ...READER, name: "test" });
+    const job = index.scan()!;
+    expect(job).toMatchObject({ file: f, reader: "test", from: 0, identity: "" });
+    const scanned = scanFile(f, READER, job.from, job.identity)!;
+    index.apply(scanned, job);
+    expect(index.messages.map((m) => m.text)).toEqual(["one", "two"]);
+    // The same read again comes from where the index no longer is.
+    index.apply(scanned, job);
+    expect(index.messages).toHaveLength(2);
+    expect(new HistoryIndex(f, READER).scan()).toBeUndefined();
   });
 });

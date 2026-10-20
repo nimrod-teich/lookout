@@ -210,6 +210,7 @@ export const ViewColumn = { Active: -1, Beside: -2, One: 1 };
 export interface StubWebviewPanel {
   viewType: string;
   title: string;
+  visible: boolean;
   webview: StubWebviewView["webview"];
   reveal(column?: unknown, preserveFocus?: boolean): void;
   onDidDispose(listener: () => void): { dispose(): void };
@@ -225,6 +226,7 @@ function createWebviewPanel(viewType: string, title: string): StubWebviewPanel {
   const panel: StubWebviewPanel = {
     viewType,
     title,
+    visible: true,
     webview: view.webview,
     reveal: (column, preserveFocus) => void stub.ops.push([`panel:${viewType}`, "reveal", [column, preserveFocus]]),
     onDidDispose: disposed.event,

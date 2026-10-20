@@ -58,6 +58,8 @@ export interface BoardActions {
   markAllSeen(): void;
   /** Dismisses the question a session's last message asks. */
   dismiss(id: string): void;
+  /** A search's results fill in as the conversations are read in the background: they are sent again as they do. */
+  follows?(): boolean;
   /** Searches the live and the past sessions' conversations. */
   /** `zone`: the board's time zone, minutes behind UTC, for the days the query names. */
   search(query: string, zone?: number): SearchOutcome;
@@ -71,6 +73,8 @@ export interface BoardActions {
 export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
   private view: vscode.WebviewView | undefined;
   private readonly subscriptions: vscode.Disposable[] = [];
+  /** The search the board last asked for, sent again as more conversations are read. */
+  private lastSearch: { query: string; zone?: number } | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -79,6 +83,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
+    this.lastSearch = undefined;
     view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "dist"), vscode.Uri.joinPath(this.extensionUri, "media")] };
     view.webview.html = this.html(view.webview);
     this.subscriptions.push(
@@ -91,6 +96,18 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
       }),
     );
     this.refresh();
+  }
+
+  /** Sends the last search's results again: more conversations were read. */
+  followSearch(): void {
+    if (this.lastSearch && this.view?.visible) this.answer(this.lastSearch);
+  }
+
+  private answer(search: { query: string; zone?: number }): void {
+    const outcome = this.actions.search(search.query, search.zone);
+    const results: ToBoard = { type: "search", query: search.query, results: outcome.results, pending: outcome.pending };
+    if (this.actions.follows?.()) results.follows = true;
+    void this.view?.webview.postMessage(results);
   }
 
   /** Sends the sessions to the board and updates the view's badge. */
@@ -125,6 +142,8 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
     const message = raw as Partial<FromBoard>;
     switch (message?.type) {
       case "ready":
+        // A page that loads has nothing in its search box.
+        this.lastSearch = undefined;
         this.refresh();
         return;
       case "jump":
@@ -163,10 +182,14 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
       }
       case "search": {
         if (typeof message.query !== "string") return;
+        // An empty box: nothing to answer, nor to follow.
+        if (message.query.trim() === "") {
+          this.lastSearch = undefined;
+          return;
+        }
         const zone = typeof message.zone === "number" && Math.abs(message.zone) <= 24 * 60 ? message.zone : undefined;
-        const outcome = this.actions.search(message.query, zone);
-        const results: ToBoard = { type: "search", query: message.query, results: outcome.results, pending: outcome.pending };
-        void this.view?.webview.postMessage(results);
+        this.lastSearch = { query: message.query, zone };
+        this.answer(this.lastSearch);
         return;
       }
       case "resume": {

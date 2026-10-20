@@ -1,5 +1,6 @@
 **
 !dist/extension.js
+!dist/reader.js
 !dist/board.js
 !dist/findings.js
 !dist/search.js

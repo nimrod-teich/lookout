@@ -105,4 +105,4 @@ function startsWith(bytes: Buffer, prefix: Buffer): boolean {
 }
 
 /** How the search reads a transcript. */
-export const TRANSCRIPT_LINES: LineReader = { mayHold: mayHoldFacts, facts: factsOf };
+export const TRANSCRIPT_LINES: LineReader = { name: "claude-transcript", mayHold: mayHoldFacts, facts: factsOf };

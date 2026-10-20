@@ -8,7 +8,8 @@ import { HistoryIndexes, type HistoryIndex, type HistoryMessage, type SnippetSiz
 import { JsonlTail } from "../../jsonlTail";
 import type { ProcessFinder, ProcessTable } from "../../proc";
 import { pulseBins } from "../../pulse";
-import { searchConversations, type Searchable } from "../../search";
+import type { BackgroundReads } from "../../background";
+import { readConversationsAhead, searchConversations, type Searchable } from "../../search";
 import type { Query } from "../../terms";
 import type { Evidence } from "../../types";
 import type { AgentProvider, AgentSession, AgentStatus, PastList, PastScope, PastSession, ResumeCommand, SearchOutcome } from "../agent";
@@ -352,26 +353,32 @@ export class CopilotProvider implements AgentProvider {
   }
 
   /** Searches the live and the past sessions' messages (see `searchConversations`). */
-  search(parsed: Query, limit: number, budgetMs: number, snippet?: SnippetSize): SearchOutcome {
-    const conversations = function* (this: CopilotProvider): Iterable<Searchable> {
-      for (const [id, file] of this.liveFiles) {
-        const cwd = this.tracked.get(file)?.state.cwd ?? "";
-        yield { id, cwd, branch: cwd ? branchAt(cwd) : undefined, index: () => this.indexFor(id) };
-      }
-      for (const [id, past] of this.pastListed) {
-        if (this.liveFiles.has(id)) continue;
-        // Copilot records no branch: `branch:` picks only the live sessions.
-        yield { id, pastModifiedAt: Math.round(past.mtimeMs), cwd: past.cwd, index: () => this.indexFor(id) };
-      }
-      for (const [id, chat] of this.localListed) yield { id, pastModifiedAt: chat.state === "idle" ? Math.round(chat.mtimeMs) : undefined, cwd: chat.cwd, index: () => this.indexFor(id) };
-    };
-    return searchConversations(conversations.call(this), parsed, limit, budgetMs, snippet);
+  search(parsed: Query, limit: number, budgetMs: number, snippet?: SnippetSize, background?: BackgroundReads): SearchOutcome {
+    return searchConversations(this.conversations(), parsed, limit, budgetMs, snippet, background);
   }
 
-  history(id: string): HistoryMessage[] | undefined {
+  readAhead(background: BackgroundReads): void {
+    readConversationsAhead(this.conversations(), background);
+  }
+
+  /** The sessions a search covers: the live ones, the past ones last listed, and VS Code's Local chats. */
+  private *conversations(): Iterable<Searchable> {
+    for (const [id, file] of this.liveFiles) {
+      const cwd = this.tracked.get(file)?.state.cwd ?? "";
+      yield { id, cwd, branch: cwd ? branchAt(cwd) : undefined, index: () => this.indexFor(id) };
+    }
+    for (const [id, past] of this.pastListed) {
+      if (this.liveFiles.has(id)) continue;
+      // Copilot records no branch: `branch:` picks only the live sessions.
+      yield { id, pastModifiedAt: Math.round(past.mtimeMs), cwd: past.cwd, index: () => this.indexFor(id) };
+    }
+    for (const [id, chat] of this.localListed) yield { id, pastModifiedAt: chat.state === "idle" ? Math.round(chat.mtimeMs) : undefined, cwd: chat.cwd, index: () => this.indexFor(id) };
+  }
+
+  history(id: string, background?: BackgroundReads): HistoryMessage[] | undefined {
     const index = this.indexFor(id);
     if (!index) return undefined;
-    index.refresh();
+    index.update(background);
     return index.messages;
   }
 

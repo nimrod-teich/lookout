@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import type { BackgroundReads } from "./background";
 import { inRange, matchRanges, termsOf, type TimeRange } from "./terms";
 
 export { termsOf, type TimeRange };
@@ -16,6 +17,8 @@ export interface LineFacts {
  * they are never decoded nor parsed.
  */
 export interface LineReader {
+  /** Names the reader for the thread that reads in the background (see `LINE_READERS`); a reader without one is read where it is asked. */
+  name?: string;
   /** The line can hold facts: false only for a line `facts` would find nothing in. */
   mayHold(line: Buffer): boolean;
   /** What a line holds. */
@@ -23,9 +26,55 @@ export interface LineReader {
 }
 
 /** A reader for files whose lines with facts each contain one of the needles. */
-export function readerOf(needles: readonly string[], facts: (line: string) => LineFacts | undefined): LineReader {
+export function readerOf(name: string, needles: readonly string[], facts: (line: string) => LineFacts | undefined): LineReader {
   const bytes = needles.map((needle) => Buffer.from(needle));
-  return { mayHold: (line) => bytes.some((needle) => line.includes(needle)), facts };
+  return { name, mayHold: (line) => bytes.some((needle) => line.includes(needle)), facts };
+}
+
+/** A read of what a conversation file gained, as the thread that reads in the background gets it. */
+export interface Scan {
+  file: string;
+  /** The reader's name. */
+  reader: string;
+  /** Where the last read stopped: after its last complete line. */
+  from: number;
+  /** The file's identity at the last read; another one means the file was replaced, and is read from its start. */
+  identity: string;
+}
+
+/** What a scan found. */
+export interface Scanned {
+  identity: string;
+  /** The file's size when it was looked at. */
+  size: number;
+  /** The file was replaced or cut short: `facts` are its whole conversation, and what was read before goes. */
+  reset: boolean;
+  /** Where the next read starts. */
+  end: number;
+  facts: LineFacts[];
+}
+
+/** Reads a conversation file from `from`, as the reader sees it; nothing when the file cannot be read. */
+export function scanFile(file: string, reader: LineReader, from: number, identity: string): Scanned | undefined {
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(file);
+  } catch {
+    return undefined;
+  }
+  const now = `${st.ino}:${st.birthtimeMs}`;
+  const reset = now !== identity || st.size < from;
+  const start = reset ? 0 : from;
+  const facts: LineFacts[] = [];
+  if (st.size === start) return { identity: now, size: st.size, reset, end: start, facts };
+  try {
+    const end = readLines(file, start, reader, (found) => facts.push(found));
+    return { identity: now, size: st.size, reset, end, facts };
+  } catch {
+    // A file that cannot be read (not ours to read, held by another process) is tried again once it changes,
+    // not at every look; a replaced one is at least emptied of what was read before.
+    return { identity: now, size: st.size, reset, end: start, facts: [] };
+  }
 }
 
 const NEWLINE = 0x0a;
@@ -160,6 +209,8 @@ export class HistoryIndex {
   readonly paths = new Set<string>();
   private offset = 0;
   private identity = "";
+  /** The file's size at the last read: a file whose last line is unfinished is not read again until it changes. */
+  private seenSize = -1;
 
   constructor(
     private readonly file: string,
@@ -171,30 +222,55 @@ export class HistoryIndex {
     return this.identity !== "";
   }
 
-  /** Reads what the file gained since the last call. */
+  /** Reads what the file gained since the last call, here and now. */
   refresh(): void {
-    let st: fs.Stats;
-    try {
-      st = fs.statSync(this.file);
-    } catch {
+    const job = { file: this.file, reader: this.reader.name ?? "", from: this.offset, identity: this.identity };
+    const scanned = scanFile(this.file, this.reader, this.offset, this.identity);
+    if (scanned) this.apply(scanned, job);
+  }
+
+  /**
+   * Reads what the file gained: in the background when `background` is given
+   * and the reader has a name, else here and now. A file that did not change
+   * since it was last read is not read.
+   */
+  update(background?: BackgroundReads): void {
+    if (!background || !this.reader.name) {
+      this.refresh();
       return;
     }
-    const identity = `${st.ino}:${st.birthtimeMs}`;
-    if (identity !== this.identity || st.size < this.offset) {
+    if (!background.has(this) && this.changed()) background.read(this);
+  }
+
+  /** The file is not as it was at the last read: replaced, grown or cut short, or never read. */
+  private changed(): boolean {
+    try {
+      const st = fs.statSync(this.file);
+      return `${st.ino}:${st.birthtimeMs}` !== this.identity || st.size !== this.seenSize;
+    } catch {
+      return false;
+    }
+  }
+
+  /** The read that takes the index from where it is; none for a reader without a name. */
+  scan(): Scan | undefined {
+    return this.reader.name ? { file: this.file, reader: this.reader.name, from: this.offset, identity: this.identity } : undefined;
+  }
+
+  /** Takes in what a scan found, unless the index moved since the scan was asked for. */
+  apply(scanned: Scanned, job: Scan): void {
+    if (job.from !== this.offset || job.identity !== this.identity) return;
+    if (scanned.reset) {
       this.replaceMessages([]);
       this.paths.clear();
-      this.offset = 0;
-      this.identity = identity;
     }
-    if (st.size === this.offset) return;
-    try {
-      this.offset = readLines(this.file, this.offset, this.reader, (facts) => {
-        if (facts.message) this.add(facts.message);
-        for (const p of facts.paths ?? []) this.paths.add(p.toLowerCase().replace(/\\/g, "/"));
-      });
-    } catch {
-      // Read again next time.
+    for (const facts of scanned.facts) {
+      if (facts.message) this.add(facts.message);
+      for (const p of facts.paths ?? []) this.paths.add(p.toLowerCase().replace(/\\/g, "/"));
     }
+    this.offset = scanned.end;
+    this.identity = scanned.identity;
+    this.seenSize = scanned.size;
   }
 
   /** Holds these messages instead of the ones it held. */

@@ -3,7 +3,8 @@ import * as path from "node:path";
 import { HistoryIndexes, type HistoryIndex, type HistoryMessage, type SnippetSize } from "../../history";
 import { branchAt } from "../../git";
 import type { Query } from "../../terms";
-import { searchConversations, type Searchable } from "../../search";
+import type { BackgroundReads } from "../../background";
+import { readConversationsAhead, searchConversations, type Searchable } from "../../search";
 import { findLastLine, JsonlTail, lineStartAtOrAfter, readLineAt } from "../../jsonlTail";
 import { TRANSCRIPT_LINES } from "./history";
 import { PastTranscripts } from "./past";
@@ -178,17 +179,23 @@ export class ClaudeProvider implements AgentProvider {
    * `searchConversations`), the live sessions first. A session's project and
    * branch are where it works now, or, for a past one, where it last worked.
    */
-  search(parsed: Query, limit: number, budgetMs: number, snippet?: SnippetSize): SearchOutcome {
-    const conversations = function* (this: ClaudeProvider): Iterable<Searchable> {
-      for (const [id, tracked] of this.tracked) yield { id, cwd: tracked.state.cwd ?? "", branch: tracked.state.gitBranch, index: () => this.indexFor(id) };
-      for (const id of this.pastFiles.keys()) {
-        if (this.tracked.has(id)) continue;
-        // Without what the list said of it, no project or branch picks it.
-        const meta = this.pastMeta.get(id);
-        yield { id, pastModifiedAt: meta?.modifiedAt, cwd: meta?.cwd ?? "", branch: meta?.branch, index: () => this.indexFor(id) };
-      }
-    };
-    return searchConversations(conversations.call(this), parsed, limit, budgetMs, snippet);
+  search(parsed: Query, limit: number, budgetMs: number, snippet?: SnippetSize, background?: BackgroundReads): SearchOutcome {
+    return searchConversations(this.conversations(), parsed, limit, budgetMs, snippet, background);
+  }
+
+  readAhead(background: BackgroundReads): void {
+    readConversationsAhead(this.conversations(), background);
+  }
+
+  /** The conversations a search covers: the live sessions', then the past ones last listed. */
+  private *conversations(): Iterable<Searchable> {
+    for (const [id, tracked] of this.tracked) yield { id, cwd: tracked.state.cwd ?? "", branch: tracked.state.gitBranch, index: () => this.indexFor(id) };
+    for (const id of this.pastFiles.keys()) {
+      if (this.tracked.has(id)) continue;
+      // Without what the list said of it, no project or branch picks it.
+      const meta = this.pastMeta.get(id);
+      yield { id, pastModifiedAt: meta?.modifiedAt, cwd: meta?.cwd ?? "", branch: meta?.branch, index: () => this.indexFor(id) };
+    }
   }
 
   /**
@@ -233,10 +240,10 @@ export class ClaudeProvider implements AgentProvider {
   }
 
 
-  history(id: string): HistoryMessage[] | undefined {
+  history(id: string, background?: BackgroundReads): HistoryMessage[] | undefined {
     const index = this.indexFor(id);
     if (!index) return undefined;
-    index.refresh();
+    index.update(background);
     return index.messages;
   }
 

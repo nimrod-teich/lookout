@@ -112,6 +112,43 @@ describe("Board", () => {
     expect(webviewView.posted.at(-1)).toEqual({ type: "search", query: "cache", results: [{ id: "00000000-0000-4000-8000-000000000001", count: 2, hits: [] }], pending: 0 });
   });
 
+  it("sends its last search again as more conversations are read, saying it follows, while the board is in view", () => {
+    let found = 0;
+    const search = vi.fn((query: string) => ({ results: Array.from({ length: found }, (_, i) => ({ id: `${query}-${i}`, count: 1, hits: [] })), pending: 2 - found }));
+    const { board, webviewView } = setup([view()], undefined, { search, follows: () => true });
+    // Nothing searched yet: nothing to send.
+    board.followSearch();
+    expect(search).not.toHaveBeenCalled();
+    webviewView.receive({ type: "search", query: "cache", zone: -60 });
+    expect(webviewView.posted.at(-1)).toEqual({ type: "search", query: "cache", results: [], pending: 2, follows: true });
+    found = 2;
+    board.followSearch();
+    expect(search).toHaveBeenLastCalledWith("cache", -60);
+    expect(webviewView.posted.at(-1)).toMatchObject({ type: "search", query: "cache", pending: 0, follows: true });
+    expect((webviewView.posted.at(-1) as { results: unknown[] }).results).toHaveLength(2);
+    // Out of view: it asks again when it is back.
+    webviewView.setVisible(false);
+    const calls = search.mock.calls.length;
+    board.followSearch();
+    expect(search).toHaveBeenCalledTimes(calls);
+  });
+
+  it("stops following a search once the box is cleared, or the page loads again", () => {
+    const { board, actions, webviewView } = setup([view()], undefined, { follows: () => true });
+    webviewView.receive({ type: "search", query: "cache" });
+    expect(actions.search).toHaveBeenCalledTimes(1);
+    const posted = webviewView.posted.length;
+    // Cleared: nothing to answer, and nothing more is sent as conversations are read.
+    webviewView.receive({ type: "search", query: "" });
+    board.followSearch();
+    expect(actions.search).toHaveBeenCalledTimes(1);
+    expect(webviewView.posted).toHaveLength(posted);
+    webviewView.receive({ type: "search", query: "cache" });
+    webviewView.receive({ type: "ready" });
+    board.followSearch();
+    expect(actions.search).toHaveBeenCalledTimes(2);
+  });
+
   it("passes the board's time zone along with a search, and drops one that is not a zone", () => {
     const { actions, webviewView } = setup([view()]);
     webviewView.receive({ type: "search", query: "cache since:today", zone: -180 });
