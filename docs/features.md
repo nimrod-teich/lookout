@@ -70,7 +70,7 @@ Every part of Lookout, in full: the board and its cards, favourites, the Earlier
 </table>
 
 <p align="center">
-  <img src="../media/readme/board.png" width="380" alt="The board in the dark theme: harbour, legend, usage, and the cards grouped by state">
+  <img src="../media/readme/board.png" width="380" alt="The board in the dark theme: harbour, legend, the search box with its Group by and Sort by chips, usage, and the cards grouped by state">
   <img src="../media/readme/board-light.png" width="380" alt="The same board in the light theme">
 </p>
 
