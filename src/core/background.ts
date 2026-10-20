@@ -2,6 +2,7 @@
 // every extension in the window shares, Claude Code's included: one file at
 // a time, in the order asked for, the results taken in as each one is done.
 import type { HistoryIndex, Scan, Scanned } from "./history";
+import type { SavedPositions } from "./savedPositions";
 
 /** Reads conversation files somewhere other than the caller's thread. */
 export interface Scanner {
@@ -30,6 +31,8 @@ export class BackgroundReads {
     private readonly onDidRead: () => void,
     /** The scanner broke, and why: the owner reads some other way from now on. */
     private readonly onBroken?: (error: unknown) => void,
+    /** Where the places of the messages are kept for the next window, and read from by this one. */
+    private readonly saved?: SavedPositions,
   ) {}
 
   /** The scanner broke, and nothing more is read here. */
@@ -65,10 +68,12 @@ export class BackgroundReads {
         this.queue.delete(index);
         this.current = index;
         const job = index.scan();
+        // A file never read: from where a window saved its messages' places, when one did.
+        if (job && this.saved && job.from === 0 && job.identity === "") job.saved = { entry: this.saved.entryFile(job.file), build: this.saved.build };
         const scanned = job ? await this.scan(job) : undefined;
         this.current = undefined;
         if (this.disposed) return;
-        if (job && scanned) index.apply(scanned, job);
+        if (job && scanned && index.apply(scanned, job) && moved(scanned)) this.saved?.later(index);
         this.notify();
       }
     } finally {
@@ -118,5 +123,11 @@ export class BackgroundReads {
     if (this.notifyTimer) clearTimeout(this.notifyTimer);
     this.notifyTimer = undefined;
     this.scanner.dispose();
+    this.saved?.dispose();
   }
+}
+
+/** The scan took the index further than what was saved of it. */
+function moved(scanned: Scanned): boolean {
+  return scanned.restored === undefined ? scanned.reset || scanned.lines.length > 0 : scanned.end > scanned.restored;
 }

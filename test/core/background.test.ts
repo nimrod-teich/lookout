@@ -5,6 +5,7 @@ import { TRANSCRIPT_LINES } from "../../src/core/agents/claude/history";
 import { inThreadScanner } from "../../src/core/agents/lineReaders";
 import { BackgroundReads, type Scanner } from "../../src/core/background";
 import { HistoryIndex, scanFile, type Scan, type Scanned } from "../../src/core/history";
+import { SavedPositions } from "../../src/core/savedPositions";
 import { WorkerScanner } from "../../src/core/workerScanner";
 import { buildReader } from "../readerBundle";
 import { appendEntries, tempConfigDir } from "./helpers";
@@ -192,10 +193,27 @@ describe("the reading thread", () => {
     try {
       const scanned = await scanner.scan({ file, reader: TRANSCRIPT_LINES.name!, from: 0, identity: "" });
       expect(scanned).toEqual(scanFile(file, TRANSCRIPT_LINES, 0, ""));
-      expect(scanned?.facts).toHaveLength(6);
+      expect(scanned?.lines).toHaveLength(6);
       // A reader it does not know, or a file that is gone: nothing found.
       expect(await scanner.scan({ file, reader: "unknown", from: 0, identity: "" })).toBeUndefined();
       expect(await scanner.scan({ file: `${file}.gone`, reader: TRANSCRIPT_LINES.name!, from: 0, identity: "" })).toBeUndefined();
+    } finally {
+      scanner.dispose();
+    }
+  });
+
+  it("reads a conversation from the places a window saved, in a thread of its own", async () => {
+    const file = transcript(3, "deploy");
+    const whole = new HistoryIndex(file, TRANSCRIPT_LINES);
+    whole.refresh();
+    const saved = new SavedPositions(path.join(tempConfigDir(), "positions"), "build-1");
+    saved.later(whole);
+    saved.dispose();
+    const scanner = new WorkerScanner(path.join(dir, "dist", "reader.js"));
+    try {
+      const scanned = await scanner.scan({ file, reader: TRANSCRIPT_LINES.name!, from: 0, identity: "", saved: { entry: saved.entryFile(file), build: "build-1" } });
+      expect(scanned?.restored).toBe(fs.statSync(file).size);
+      expect(scanned?.lines.map((line) => line.facts.message?.text)).toEqual(whole.messages.map((m) => m.text));
     } finally {
       scanner.dispose();
     }
