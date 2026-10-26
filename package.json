@@ -144,13 +144,8 @@
         "category": "Lookout"
       },
       {
-        "command": "lookout.card.editNote",
-        "title": "Change Note…",
-        "category": "Lookout"
-      },
-      {
-        "command": "lookout.card.removeNote",
-        "title": "Remove Note",
+        "command": "lookout.card.showNotes",
+        "title": "Show Notes",
         "category": "Lookout"
       }
     ],
@@ -205,11 +200,7 @@
           "when": "false"
         },
         {
-          "command": "lookout.card.editNote",
-          "when": "false"
-        },
-        {
-          "command": "lookout.card.removeNote",
+          "command": "lookout.card.showNotes",
           "when": "false"
         }
       ],
@@ -256,16 +247,11 @@
         },
         {
           "command": "lookout.card.addNote",
-          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && !lookoutNoted",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card'",
           "group": "2_edit@2"
         },
         {
-          "command": "lookout.card.editNote",
-          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutNoted",
-          "group": "2_edit@2"
-        },
-        {
-          "command": "lookout.card.removeNote",
+          "command": "lookout.card.showNotes",
           "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutNoted",
           "group": "2_edit@3"
         }

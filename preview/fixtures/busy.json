@@ -225,7 +225,8 @@
         "source": "session file",
         "at": 3000
       },
-      "lastWriteAt": 4000
+      "lastWriteAt": 4000,
+      "noteCount": 2
     },
     {
       "id": "5",
@@ -366,7 +367,8 @@
       "cwd": "/home/bob/projects/lava-connect",
       "branch": "solana-peak",
       "resumable": true,
-      "modifiedAt": 1814400000
+      "modifiedAt": 1814400000,
+      "noteCount": 3
     },
     {
       "id": "p3",

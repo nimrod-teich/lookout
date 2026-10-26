@@ -734,31 +734,36 @@ describe("the extension", () => {
       expect(stub.panels.find((panel) => panel.viewType === "lookout.findings")?.posted.at(-1)).toMatchObject({ type: "conversation", session: { id: ELSEWHERE } });
     }, 60_000);
 
-    it("keeps a note on an earlier session, shows it on the card, finds it in a search, and takes it away with an empty one", async () => {
+    it("keeps a thread of notes on an earlier session, shows the newest on the card, finds each in a search, and takes them away one by one", async () => {
       const recordsDir = path.join(configDir, "global-storage", "sessions");
       // A note written in another window, on a session this window's folders do not hold.
-      new SessionRecords(recordsDir).setNote(ELSEWHERE, "the other service's deploy, kept for its runbook", { agent: "claude-code", title: "deploy the other service", cwd: "/work/other" });
+      new SessionRecords(recordsDir).addNote(ELSEWHERE, "the other service's deploy, kept for its runbook", { agent: "claude-code", title: "deploy the other service", cwd: "/work/other" });
       activate(context());
       const { boardView, listed } = openBoard();
       await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
-      const noted = () => (listed()?.past as { id: string; note?: string }[] | undefined)?.find((p) => p.id === HERE)?.note;
-      expect(noted()).toBeUndefined();
+      const card = () => (listed()?.past as { id: string; note?: string; noteCount?: number }[] | undefined)?.find((p) => p.id === HERE);
+      expect(card()?.note).toBeUndefined();
       const notePanels = () => stub.panels.filter((panel) => panel.viewType === "lookout.note");
       const notePanel = () => notePanels().at(-1)!;
-      const shown = () => notePanel().posted.at(-1) as { type: string; note?: string };
-      // The note button opens the note's own page, which says there is no note yet; a save keeps what was typed, line by line.
+      const thread = () => (notePanel().posted.filter((m) => (m as { type: string }).type === "notes").at(-1) as { notes: { id: string; text: string }[]; max: number } | undefined)?.notes;
+      // The note button opens the notes' page, empty; a note keeps its lines.
       boardView.receive({ type: "note", id: HERE });
-      await vi.waitFor(() => expect(shown()).toMatchObject({ type: "note", session: { id: HERE, title: "tune the deploy script", live: false }, note: undefined, max: NOTE_MAX }), WAIT);
-      expect(notePanel().title).toBe("Note: tune the deploy script");
-      notePanel().receive({ type: "save", id: HERE, text: "  has the deploy  recipe \n\nsecond line  " });
-      await vi.waitFor(() => expect(noted()).toBe("has the deploy  recipe\n\nsecond line"), WAIT);
-      await vi.waitFor(() => expect(shown()).toMatchObject({ type: "saved", id: HERE, note: "has the deploy  recipe\n\nsecond line" }), WAIT);
-      // Kept for the machine: one file per noted session under the extension's storage.
+      await vi.waitFor(() => expect(notePanel()?.posted.at(-1)).toMatchObject({ type: "notes", session: { id: HERE, title: "tune the deploy script", live: false }, notes: [], max: NOTE_MAX }), WAIT);
+      expect(notePanel().title).toBe("Notes: tune the deploy script");
+      notePanel().receive({ type: "add", id: HERE, text: "  has the deploy  recipe \n\nsecond line  " });
+      await vi.waitFor(() => expect(card()).toMatchObject({ note: "has the deploy  recipe\n\nsecond line", noteCount: 1 }), WAIT);
+      notePanel().receive({ type: "add", id: HERE, text: "the staging run went fine" });
+      await vi.waitFor(() => expect(card()).toMatchObject({ note: "the staging run went fine", noteCount: 2 }), WAIT);
+      // Kept for the machine: one file per noted session under the extension's storage, the thread in it.
       expect(fs.readdirSync(recordsDir)).toHaveLength(2);
+      // A blank note adds nothing, and says so.
+      notePanel().receive({ type: "add", id: HERE, text: " \n " });
+      await vi.waitFor(() => expect(notePanel().posted.at(-1)).toEqual({ type: "failed", id: HERE }), WAIT);
+      expect(card()?.noteCount).toBe(2);
       // A session the board was not shown gets no page.
       boardView.receive({ type: "note", id: "nope" });
       expect(notePanels()).toHaveLength(1);
-      // The search finds the note, first among the session's matches, and has:note lists every noted session, the other project's included.
+      // The search finds a note by its words, before the session's messages; has:note lists every note of every noted session, newest first.
       boardView.receive({ type: "search", query: "deploy recipe", zone: 0 });
       const found = () => boardView.posted.filter((m) => (m as { type: string }).type === "search").at(-1) as { query: string; results: { id: string; count: number; hits: { role: string; snippet: string }[] }[] };
       expect(found().query).toBe("deploy recipe");
@@ -766,32 +771,28 @@ describe("the extension", () => {
       boardView.receive({ type: "search", query: "has:note", zone: 0 });
       expect(
         found()
-          .results.map((r) => [r.id, r.count, r.hits[0]?.snippet])
+          .results.map((r) => [r.id, r.count, r.hits.map((hit) => hit.snippet)])
           .sort(),
       ).toEqual([
-        [HERE, 0, "has the deploy  recipe\n\nsecond line"],
-        [ELSEWHERE, 0, "the other service's deploy, kept for its runbook"],
+        [HERE, 0, ["the staging run went fine", "has the deploy  recipe\n\nsecond line"]],
+        [ELSEWHERE, 0, ["the other service's deploy, kept for its runbook"]],
       ]);
       // The command opens the search page on them.
       await stub.commands.get("lookout.showNotes")!();
       expect(stub.panels.find((panel) => panel.viewType === "lookout.search")?.posted.at(-1)).toEqual({ type: "query", query: "has:note" });
-      // The page again, the same tab, starting from the note as it is; Remove note takes it away; a save of blanks is a removal too.
+      // The page again, the same tab, with the thread as it is; each note goes on its own, the record with the last.
       boardView.receive({ type: "note", id: HERE });
       expect(notePanels()).toHaveLength(1);
-      await vi.waitFor(() => expect(shown()).toMatchObject({ type: "note", note: "has the deploy  recipe\n\nsecond line" }), WAIT);
-      notePanel().receive({ type: "remove", id: HERE });
-      await vi.waitFor(() => expect(noted()).toBeUndefined(), WAIT);
+      const [first, second] = thread()!;
+      notePanel().receive({ type: "remove", id: HERE, noteId: first!.id });
+      await vi.waitFor(() => expect(card()).toMatchObject({ note: "the staging run went fine", noteCount: 1 }), WAIT);
+      notePanel().receive({ type: "edit", id: HERE, noteId: second!.id, text: "  " });
+      await vi.waitFor(() => expect(card()?.note).toBeUndefined(), WAIT);
       expect(fs.readdirSync(recordsDir)).toHaveLength(1);
-      notePanel().receive({ type: "save", id: HERE, text: "again" });
-      await vi.waitFor(() => expect(noted()).toBe("again"), WAIT);
-      notePanel().receive({ type: "save", id: HERE, text: " \n " });
-      await vi.waitFor(() => expect(noted()).toBeUndefined(), WAIT);
-      expect(fs.readdirSync(recordsDir)).toHaveLength(1);
-      // A note written in another window shows on the card here, through the watch on the records.
-      new SessionRecords(recordsDir).setNote(HERE, "written elsewhere", { agent: "claude-code", title: "tune the deploy script", cwd: "/work/app" });
-      await vi.waitFor(() => expect(noted()).toBe("written elsewhere"), WAIT);
-      // The open page hears of it too.
-      await vi.waitFor(() => expect(shown()).toMatchObject({ type: "note", note: "written elsewhere" }), WAIT);
+      // A note written in another window shows on the card here, through the watch on the records, and on the open page.
+      new SessionRecords(recordsDir).addNote(HERE, "written elsewhere", { agent: "claude-code", title: "tune the deploy script", cwd: "/work/app" });
+      await vi.waitFor(() => expect(card()?.note).toBe("written elsewhere"), WAIT);
+      await vi.waitFor(() => expect(thread()?.map((note) => note.text)).toEqual(["written elsewhere"]), WAIT);
     }, 60_000);
 
     it("takes a session out of the archive once it runs again", async () => {
@@ -928,25 +929,39 @@ describe("the extension", () => {
     board.resolveWebviewView(boardView);
     const shown = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions?: { id: string; note?: string }[] } | undefined)?.sessions?.[0];
     await vi.waitFor(() => expect(shown()).toMatchObject({ id: SESSION }), WAIT);
+    const shownNotes = () => shown() as { note?: string; noteCount?: number } | undefined;
     const card = { webviewSection: "card", sessionId: SESSION };
     const notePanels = () => stub.panels.filter((panel) => panel.viewType === "lookout.note");
     const notePanel = () => notePanels().at(-1)!;
-    // Add Note… opens the note's page on the session, which says it is running; a save from the page keeps the note.
+    const thread = () => (notePanel().posted.filter((m) => (m as { type: string }).type === "notes").at(-1) as { notes: { id: string; text: string; at: number; editedAt?: number }[] } | undefined)?.notes;
+    // Add Note… opens the notes' page on the session, which says it is running and has none yet; a note added there lands on the card.
     await stub.commands.get("lookout.card.addNote")!(card);
-    await vi.waitFor(() => expect(notePanel()?.posted.at(-1)).toMatchObject({ type: "note", session: { id: SESSION, title: "Empty tab", live: true }, note: undefined }), WAIT);
-    notePanel().receive({ type: "save", id: SESSION, text: "kept for the migration" });
-    await vi.waitFor(() => expect(shown()?.note).toBe("kept for the migration"), WAIT);
+    await vi.waitFor(() => expect(notePanel()?.posted.at(-1)).toMatchObject({ type: "notes", session: { id: SESSION, title: "Empty tab", live: true }, notes: [] }), WAIT);
+    expect(notePanel().title).toBe("Notes: Empty tab");
+    notePanel().receive({ type: "add", id: SESSION, text: "kept for the migration" });
+    await vi.waitFor(() => expect(shownNotes()).toMatchObject({ note: "kept for the migration", noteCount: 1 }), WAIT);
+    expect(thread()?.map((note) => note.text)).toEqual(["kept for the migration"]);
     // The record names the session as the board does.
     const records = new SessionRecords(path.join(configDir, "global-storage", "sessions"));
-    expect(records.get(SESSION)).toMatchObject({ agent: "claude-code", title: "Empty tab", cwd: "/work/app", note: "kept for the migration" });
-    // Change Note… brings the same page forward, with the note as it is.
-    await stub.commands.get("lookout.card.editNote")!(card);
+    expect(records.get(SESSION)).toMatchObject({ agent: "claude-code", title: "Empty tab", cwd: "/work/app", notes: [{ text: "kept for the migration" }] });
+    // A second note joins the thread, each with its own time; the card shows the newest and how many there are.
+    notePanel().receive({ type: "add", id: SESSION, text: "the rollback is in the second message" });
+    await vi.waitFor(() => expect(shownNotes()).toMatchObject({ note: "the rollback is in the second message", noteCount: 2 }), WAIT);
+    const [first, second] = thread()!;
+    expect(first!.at).toBeLessThanOrEqual(second!.at);
+    // Show Notes brings the same page forward.
+    await stub.commands.get("lookout.card.showNotes")!(card);
     expect(notePanels()).toHaveLength(1);
-    await vi.waitFor(() => expect(notePanel().posted.at(-1)).toMatchObject({ type: "note", note: "kept for the migration" }), WAIT);
-    notePanel().receive({ type: "save", id: SESSION, text: "kept for the migration, done" });
-    await vi.waitFor(() => expect(shown()?.note).toBe("kept for the migration, done"), WAIT);
-    await stub.commands.get("lookout.card.removeNote")!(card);
-    await vi.waitFor(() => expect(shown()?.note).toBeUndefined(), WAIT);
+    // One note changed, marked as changed; one taken away; the last taken away leaves the card without notes.
+    notePanel().receive({ type: "edit", id: SESSION, noteId: first!.id, text: "kept for the migration, done" });
+    await vi.waitFor(() => expect(thread()?.[0]).toMatchObject({ text: "kept for the migration, done", editedAt: expect.any(Number) }), WAIT);
+    notePanel().receive({ type: "remove", id: SESSION, noteId: second!.id });
+    await vi.waitFor(() => expect(shownNotes()).toMatchObject({ note: "kept for the migration, done", noteCount: 1 }), WAIT);
+    notePanel().receive({ type: "remove", id: SESSION, noteId: first!.id });
+    await vi.waitFor(() => expect(shownNotes()?.note).toBeUndefined(), WAIT);
+    // A change to a note that is not there says so, and changes nothing.
+    notePanel().receive({ type: "edit", id: SESSION, noteId: "nope", text: "x" });
+    await vi.waitFor(() => expect(notePanel().posted.at(-1)).toEqual({ type: "failed", id: SESSION }), WAIT);
     // Not running, or no card at all: nothing happens.
     await stub.commands.get("lookout.card.addNote")!({ ...card, sessionId: "gone" });
     await stub.commands.get("lookout.card.addNote")!();

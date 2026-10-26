@@ -38,7 +38,7 @@ body {
   display: none !important;
 }
 
-/* The top: the session the note is on, and the way to it -------------------- */
+/* The top: the session the notes are on, and the way to it ------------------ */
 
 .top {
   display: grid;
@@ -118,47 +118,144 @@ body {
   background: rgba(255, 176, 0, 0.22);
 }
 
-/* The note ------------------------------------------------------------------- */
+/* The thread: each note with its time, oldest first ------------------------- */
 
-.editor {
-  position: relative;
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.thread .empty {
+  margin: 4px 0 6px;
+  color: var(--muted);
+  font-style: italic;
 }
 
 .note {
+  padding: 10px 14px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid color-mix(in srgb, var(--note) 70%, transparent);
+  border-radius: 8px;
+  background: var(--paper-2);
+}
+
+.note-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.stamp {
+  color: var(--note);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.edited {
+  font-style: italic;
+  opacity: 0.8;
+}
+
+.note-actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.note:hover .note-actions,
+.note:focus-within .note-actions,
+.note-actions.editing {
+  opacity: 1;
+}
+
+.note-actions.editing {
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.note-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.link.danger:hover,
+.link.armed {
+  color: var(--danger);
+}
+
+.link.armed {
+  font-weight: 600;
+}
+
+/* The box for the next note, and the box a note is changed in -------------- */
+
+.draft,
+.edit-box {
   display: block;
   box-sizing: border-box;
   width: 100%;
-  min-height: 240px;
-  padding: 16px 18px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--well);
   color: var(--ink);
   font: inherit;
-  font-size: calc(var(--vscode-font-size) + 1px);
-  line-height: 1.6;
+  line-height: 1.55;
   resize: none;
   overflow: hidden;
   outline: none;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.note::placeholder {
+.draft {
+  min-height: 96px;
+}
+
+.edit-box {
+  min-height: 72px;
+}
+
+.draft::placeholder {
   color: color-mix(in srgb, var(--muted) 70%, transparent);
 }
 
-.note:focus {
+.draft:focus,
+.edit-box:focus {
   border-color: color-mix(in srgb, var(--note) 60%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--note) 18%, transparent);
 }
 
-/* Under it: how the note stands, and what to do with it ---------------------- */
+/* Under the box: how the draft stands, and the button that keeps it -------- */
 
 .foot {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 10px;
   color: var(--muted);
   font-size: 12px;
 }
@@ -166,10 +263,6 @@ body {
 .status {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.status.dirty {
-  color: var(--lamp);
 }
 
 .status.failed {
@@ -210,23 +303,21 @@ body {
   background: transparent;
 }
 
-.btn.save {
+.btn.save,
+.btn.add {
   border-color: rgba(255, 176, 0, 0.45);
   background: rgba(255, 176, 0, 0.12);
   color: var(--lamp);
 }
 
-.btn.save:not(:disabled):hover {
+.btn.save:not(:disabled):hover,
+.btn.add:not(:disabled):hover {
   background: rgba(255, 176, 0, 0.22);
 }
 
-.btn.remove {
-  color: var(--muted);
-}
-
-.btn.remove:hover {
-  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
-  color: var(--danger);
+.btn.small {
+  padding: 3px 10px;
+  font-size: 12px;
 }
 
 @media (max-width: 480px) {

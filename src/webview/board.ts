@@ -965,7 +965,21 @@ function noteHead(note: string): string {
   return lines.length > 1 ? `${lines[0]} …` : (lines[0] ?? "");
 }
 
-/** The button on a card's title row that writes a note on the session, or changes the one it has; lit while there is one. */
+/** What a card knows of a session's notes: the newest, when it was written, and how many there are. */
+interface NotesOnCard {
+  note?: string;
+  noteAt?: number;
+  noteCount?: number;
+}
+
+/** "3 notes, the newest 2h ago", for a hover. */
+function notesSummary(view: NotesOnCard): string {
+  const count = view.noteCount ?? (view.note === undefined ? 0 : 1);
+  const age = view.noteAt === undefined ? "" : `, the newest ${formatElapsed(now() - view.noteAt)} ago`;
+  return count === 1 ? `1 note${view.noteAt === undefined ? "" : `, ${formatElapsed(now() - view.noteAt)} ago`}` : `${count} notes${age}`;
+}
+
+/** The button on a card's title row that opens the session's notes; lit while there are any. */
 function noteButton(id: string): HTMLElement {
   const button = el("span", "note-btn");
   button.setAttribute("role", "button");
@@ -977,21 +991,22 @@ function noteButton(id: string): HTMLElement {
   return button;
 }
 
-function setNoteButton(card: HTMLElement, note: string | undefined): void {
+function setNoteButton(card: HTMLElement, view: NotesOnCard): void {
   const button = card.querySelector<HTMLElement>(".note-btn");
   if (!button) return;
-  button.classList.toggle("on", note !== undefined);
-  const title = note === undefined ? "Add a note: a line to remember the session by" : `Note: ${note}\nClick to change it`;
+  const noted = view.note !== undefined;
+  button.classList.toggle("on", noted);
+  const title = noted ? `${notesSummary(view)}:\n${view.note}\nClick to read or add notes` : "Add a note: a line to remember the session by";
   if (button.title !== title) button.title = title;
-  button.setAttribute("aria-label", note === undefined ? "Add a note" : "Change the note");
+  button.setAttribute("aria-label", noted ? "The notes" : "Add a note");
 }
 
-/** Under the title row of a card that is not running: the note on the session, one line; a click changes it. */
+/** Under the title row of a card that is not running: the newest note, its first line, and how many more; a click opens them all. */
 function noteLine(id: string): HTMLElement {
   const line = el("span", "note-line hidden");
   line.setAttribute("role", "button");
   line.innerHTML = NOTE_ICON;
-  line.append(el("span", "note-text"));
+  line.append(el("span", "note-text"), el("span", "note-more hidden"));
   line.addEventListener("click", (event) => {
     event.stopPropagation();
     vscode.postMessage({ type: "note", id });
@@ -999,14 +1014,19 @@ function noteLine(id: string): HTMLElement {
   return line;
 }
 
-function setNoteLine(card: HTMLElement, note: string | undefined): void {
+function setNoteLine(card: HTMLElement, view: NotesOnCard | undefined): void {
   const line = card.querySelector<HTMLElement>(".note-line");
   if (!line) return;
+  const note = view?.note;
   line.classList.toggle("hidden", note === undefined);
   const text = line.querySelector(".note-text")!;
   const head = note === undefined ? "" : noteHead(note);
   if (text.textContent !== head) text.textContent = head;
-  line.title = note === undefined ? "" : `${note}\nClick to change the note`;
+  const more = line.querySelector<HTMLElement>(".note-more")!;
+  const extra = (view?.noteCount ?? 1) - 1;
+  more.classList.toggle("hidden", note === undefined || extra < 1);
+  more.textContent = extra > 0 ? `+${extra}` : "";
+  line.title = note === undefined || !view ? "" : `${notesSummary(view)}:\n${note}\nClick to read or add notes`;
 }
 
 /**
@@ -1048,7 +1068,7 @@ function cardTitle(view: SessionView): string {
   if (quiet !== undefined) lines.push(`Nothing written to its transcript for ${formatElapsed(quiet)}.`);
   const evidence = describeEvidence(view.evidence, now());
   if (evidence) lines.push(evidence);
-  if (view.note !== undefined) lines.push(`Note: ${noteHead(view.note)}`);
+  if (view.note !== undefined) lines.push(`${(view.noteCount ?? 1) > 1 ? `Notes (${view.noteCount}), the newest` : "Note"}: ${noteHead(view.note)}`);
   return lines.join("\n");
 }
 
@@ -1091,7 +1111,7 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   card.querySelector(".elapsed")!.textContent = elapsedText(view);
   setStar(card, view.id);
   // On a running card the note is in the hover only: the board stays quiet.
-  setNoteButton(card, view.note);
+  setNoteButton(card, view);
   const line = card.querySelector(".line")!;
   const second = cardLine(view, now());
   line.querySelector(".mark")!.textContent = MARKS[view.state];
@@ -1273,10 +1293,10 @@ function updatePastCard(card: HTMLElement, view: PastView): void {
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   setStar(card, view.id);
-  setNoteButton(card, view.note);
+  setNoteButton(card, view);
   // While a search shows the note among the matches, the line under the title would say it twice.
   const result = query === "" ? undefined : hits.get(view.id);
-  setNoteLine(card, result?.hits.some((hit) => hit.role === "note") ? undefined : view.note);
+  setNoteLine(card, result?.hits.some((hit) => hit.role === "note") ? undefined : view);
   const chipsEl = card.querySelector(".chips")!;
   const values: Chip[] = [{ text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
   if (view.branch) values.push(branchChip(view.branch));
@@ -1331,9 +1351,9 @@ function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, v
   card.querySelector(".title")!.textContent = shown.title;
   card.querySelector(".elapsed")!.textContent = live ? `${stateTitle(live)}${elapsedText(live) ? ` · ${elapsedText(live)}` : ""}` : pastElapsed(view!);
   setStar(card, shown.id);
-  setNoteButton(card, shown.note);
+  setNoteButton(card, shown);
   // A running favourite keeps its note in the hover, like any running card.
-  setNoteLine(card, live ? undefined : shown.note);
+  setNoteLine(card, live ? undefined : shown);
   const values: Chip[] = [{ text: shown.worktree ? `${shown.project} · ${shown.worktree}` : shown.project }];
   if (shown.branch) values.push(branchChip(shown.branch));
   const chipsEl = card.querySelector(".chips")!;

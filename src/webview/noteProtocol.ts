@@ -1,4 +1,4 @@
-/** The session a note is on, as the note page heads it. */
+/** The session a note page is on, as the page heads it. */
 export interface NoteSession {
   id: string;
   title: string;
@@ -11,11 +11,18 @@ export interface NoteSession {
   openable?: boolean;
 }
 
-/** Extension → note page: the session and the note on it; how a save went. */
-export type ToNote =
-  | { type: "note"; session: NoteSession; note: string | undefined; noteAt?: number; max: number; markers?: boolean }
-  | { type: "saved"; id: string; note: string | undefined; noteAt?: number }
-  | { type: "failed"; id: string };
+/** One note of the thread, as the page shows it. */
+export interface NoteItem {
+  id: string;
+  text: string;
+  /** Epoch ms it was written. */
+  at: number;
+  /** Epoch ms it was last changed, when it was. */
+  editedAt?: number;
+}
+
+/** Extension → note page: the session and its notes, oldest first; a change that could not be kept. */
+export type ToNote = { type: "notes"; session: NoteSession; notes: NoteItem[]; max: number; markers?: boolean } | { type: "failed"; id: string };
 
 /** Note page → extension. */
-export type FromNote = { type: "ready" } | { type: "save"; id: string; text: string } | { type: "remove"; id: string } | { type: "open"; id: string };
+export type FromNote = { type: "ready" } | { type: "add"; id: string; text: string } | { type: "edit"; id: string; noteId: string; text: string } | { type: "remove"; id: string; noteId: string } | { type: "open"; id: string };

@@ -36,12 +36,11 @@ describe("the card menu", () => {
       [
         "lookout.card.addNote",
         "lookout.card.conversation",
-        "lookout.card.editNote",
         "lookout.card.jump",
         "lookout.card.park",
-        "lookout.card.removeNote",
         "lookout.card.rename",
         "lookout.card.seen",
+        "lookout.card.showNotes",
         "lookout.card.star",
         "lookout.card.unpark",
         "lookout.card.unstar",

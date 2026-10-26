@@ -192,14 +192,16 @@ export function activate(context: vscode.ExtensionContext): void {
       return !live || !unreachable(live);
     },
   });
-  /** The note on a session, on a page of its own: as many lines as it takes. */
+  /** The notes on a session, on a page of their own: a thread, each note with its time. */
   const notePage = new NotePage(context.extensionUri, {
     titleOf: (id) => controller.titleOf(id) ?? id,
     agentOf,
     markers,
     whereOf: (id) => controller.whereOf(id),
-    noteOf: (id) => controller.noteRecordOf(id),
-    setNote: (id, note) => controller.setNote(id, note),
+    notesOf: (id) => controller.notesOf(id),
+    addNote: (id, text) => controller.addNote(id, text),
+    editNote: (id, noteId, text) => controller.editNote(id, noteId, text),
+    removeNote: (id, noteId) => controller.removeNote(id, noteId),
     isLive: (id) => controller.sessions.some((view) => view.id === id),
     open: async (id) => {
       const live = controller.sessions.find((view) => view.id === id);
@@ -397,8 +399,7 @@ export function activate(context: vscode.ExtensionContext): void {
       "lookout.card.park": (view) => controller.togglePark(view.id),
       "lookout.card.unpark": (view) => controller.togglePark(view.id),
       "lookout.card.addNote": (view) => editNote(view.id),
-      "lookout.card.editNote": (view) => editNote(view.id),
-      "lookout.card.removeNote": (view) => controller.setNote(view.id, undefined),
+      "lookout.card.showNotes": (view) => editNote(view.id),
     }),
     vscode.commands.registerCommand(SORT, async () => {
       const current = sort();

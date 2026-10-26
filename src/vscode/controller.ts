@@ -22,7 +22,7 @@ import { isParked, park, readParking, settle, unpark, type Parking } from "../co
 import { createProcessFinder, createProcessTable, type ProcessTable } from "../core/proc";
 import type { PastView, SessionView, State } from "../core/types";
 import { RefreshLedger } from "../core/refreshLedger";
-import { SessionRecords, type SessionSeen } from "../core/sessionRecords";
+import { latestNote, SessionRecords, type NoteEntry, type SessionSeen } from "../core/sessionRecords";
 import { hasFilters, parseQuery } from "../core/terms";
 import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
 import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../core/usageAlerts";
@@ -412,33 +412,55 @@ export class Controller implements vscode.Disposable {
     const record = this.records?.get(id);
     if (!record) return undefined;
     const cwd = record.cwd ?? "";
-    return { id, agent: record.agent, title: record.title ?? "Untitled session", ...projectOf(cwd), branch: record.branch, cwd, resumable: false, modifiedAt: record.modifiedAt ?? record.noteAt ?? 0, ...(record.note !== undefined ? { note: record.note } : {}) };
+    const latest = latestNote(record);
+    return { id, agent: record.agent, title: record.title ?? "Untitled session", ...projectOf(cwd), branch: record.branch, cwd, resumable: false, modifiedAt: record.modifiedAt ?? latest?.at ?? 0, ...noteFields(record.notes) };
   }
 
-  /** The user's note on a live or a past session. */
-  noteOf(id: string): string | undefined {
-    return this.records?.noteOf(id);
+  /** The user's notes on a live or a past session, oldest first. */
+  notesOf(id: string): NoteEntry[] {
+    return this.records?.notesOf(id) ?? [];
   }
 
-  /** The note on a session and when it was written, for the note's page; nothing for none. */
-  noteRecordOf(id: string): { note: string; noteAt?: number } | undefined {
-    const record = this.records?.get(id);
-    if (record?.note === undefined) return undefined;
-    return record.noteAt === undefined ? { note: record.note } : { note: record.note, noteAt: record.noteAt };
+  /** What the board knows a session as, for its record: as it runs, or as last listed. */
+  private seenFor(id: string): SessionSeen | undefined {
+    const live = this.current.find((view) => view.id === id);
+    if (live) return seenOf(live);
+    const past = this.pastView(id);
+    return past ? seenOf(past) : undefined;
   }
 
   /**
-   * Keeps the user's note on a session, with the session's title and place
-   * as the board has them, or takes the note away for an empty one. False
-   * when Lookout keeps no records, or knows nothing of the session.
+   * Adds a note to a session's thread, with the session's title and place
+   * as the board has them. False when Lookout keeps no records, knows
+   * nothing of the session, or the note is blank.
    */
-  setNote(id: string, note: string | undefined): boolean {
+  addNote(id: string, text: string): boolean {
     if (!this.records) return false;
-    const live = this.current.find((view) => view.id === id);
-    const past = live ? undefined : this.pastView(id);
-    const seen: SessionSeen | undefined = live ? seenOf(live) : past ? seenOf(past) : undefined;
+    const seen = this.seenFor(id);
     if (!seen && !this.records.get(id)) return false;
-    if (!this.records.setNote(id, note, seen)) return false;
+    if (!this.records.addNote(id, text, seen)) return false;
+    this.poll();
+    return true;
+  }
+
+  /** Changes one note; a blank text takes it away. False when Lookout cannot. */
+  editNote(id: string, noteId: string, text: string): boolean {
+    if (!this.records?.editNote(id, noteId, text)) return false;
+    this.poll();
+    return true;
+  }
+
+  /** Takes one note away. False when Lookout cannot. */
+  removeNote(id: string, noteId: string): boolean {
+    if (!this.records?.removeNote(id, noteId)) return false;
+    this.poll();
+    return true;
+  }
+
+  /** Takes every note on a session away. */
+  removeNotes(id: string): boolean {
+    if (!this.records) return false;
+    this.records.removeNotes(id);
     this.poll();
     return true;
   }
@@ -448,12 +470,12 @@ export class Controller implements vscode.Disposable {
     return this.records ? this.records.noted().map((record) => record.id) : [];
   }
 
-  /** The views with the user's notes on them. */
-  private annotate<T extends { id: string; note?: string }>(views: T[]): T[] {
+  /** The views with the user's notes on them: the newest, and how many there are. */
+  private annotate<T extends { id: string; note?: string; noteCount?: number }>(views: T[]): T[] {
     if (!this.records) return views;
     return views.map((view) => {
-      const note = this.records!.noteOf(view.id);
-      return note === undefined ? view : { ...view, note };
+      const fields = noteFields(this.records!.notesOf(view.id));
+      return fields.note === undefined ? view : { ...view, ...fields };
     });
   }
 
@@ -471,10 +493,10 @@ export class Controller implements vscode.Disposable {
     const seen = new Set<string>();
     const take = (id: string, cwd: string, branch: string | undefined) => {
       if (seen.has(id)) return;
-      const record = this.records!.get(id);
-      if (record?.note === undefined) return;
+      const notes = this.records!.notesOf(id);
+      if (notes.length === 0) return;
       seen.add(id);
-      out.push({ id, note: record.note, noteAt: record.noteAt, cwd, branch });
+      out.push({ id, notes, cwd, branch });
     };
     for (const view of this.current) take(view.id, view.cwd, view.branch);
     for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast]) take(view.id, view.cwd, view.branch);
@@ -1059,6 +1081,13 @@ export class Controller implements vscode.Disposable {
 }
 
 /** What a session is called and where it works, as the board has it, for its record; `withTime`: when its transcript was last written, too. */
+/** The note fields of a view: the newest note's text and time, and how many notes there are; none without notes. */
+function noteFields(notes: readonly NoteEntry[] | undefined): { note?: string; noteAt?: number; noteCount?: number } {
+  const latest = notes?.at(-1);
+  if (!latest) return {};
+  return { note: latest.text, noteAt: latest.at, noteCount: notes!.length };
+}
+
 function seenOf(view: SessionView | PastView, withTime = true): SessionSeen {
   const seen: SessionSeen = { agent: view.agent, title: view.title, cwd: view.cwd };
   if (view.branch !== undefined) seen.branch = view.branch;

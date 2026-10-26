@@ -1,14 +1,25 @@
-// What Lookout keeps about a session of its own: the note the user wrote on
-// it, and what the session was called and where it worked as last seen, so
-// the note still says which session it was once the agent's transcript is
-// gone. One small file per session under a directory every window shares,
-// written whole and moved into place, so another window never reads half of
-// one. A window watches the directory and reads it again when it changes;
-// where no watch can be had, the files' names, sizes and times are looked
-// at once a second instead.
+// What Lookout keeps about a session of its own: the notes the user wrote
+// on it, each with its time, and what the session was called and where it
+// worked as last seen, so the notes still say which session it was once
+// the agent's transcript is gone. One small file per session under a
+// directory every window shares, written whole and moved into place, so
+// another window never reads half of one. A window watches the directory
+// and reads it again when it changes; where no watch can be had, the
+// files' names, sizes and times are looked at once a second instead.
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+
+/** One note in a session's thread. */
+export interface NoteEntry {
+  /** Its own id, for a change or a removal. */
+  id: string;
+  text: string;
+  /** Epoch ms it was written. */
+  at: number;
+  /** Epoch ms it was last changed, when it was. */
+  editedAt?: number;
+}
 
 export interface SessionRecord {
   v: 1;
@@ -23,10 +34,8 @@ export interface SessionRecord {
   branch?: string;
   /** Epoch ms its transcript was last written, as last seen. */
   modifiedAt?: number;
-  /** The user's note on it: one line. */
-  note?: string;
-  /** Epoch ms the note was written. */
-  noteAt?: number;
+  /** The user's notes on it, oldest first; a record with none is deleted. */
+  notes?: NoteEntry[];
 }
 
 /** What a session was called and where it worked, as the board has it now. */
@@ -38,7 +47,7 @@ export interface SessionSeen {
   modifiedAt?: number;
 }
 
-/** The longest note: a page of its own, the first line of it on the card. */
+/** The longest note. */
 export const NOTE_MAX = 8000;
 /** One write is several file events: the listener hears once, this long after the last. */
 const WATCH_SETTLE_MS = 100;
@@ -55,6 +64,11 @@ export function cleanNote(text: string | undefined): string | undefined {
     .trim()
     .slice(0, NOTE_MAX);
   return note === "" ? undefined : note;
+}
+
+/** The newest note of a record, when it has any. */
+export function latestNote(record: SessionRecord | undefined): NoteEntry | undefined {
+  return record?.notes?.at(-1);
 }
 
 /** The records of the sessions, one file each under `dir`, named after the session id. */
@@ -128,35 +142,64 @@ export class SessionRecords {
     return this.all().get(id);
   }
 
-  /** The user's note on the session, when there is one. */
-  noteOf(id: string): string | undefined {
-    return this.get(id)?.note;
+  /** The user's notes on the session, oldest first; none for a session without. */
+  notesOf(id: string): NoteEntry[] {
+    return this.get(id)?.notes ?? [];
   }
 
-  /** The sessions with a note, newest note first. */
+  /** The sessions with notes, newest note first. */
   noted(): SessionRecord[] {
-    return [...this.all().values()].filter((record) => record.note !== undefined).sort((a, b) => (b.noteAt ?? 0) - (a.noteAt ?? 0));
+    return [...this.all().values()].filter((record) => (record.notes?.length ?? 0) > 0).sort((a, b) => (latestNote(b)?.at ?? 0) - (latestNote(a)?.at ?? 0));
   }
 
   /**
-   * Writes the note on a session, with what the session is called and where
-   * it works, or takes the note away: a record with nothing left to say is
-   * deleted. False when the note could not be written; true otherwise, with
-   * nothing to do included.
+   * Adds a note to a session, with what the session is called and where it
+   * works. The note added, or nothing when there was nothing to add or it
+   * could not be written: a blank note, or a session nothing is known about.
    */
-  setNote(id: string, note: string | undefined, seen: SessionSeen | undefined, now: number = Date.now()): boolean {
-    const clean = cleanNote(note);
+  addNote(id: string, text: string | undefined, seen: SessionSeen | undefined, now: number = Date.now()): NoteEntry | undefined {
+    const clean = cleanNote(text);
+    if (clean === undefined) return undefined;
     // As the file has it: another window may have written since.
     const before = this.fresh(id);
-    if (clean === undefined) {
-      if (before) this.remove(id);
+    const agent = seen?.agent ?? before?.agent;
+    if (!agent) return undefined;
+    const entry: NoteEntry = { id: newId(before?.notes ?? []), text: clean, at: now };
+    const record: SessionRecord = { v: 1, id, agent, ...pick(seen ?? before ?? {}), notes: [...(before?.notes ?? []), entry] };
+    return this.write(record) ? entry : undefined;
+  }
+
+  /**
+   * Changes one note; a blank text takes it away. False when the session or
+   * the note is not on record, or the record could not be written.
+   */
+  editNote(id: string, noteId: string, text: string | undefined, now: number = Date.now()): boolean {
+    const clean = cleanNote(text);
+    if (clean === undefined) return this.removeNote(id, noteId);
+    const before = this.fresh(id);
+    const entry = before?.notes?.find((note) => note.id === noteId);
+    if (!before || !entry) return false;
+    if (entry.text === clean) return true;
+    const notes = before.notes!.map((note) => (note.id === noteId ? { ...note, text: clean, editedAt: now } : note));
+    return this.write({ ...before, notes });
+  }
+
+  /** Takes one note away; the record goes with the last. False when the session or the note is not on record. */
+  removeNote(id: string, noteId: string): boolean {
+    const before = this.fresh(id);
+    if (!before?.notes?.some((note) => note.id === noteId)) return false;
+    const notes = before.notes.filter((note) => note.id !== noteId);
+    if (notes.length === 0) {
+      this.remove(id);
       return true;
     }
-    if (before?.note === clean && (!seen || sameSeen(before, seen))) return true;
-    const agent = seen?.agent ?? before?.agent;
-    if (!agent) return false;
-    const record: SessionRecord = { v: 1, id, agent, ...pick(seen ?? before ?? {}), note: clean, noteAt: before?.note === clean ? (before.noteAt ?? now) : now };
-    return this.write(record);
+    return this.write({ ...before, notes });
+  }
+
+  /** Takes every note on a session away, and the record with them. True with nothing to do included. */
+  removeNotes(id: string): boolean {
+    if (this.fresh(id)) this.remove(id);
+    return true;
   }
 
   /**
@@ -173,7 +216,7 @@ export class SessionRecords {
     this.write({ ...current, ...pick(seen) });
   }
 
-  /** Tells `listener` when the directory changes, as another window writes to it; without a watch, `all` looks at the directory's time instead. */
+  /** Tells `listener` when the directory changes, as another window writes to it; without a watch, `all` looks at the files instead. */
   watch(listener: () => void): { dispose(): void } {
     this.watcher?.close();
     this.watcher = undefined;
@@ -191,7 +234,7 @@ export class SessionRecords {
         this.watcher = undefined;
       });
     } catch {
-      // No watch: the directory's time is looked at instead.
+      // No watch: the files are looked at instead.
     }
     return { dispose: () => this.dispose() };
   }
@@ -251,6 +294,14 @@ export class SessionRecords {
   }
 }
 
+/** An id no note of the thread has. */
+function newId(notes: readonly NoteEntry[]): string {
+  for (;;) {
+    const id = crypto.randomBytes(4).toString("hex");
+    if (!notes.some((note) => note.id === id)) return id;
+  }
+}
+
 /** The fields of a record that follow the session, from what was seen. */
 function pick(seen: Partial<SessionSeen>): Pick<SessionRecord, "title" | "cwd" | "branch" | "modifiedAt"> {
   const out: Pick<SessionRecord, "title" | "cwd" | "branch" | "modifiedAt"> = {};
@@ -273,7 +324,7 @@ function readRecord(file: string): SessionRecord | undefined {
   } catch {
     return undefined;
   }
-  const r = raw as Partial<SessionRecord> | null;
+  const r = raw as (Partial<SessionRecord> & { note?: unknown; noteAt?: unknown }) | null;
   if (!r || r.v !== 1 || typeof r.id !== "string" || r.id === "" || typeof r.agent !== "string" || r.agent === "") return undefined;
   const text = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
   const time = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
@@ -286,11 +337,21 @@ function readRecord(file: string): SessionRecord | undefined {
   if (branch !== undefined) record.branch = branch;
   const modifiedAt = time(r.modifiedAt);
   if (modifiedAt !== undefined) record.modifiedAt = modifiedAt;
-  const note = cleanNote(text(r.note));
-  if (note !== undefined) {
-    record.note = note;
-    const noteAt = time(r.noteAt);
-    if (noteAt !== undefined) record.noteAt = noteAt;
+  const notes: NoteEntry[] = [];
+  for (const raw of Array.isArray(r.notes) ? r.notes : []) {
+    const n = raw as Partial<NoteEntry> | null;
+    const id = text(n?.id);
+    const body = cleanNote(text(n?.text));
+    const at = time(n?.at);
+    if (id === undefined || id === "" || body === undefined || at === undefined) continue;
+    const entry: NoteEntry = { id, text: body, at };
+    const editedAt = time(n?.editedAt);
+    if (editedAt !== undefined) entry.editedAt = editedAt;
+    notes.push(entry);
   }
+  // A record from before the thread: its one note, with its time.
+  const single = cleanNote(text(r.note));
+  if (notes.length === 0 && single !== undefined) notes.push({ id: "first", text: single, at: time(r.noteAt) ?? 0 });
+  if (notes.length > 0) record.notes = notes.sort((a, b) => a.at - b.at);
   return record;
 }

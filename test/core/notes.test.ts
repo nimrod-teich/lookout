@@ -7,8 +7,8 @@ const NOW = new Date(2026, 9, 26, 12, 0).getTime();
 const DAY = 86_400_000;
 
 const NOTED: NotedSession[] = [
-  { id: "a", note: "Has the retag recipe for the dashboard", noteAt: NOW - 1 * DAY, cwd: "/work/dashboard", branch: "main" },
-  { id: "b", note: "Superseded by the cache PR", noteAt: NOW - 10 * DAY, cwd: "/work/api", branch: "fix-cache" },
+  { id: "a", notes: [{ id: "a1", text: "Has the retag recipe for the dashboard", at: NOW - 1 * DAY }], cwd: "/work/dashboard", branch: "main" },
+  { id: "b", notes: [{ id: "b1", text: "Superseded by the cache PR", at: NOW - 10 * DAY }], cwd: "/work/api", branch: "fix-cache" },
 ];
 
 /** A result as a conversation search gives it: one message hit. */
@@ -71,10 +71,10 @@ describe("withNotes", () => {
     expect(withNotes(none, NOTED, parseQuery("has:note branch:main", NOW), 3).results.map((r) => r.id)).toEqual(["a"]);
     expect(withNotes(none, NOTED, parseQuery("has:note since:3d", NOW), 3).results.map((r) => r.id)).toEqual(["a"]);
     expect(withNotes(none, NOTED, parseQuery("has:note before:3d", NOW), 3).results.map((r) => r.id)).toEqual(["b"]);
-    // A note of unknown time falls within no bounded range.
-    const undated = [{ id: "u", note: "retag", cwd: "/w" }];
-    expect(withNotes(none, undated, parseQuery("retag since:3d", NOW), 3).results).toEqual([]);
-    expect(withNotes(none, undated, parseQuery("retag", NOW), 3).results.map((r) => r.id)).toEqual(["u"]);
+    // A note from before the times falls outside a bounded range, and within an open one.
+    const old = [{ id: "u", notes: [{ id: "u1", text: "retag", at: 0 }], cwd: "/w" }];
+    expect(withNotes(none, old, parseQuery("retag since:3d", NOW), 3).results).toEqual([]);
+    expect(withNotes(none, old, parseQuery("retag", NOW), 3).results.map((r) => r.id)).toEqual(["u"]);
   });
 
   it("leaves a search without notes as it was", () => {
@@ -98,5 +98,46 @@ describe("withNotes, the operators a note has nothing for", () => {
     // Without has:note the session stays for its messages, without the note.
     const words = withNotes({ results: [result("b", 1)], pending: 0 }, NOTED, parseQuery("message since:3d", NOW), 3);
     expect(words.results.map((r) => [r.id, r.hits.map((hit) => hit.role)])).toEqual([["b", ["agent"]]]);
+  });
+});
+
+describe("withNotes, a thread of notes", () => {
+  const THREAD: NotedSession[] = [
+    {
+      id: "t",
+      cwd: "/work/api",
+      notes: [
+        { id: "t1", text: "Started on the cache layer", at: NOW - 9 * DAY },
+        { id: "t2", text: "The cache needed a TTL per tenant", at: NOW - 2 * DAY },
+        { id: "t3", text: "Shipped, see the release notes", at: NOW - 1 * DAY },
+      ],
+    },
+  ];
+
+  it("gives each note that holds the words a match of its own, the newest first, before the messages, and counts them all", () => {
+    const merged = withNotes({ results: [result("t", 2)], pending: 0 }, THREAD, parseQuery("cache", NOW), 5);
+    expect(merged.results[0]!.count).toBe(4);
+    expect(merged.results[0]!.hits.map((hit) => [hit.role, hit.snippet])).toEqual([
+      ["note", "The cache needed a TTL per tenant"],
+      ["note", "Started on the cache layer"],
+      ["agent", "message 0"],
+      ["agent", "message 1"],
+    ]);
+    // Within the number shown, the notes first.
+    expect(withNotes({ results: [result("t", 2)], pending: 0 }, THREAD, parseQuery("cache", NOW), 2).results[0]!.hits.map((hit) => hit.role)).toEqual(["note", "note"]);
+  });
+
+  it("lists every note for has:note, newest first, and holds each to the times", () => {
+    const none = { results: [], pending: 0 };
+    expect(withNotes(none, THREAD, parseQuery("has:note", NOW), 5).results[0]!.hits.map((hit) => hit.snippet)).toEqual(["Shipped, see the release notes", "The cache needed a TTL per tenant", "Started on the cache layer"]);
+    expect(withNotes(none, THREAD, parseQuery("has:note since:3d", NOW), 5).results[0]!.hits.map((hit) => hit.snippet)).toEqual(["Shipped, see the release notes", "The cache needed a TTL per tenant"]);
+    // has:note keeps a session listed for its messages as long as one of its notes falls within the times.
+    const listed = withNotes({ results: [result("t", 0)], pending: 0 }, THREAD, parseQuery("has:note before:5d", NOW), 5);
+    expect(listed.results.map((r) => [r.id, r.hits.map((hit) => hit.snippet)])).toEqual([["t", ["Started on the cache layer"]]]);
+  });
+
+  it("passes over a session whose thread is empty", () => {
+    const empty = [{ id: "e", notes: [], cwd: "/w" }];
+    expect(withNotes({ results: [], pending: 0 }, empty, parseQuery("has:note", NOW), 3).results).toEqual([]);
   });
 });

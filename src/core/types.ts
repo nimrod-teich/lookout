@@ -106,8 +106,12 @@ export interface SessionView {
   pulseMarks?: number[];
   /** Tokens the session used so far, and what they cost. */
   spend?: SessionSpend;
-  /** The note the user wrote on it: one line, kept by Lookout for the machine. */
+  /** The newest of the user's notes on it, kept by Lookout for the machine. */
   note?: string;
+  /** Epoch ms the newest note was written. */
+  noteAt?: number;
+  /** How many notes it has. */
+  noteCount?: number;
 }
 
 /** A session that is not running, shown collapsed under the live ones. */
@@ -128,8 +132,12 @@ export interface PastView {
   resumesIn?: "panel" | "terminal";
   /** VS Code's address for it, when VS Code ran it in its Chat view. */
   vscodeSession?: string;
-  /** The note the user wrote on it: one line, kept by Lookout for the machine. */
+  /** The newest of the user's notes on it, kept by Lookout for the machine. */
   note?: string;
+  /** Epoch ms the newest note was written. */
+  noteAt?: number;
+  /** How many notes it has. */
+  noteCount?: number;
 }
 
 export interface SessionSpend {

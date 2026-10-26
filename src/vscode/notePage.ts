@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import { NOTE_MAX } from "../core/sessionRecords";
-import type { FromNote, ToNote } from "../webview/noteProtocol";
+import type { FromNote, NoteItem, ToNote } from "../webview/noteProtocol";
 
 export const NOTE_VIEW_TYPE = "lookout.note";
 
@@ -13,10 +13,14 @@ export interface NotePageActions {
   agentOf?(id: string): string | undefined;
   /** Tell the agents apart. */
   markers?(): boolean;
-  /** The note on the session, and when it was written; nothing for none. */
-  noteOf(id: string): { note: string; noteAt?: number } | undefined;
-  /** Keeps the note, or takes it away for undefined; false when Lookout cannot. */
-  setNote(id: string, note: string | undefined): boolean;
+  /** The notes on the session, oldest first. */
+  notesOf(id: string): NoteItem[];
+  /** Adds a note; false when Lookout cannot. */
+  addNote(id: string, text: string): boolean;
+  /** Changes one note; a blank text takes it away. False when Lookout cannot. */
+  editNote(id: string, noteId: string, text: string): boolean;
+  /** Takes one note away. False when Lookout cannot. */
+  removeNote(id: string, noteId: string): boolean;
   /** The session is running now. */
   isLive?(id: string): boolean;
   /** Brings the session's own tab or terminal to the front, or resumes it when it is not running. */
@@ -26,9 +30,9 @@ export interface NotePageActions {
 }
 
 /**
- * A page of its own for the note on a session: the session at the top, the
- * note under it, as many lines as it takes, kept on Ctrl+S or the button.
- * One tab per session, reused; closed by the user like any other.
+ * A page of its own for the notes on a session: the session at the top,
+ * the notes under it as a thread, each with its time, and a box for the
+ * next one. One tab per session, reused; closed by the user like any other.
  */
 export class NotePage implements vscode.Disposable {
   private readonly panels = new Map<string, vscode.WebviewPanel>();
@@ -38,7 +42,7 @@ export class NotePage implements vscode.Disposable {
     private readonly actions: NotePageActions,
   ) {}
 
-  /** Opens the note on a session, or brings its tab forward. */
+  /** Opens the notes on a session, or brings their tab forward. */
   show(id: string): void {
     const panel = this.ensurePanel(id);
     panel.title = this.titleFor(id);
@@ -46,7 +50,7 @@ export class NotePage implements vscode.Disposable {
     void panel.webview.postMessage(this.state(id));
   }
 
-  /** The open pages hear of their sessions again: a title changed, or another window wrote the note. */
+  /** The open pages hear of their sessions again: a title changed, or another window wrote a note. */
   refresh(): void {
     for (const [id, panel] of this.panels) {
       const title = this.titleFor(id);
@@ -56,16 +60,14 @@ export class NotePage implements vscode.Disposable {
   }
 
   private titleFor(id: string): string {
-    return `Note: ${this.actions.titleOf(id)}`;
+    return `Notes: ${this.actions.titleOf(id)}`;
   }
 
   private state(id: string): ToNote {
-    const kept = this.actions.noteOf(id);
     return {
-      type: "note",
+      type: "notes",
       session: { id, title: this.actions.titleOf(id), where: this.actions.whereOf(id), agent: this.actions.agentOf?.(id), live: this.actions.isLive?.(id) === true, ...(this.actions.openable?.(id) === false ? { openable: false } : {}) },
-      note: kept?.note,
-      ...(kept?.noteAt !== undefined ? { noteAt: kept.noteAt } : {}),
+      notes: this.actions.notesOf(id),
       max: NOTE_MAX,
       markers: this.actions.markers?.(),
     };
@@ -74,7 +76,7 @@ export class NotePage implements vscode.Disposable {
   private ensurePanel(id: string): vscode.WebviewPanel {
     const open = this.panels.get(id);
     if (open) return open;
-    const panel = vscode.window.createWebviewPanel(NOTE_VIEW_TYPE, "Lookout: Note", vscode.ViewColumn.Active, {
+    const panel = vscode.window.createWebviewPanel(NOTE_VIEW_TYPE, "Lookout: Notes", vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "dist"), vscode.Uri.joinPath(this.extensionUri, "media")],
@@ -90,23 +92,28 @@ export class NotePage implements vscode.Disposable {
 
   private receive(id: string, panel: vscode.WebviewPanel, raw: unknown): void {
     const message = raw as Partial<FromNote>;
+    let ok: boolean | undefined;
     switch (message?.type) {
       case "ready":
         void panel.webview.postMessage(this.state(id));
         return;
-      case "save":
-      case "remove": {
-        const text = message.type === "save" && typeof message.text === "string" ? message.text : undefined;
-        const ok = this.actions.setNote(id, text);
-        const kept = ok ? this.actions.noteOf(id) : undefined;
-        const answer: ToNote = ok ? { type: "saved", id, note: kept?.note, ...(kept?.noteAt !== undefined ? { noteAt: kept.noteAt } : {}) } : { type: "failed", id };
-        void panel.webview.postMessage(answer);
-        return;
-      }
+      case "add":
+        ok = typeof message.text === "string" && this.actions.addNote(id, message.text);
+        break;
+      case "edit":
+        ok = typeof message.noteId === "string" && typeof message.text === "string" && this.actions.editNote(id, message.noteId, message.text);
+        break;
+      case "remove":
+        ok = typeof message.noteId === "string" && this.actions.removeNote(id, message.noteId);
+        break;
       case "open":
         void this.actions.open(id);
         return;
+      default:
+        return;
     }
+    // The thread as it is now, whether the change took or not; a change that did not is said.
+    void panel.webview.postMessage(ok ? this.state(id) : { type: "failed", id });
   }
 
   private html(webview: vscode.Webview): string {
@@ -120,7 +127,7 @@ export class NotePage implements vscode.Disposable {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${style}">
-<title>Lookout: Note</title>
+<title>Lookout: Notes</title>
 </head>
 <body>
 <div id="root"></div>

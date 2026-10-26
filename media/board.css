@@ -1569,6 +1569,23 @@ body.vscode-reduce-motion .hover-card {
   color: var(--note);
 }
 
+/* How many notes more than the one shown. */
+.note-line .note-more {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--note) 16%, transparent);
+  color: var(--note);
+  font-size: calc(var(--vscode-font-size) - 2px);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  line-height: 15px;
+}
+
+.note-line .note-more.hidden {
+  display: none;
+}
+
 .note-line .note-text {
   min-width: 0;
   overflow: hidden;
