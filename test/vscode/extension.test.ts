@@ -826,9 +826,11 @@ describe("the extension", () => {
         // And searched.
         boardView.receive({ type: "search", query: "deploy", zone: 0 });
         expect(found().results.map((r) => [r.id, r.count, r.hits.map((hit) => hit.role)])).toEqual([[HERE, 1, ["you"]]]);
-        // A note can be written on it.
-        stub.inputBox = () => "gone, but had the deploy steps";
+        // A note can be written on it, from its page.
         boardView.receive({ type: "note", id: HERE });
+        const notePanel = () => stub.panels.filter((panel) => panel.viewType === "lookout.note").at(-1)!;
+        await vi.waitFor(() => expect(notePanel()?.posted.at(-1)).toMatchObject({ type: "notes", session: { id: HERE } }), WAIT);
+        notePanel().receive({ type: "add", id: HERE, text: "gone, but had the deploy steps" });
         await vi.waitFor(() => expect((purged() as { note?: string }[] | undefined)?.[0]?.note).toBe("gone, but had the deploy steps"), WAIT);
         // Forgotten, after a confirmation, since the copy is the only one left: gone from Purged and from the search; the note stays.
         stub.notificationAnswer = undefined;
