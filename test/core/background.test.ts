@@ -185,7 +185,7 @@ describe("BackgroundReads", () => {
 
 describe("the reading thread", () => {
   const dir = path.dirname(path.dirname(buildReader()));
-  afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+  afterAll(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 
   it("reads a transcript as the extension host would, in a thread of its own", async () => {
     const scanner = new WorkerScanner(path.join(dir, "dist", "reader.js"));

@@ -124,7 +124,8 @@ beforeEach(() => {
 afterEach(() => {
   for (const subscription of subscriptions) subscription.dispose();
   child.kill();
-  fs.rmSync(configDir, { recursive: true, force: true });
+  // A reading thread may still be letting go of the store's file: Windows refuses the removal until it has, so it is tried again for a moment.
+  fs.rmSync(configDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe("the extension", () => {
