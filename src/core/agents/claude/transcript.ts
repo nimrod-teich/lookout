@@ -1,6 +1,8 @@
 import { PULSE_BINS, PULSE_WINDOW_MS, pulseBin, pulseBins, pulseLength } from "../../pulse";
 import { clip, quoteAsk } from "../../asks";
 import { costOf, type TokenCounts } from "./pricing";
+import { cronListOf, cronResultOf, cronSchedule, firedBy, pendingSchedules, promptLine, scheduleView, type Schedule } from "./schedule";
+import type { ScheduleView } from "../../types";
 
 /** A tool call the assistant made that has no result yet. */
 export interface OpenTool {
@@ -71,6 +73,10 @@ export interface TranscriptState {
   countedMessages: Set<string>;
   /** No checkpoint was seen: the state started mid-transcript. */
   joinedLate: boolean;
+  /** The tasks the session scheduled for itself, by id. */
+  schedules: Map<string, Schedule>;
+  /** CronCreate and CronList calls whose result, naming the jobs, is still to come: by the call's id. */
+  cronCalls: Map<string, { kind: "create"; cron: string; prompt: string; at: number | undefined } | { kind: "list"; at: number | undefined }>;
 }
 
 export { PULSE_WINDOW_MS };
@@ -83,7 +89,7 @@ const REPLY_MAX = 16 * 1024;
 const OPTION_MAX = 60;
 
 export function emptyTranscript(): TranscriptState {
-  return { openTools: new Map(), toolCallTimes: [], compactedAt: [], since: new Map(), countedMessages: new Set(), joinedLate: false };
+  return { openTools: new Map(), toolCallTimes: [], compactedAt: [], since: new Map(), countedMessages: new Set(), joinedLate: false, schedules: new Map(), cronCalls: new Map() };
 }
 
 /**
@@ -282,6 +288,7 @@ function applyAssistant(state: TranscriptState, e: Record<string, unknown>): voi
   for (const block of blocksOf(e.message)) {
     if (block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") {
       state.openTools.set(block.id, { id: block.id, name: block.name, summary: summarizeTool(block.name, block.input), ...askOf(block.name, block.input, state.cwd) });
+      applySchedulingCall(state, block.id, block.name, block.input, Number.isFinite(at) ? at : undefined);
       // The turn goes on: what was said before the call is not where it stopped.
       state.reply = undefined;
       if (Number.isFinite(at)) {
@@ -312,13 +319,18 @@ function applyUser(state: TranscriptState, e: Record<string, unknown>): void {
     if (content.startsWith(INTERRUPT)) state.openTools.clear();
     // A prompt, an interrupt or a compaction summary: the reply before it is answered or moot.
     if (e.isMeta !== true) state.reply = undefined;
+    // The runtime marks the prompt a scheduled task enqueued: that task has fired.
+    if (e.turnOrigin === "scheduled") applyScheduledPrompt(state, content);
     return;
   }
   let results = 0;
   for (const block of blocksOf(e.message)) {
     if (block.type === "tool_result") {
       results++;
-      if (typeof block.tool_use_id === "string") state.openTools.delete(block.tool_use_id);
+      if (typeof block.tool_use_id === "string") {
+        state.openTools.delete(block.tool_use_id);
+        applySchedulingResult(state, block.tool_use_id, (block as { content?: unknown }).content);
+      }
     } else if (block.type === "text" && typeof block.text === "string" && block.text.startsWith(INTERRUPT)) {
       state.openTools.clear();
       state.reply = undefined;
@@ -330,6 +342,82 @@ function applyUser(state: TranscriptState, e: Record<string, unknown>): void {
     state.openTools.clear();
     state.reply = undefined;
   }
+}
+
+/**
+ * A tool call that schedules the session's own future: a wakeup, held as
+ * the one the session can have at a time and dropped by `stop`; a cron
+ * job, held from the call until its result names the job; a deletion.
+ */
+function applySchedulingCall(state: TranscriptState, id: string, name: string, input: unknown, at: number | undefined): void {
+  const args = typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
+  if (name === "ScheduleWakeup") {
+    if (args.stop === true) {
+      state.schedules.delete("wakeup");
+      return;
+    }
+    const delay = typeof args.delaySeconds === "number" ? Math.min(3600, Math.max(60, args.delaySeconds)) : undefined;
+    if (delay === undefined || at === undefined) return;
+    const wakeup: Schedule = { id: "wakeup", kind: "wakeup", prompt: promptLine(args.prompt), at, nextAt: at + delay * 1000 };
+    if (typeof args.prompt === "string") wakeup.fullPrompt = args.prompt;
+    state.schedules.set("wakeup", wakeup);
+  } else if (name === "CronCreate") {
+    if (typeof args.cron !== "string") return;
+    state.cronCalls.set(id, { kind: "create", cron: args.cron, prompt: typeof args.prompt === "string" ? args.prompt : "", at });
+  } else if (name === "CronList") {
+    state.cronCalls.set(id, { kind: "list", at });
+  } else if (name === "CronDelete") {
+    if (typeof args.id === "string") state.schedules.delete(args.id);
+  }
+}
+
+/**
+ * The result of a CronCreate names the job: from then on it is a schedule
+ * of the session's, with the first run the scheduler announced. A
+ * CronList result is the scheduler's own word on the jobs: a job it lists
+ * takes its next run from it, one it leaves out has run its once or
+ * expired, and one it names that the transcript never showed created is
+ * taken in, its next run known only until it passes.
+ */
+function applySchedulingResult(state: TranscriptState, callId: string, content: unknown): void {
+  const call = state.cronCalls.get(callId);
+  if (!call) return;
+  state.cronCalls.delete(callId);
+  const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((part) => (typeof (part as { text?: unknown })?.text === "string" ? (part as { text: string }).text : "")).join("\n") : "";
+  const at = call.at ?? Date.now();
+  if (call.kind === "create") {
+    const line = cronResultOf(text, at);
+    if (line) state.schedules.set(line.id, cronSchedule(line, call.cron, call.prompt, at));
+    return;
+  }
+  const listed = cronListOf(text, at);
+  // A listing that reads as none, or as nothing, says nothing about the jobs.
+  if (listed.length === 0 && !/no (cron )?jobs|none/i.test(text)) return;
+  const ids = new Set(listed.map((line) => line.id));
+  for (const id of [...state.schedules.keys()]) if (id !== "wakeup" && !ids.has(id)) state.schedules.delete(id);
+  for (const line of listed) {
+    const known = state.schedules.get(line.id);
+    if (known) {
+      if (line.nextAt !== undefined) known.nextAt = line.nextAt;
+    } else state.schedules.set(line.id, cronSchedule(line, undefined, undefined, at));
+  }
+}
+
+/** A scheduled prompt has fired: the one-time job or the wakeup that gave it is over; a recurring job runs on. */
+function applyScheduledPrompt(state: TranscriptState, content: string): void {
+  for (const schedule of state.schedules.values()) {
+    if (schedule.kind === "cron" && firedBy(schedule, content)) {
+      if (!schedule.recurring) state.schedules.delete(schedule.id);
+      return;
+    }
+  }
+  // A prompt no cron job gave, while a wakeup waits, is the wakeup's (its prompt may be a sentinel the runtime resolved).
+  state.schedules.delete("wakeup");
+}
+
+/** The tasks the session scheduled for itself and still to come at `now`, the next first, as the board shows them. */
+export function schedulesOf(state: TranscriptState, now: number): ScheduleView[] {
+  return pendingSchedules(state.schedules.values(), now).map(scheduleView);
 }
 
 /** Folds one transcript line into the state. Lines that don't parse are ignored, and subagents' unless `sidechain` asks for them. */

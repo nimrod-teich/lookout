@@ -49,6 +49,19 @@ export interface TypedQuestion {
   at?: number;
 }
 
+/** A task a session scheduled for itself, as the card shows it: a cron job or a wakeup. */
+export interface ScheduleView {
+  kind: "cron" | "wakeup";
+  /** When it runs, in words: "every day at 09:13", "weekdays at 08:00", "wakes once". */
+  label: string;
+  /** What the session will do then: the prompt's first line. */
+  prompt: string;
+  /** Epoch ms of the next run, when it can be told. */
+  nextAt?: number;
+  /** Epoch ms a cron job expires: Claude Code lets a session's live a week. */
+  expiresAt?: number;
+}
+
 /** What the UI shows for one session. */
 export interface SessionView {
   id: string;
@@ -114,6 +127,8 @@ export interface SessionView {
   noteCount?: number;
   /** Lookout keeps a copy of its transcript, on the user's say-so. */
   kept?: boolean;
+  /** The tasks it scheduled for itself and still to come, the next first. */
+  schedules?: ScheduleView[];
 }
 
 /** A session that is not running, shown collapsed under the live ones. */

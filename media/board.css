@@ -1443,6 +1443,11 @@ body.vscode-reduce-motion .hover-card {
   line-height: 16px;
 }
 
+/* A session waiting on its own clock: the next task it scheduled. */
+.chip.schedule {
+  font-variant-numeric: tabular-nums;
+}
+
 /* What the session costs. */
 .costs {
   display: flex;

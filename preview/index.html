@@ -116,6 +116,20 @@
       s.since = ago(s.since);
       s.lastWriteAt = ago(s.lastWriteAt);
       if (s.evidence) s.evidence.at = ago(s.evidence.at);
+      // A schedule's times are "this many ms from now", or "tomorrow-HH:MM" for a clock time.
+      for (const schedule of s.schedules ?? []) {
+        for (const key of ["nextAt", "expiresAt"]) {
+          const t = schedule[key];
+          if (typeof t === "number" && t < 1e9) schedule[key] = now + t;
+          else if (typeof t === "string" && t.startsWith("tomorrow-")) {
+            const [h, m] = t.slice(9).split(":").map(Number);
+            const d = new Date(now);
+            d.setDate(d.getDate() + 1);
+            d.setHours(h, m, 0, 0);
+            schedule[key] = d.getTime();
+          }
+        }
+      }
     }
     // One agent's usage, or one group per agent.
     const usage = fixture.usage;

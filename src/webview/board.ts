@@ -8,7 +8,7 @@ import type { PastView, SessionView } from "../core/types";
 import { barMeter, chosenGroup, groupHeading, pickBar, sortGroups, tabMeters } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
 import { Harbour } from "./harbour";
-import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isFoldKey, isGroupKey, pageOf, pulseBars, secondLine, type Chip, type FoldKey, type GroupKey } from "./model";
+import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isFoldKey, isGroupKey, pageOf, pulseBars, scheduleChip, secondLine, type Chip, type FoldKey, type GroupKey } from "./model";
 import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "./protocol";
 
 interface BoardState {
@@ -216,6 +216,8 @@ function chips(view: SessionView): Chip[] {
   if (view.contextTokens && !view.contextWindow) out.push({ text: `${formatTokens(view.contextTokens)} tokens` });
   if (view.agents > 0) out.push({ text: view.agents === 1 ? "1 agent" : `${view.agents} agents` });
   if (view.kept) out.push(keptChip());
+  const schedule = scheduleChip(view.schedules, now());
+  if (schedule) out.push(schedule);
   return out;
 }
 

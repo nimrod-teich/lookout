@@ -117,6 +117,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
     pulse: session.pulse,
     pulseMarks: session.pulseMarks,
     spend: session.spend,
+    ...(session.schedules?.length ? { schedules: session.schedules } : {}),
   };
 }
 

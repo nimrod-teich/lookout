@@ -1,6 +1,6 @@
 // Pure helpers for the board; no DOM here so they can be tested under Node.
 import { formatElapsed, quietFor, reasonLabel } from "../core/format";
-import type { SessionView, State } from "../core/types";
+import type { ScheduleView, SessionView, State } from "../core/types";
 
 export type GroupKey = "waiting" | "done" | "working" | "idle" | "parked";
 
@@ -218,4 +218,42 @@ export function pageOf(total: number, page: number, size: number): { page: numbe
   const pages = Math.max(1, Math.ceil(total / size));
   const shown = Math.min(Math.max(0, page), pages - 1);
   return { page: shown, pages, first: shown * size, end: Math.min(total, (shown + 1) * size) };
+}
+
+const MINUTE = 60_000;
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** A time to come, said from `now`: "in 25 min", "at 15:00", "09:13 tomorrow", "Thu 09:13", "Nov 2 09:13". */
+export function formatWhen(at: number, now: number): string {
+  const left = at - now;
+  if (left < MINUTE) return "now";
+  if (left < 60 * MINUTE) return `in ${Math.round(left / MINUTE)} min`;
+  const then = new Date(at);
+  const today = new Date(now);
+  const clock = `${String(then.getHours()).padStart(2, "0")}:${String(then.getMinutes()).padStart(2, "0")}`;
+  const dayOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((dayOf(then) - dayOf(today)) / (24 * 60 * MINUTE));
+  if (days === 0) return `at ${clock}`;
+  if (days === 1) return `${clock} tomorrow`;
+  if (days < 7) return `${DAY_NAMES[then.getDay()]} ${clock}`;
+  return `${MONTH_NAMES[then.getMonth()]} ${then.getDate()} ${clock}`;
+}
+
+/**
+ * The chip of a session waiting on its own clock: the next task it
+ * scheduled (a wakeup, or a cron job of its own), with every one still to
+ * come in the hover. Nothing for a session with none.
+ */
+export function scheduleChip(schedules: ScheduleView[] | undefined, now: number): Chip | undefined {
+  if (!schedules?.length) return undefined;
+  const [next] = schedules;
+  const when = next!.nextAt === undefined ? "scheduled" : formatWhen(next!.nextAt, now);
+  const more = schedules.length > 1 ? ` +${schedules.length - 1}` : "";
+  const lines = schedules.map((schedule) => {
+    const at = schedule.nextAt === undefined ? "" : formatWhen(schedule.nextAt, now);
+    const head = schedule.kind === "wakeup" ? `Wakes ${at || "later"}` : schedule.label.startsWith("once, ") ? `Runs ${at || "later"}` : `${schedule.label.replace(/^./, (c) => c.toUpperCase())}${at ? `, next ${at}` : ""}`;
+    return `${head}: ${schedule.prompt || "(no prompt)"}`;
+  });
+  return { text: `◷ ${when}${more}`, title: `${lines.join("\n")}\nScheduled by the session for itself; gone when the session ends.`, kind: "schedule" };
 }
