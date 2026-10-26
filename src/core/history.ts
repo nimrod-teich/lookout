@@ -47,6 +47,13 @@ export interface Scan {
    * build of the reading code they must come from.
    */
   saved?: { entry: string; build: string };
+  /**
+   * The store the conversation goes into as it is read (see
+   * `ConversationStore`): a file the store already holds is read from where
+   * the store stopped, and the build of the reading code the rows must come
+   * from.
+   */
+  store?: { file: string; build: string };
 }
 
 /** A line that holds facts, and where it sits in its file. */
@@ -423,7 +430,7 @@ export class HistoryIndex {
   }
 
   /** The file is not as it was at the last read: replaced, grown or cut short, or never read. */
-  private changed(): boolean {
+  changed(): boolean {
     try {
       const st = fs.statSync(this.file);
       return `${st.ino}:${st.birthtimeMs}` !== this.identity || st.size !== this.seenSize;

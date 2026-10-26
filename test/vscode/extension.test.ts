@@ -5,8 +5,10 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpMailbox } from "../../src/core/jumpMailbox";
 import { NOTE_MAX, SessionRecords } from "../../src/core/sessionRecords";
+import { loadSqlite } from "../../src/core/sqlite";
 import { activate } from "../../src/extension";
 import { buildReader } from "../readerBundle";
+import { settle } from "./helpers";
 import { createWebviewView, stub, TabInputWebview, workspace } from "./stub-vscode";
 
 // The whole extension against a real process: a child of this test process
@@ -794,6 +796,66 @@ describe("the extension", () => {
       await vi.waitFor(() => expect(card()?.note).toBe("written elsewhere"), WAIT);
       await vi.waitFor(() => expect(thread()?.map((note) => note.text)).toEqual(["written elsewhere"]), WAIT);
     }, 60_000);
+
+    describe.skipIf(loadSqlite() === undefined)("kept past the purge", () => {
+      const transcriptOf = (id: string) => path.join(configDir, "projects", "-work-app", `${id}.jsonl`);
+
+      it("keeps a conversation after the agent deletes its transcript: under Purged, readable and searchable, until forgotten", async () => {
+        activate(context());
+        const { boardView, listed } = openBoard();
+        await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+        const found = () => boardView.posted.filter((m) => (m as { type: string }).type === "search").at(-1) as { results: { id: string; count: number; hits: { role: string }[] }[] };
+        const purged = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { purged?: { id: string; title: string; resumable: boolean; purged?: boolean }[] } | undefined)?.purged;
+        // A search reads the conversation, into the store on the way.
+        boardView.receive({ type: "search", query: "deploy", zone: 0 });
+        expect(found().results.map((r) => [r.id, r.count])).toEqual([[HERE, 1]]);
+        boardView.receive({ type: "search", query: "" });
+        expect(fs.existsSync(path.join(configDir, "global-storage", "history.sqlite"))).toBe(true);
+        // The agent deletes the transcript: the session leaves Earlier for Purged.
+        fs.unlinkSync(transcriptOf(HERE));
+        await vi.waitFor(() => expect(purged()?.map((p) => [p.id, p.title, p.resumable, p.purged])).toEqual([[HERE, "tune the deploy script", false, true]]), WAIT);
+        expect(listed()?.past).toEqual([]);
+        // Its conversation can be read, from the store; the tab offers no way to the session, and a try says why.
+        boardView.receive({ type: "openHit", query: "", id: HERE });
+        const findings = stub.panels.find((panel) => panel.viewType === "lookout.findings")!;
+        const tab = findings.posted.at(-1) as { session: { id: string; title: string; openable?: boolean }; messages: { text: string }[] };
+        expect(tab).toMatchObject({ session: { id: HERE, title: "tune the deploy script", openable: false }, messages: [{ text: "tune the deploy script" }] });
+        findings.receive({ type: "jump", id: HERE });
+        await vi.waitFor(() => expect(infoMessages().at(-1)).toMatch(/cannot be resumed/), WAIT);
+        // And searched.
+        boardView.receive({ type: "search", query: "deploy", zone: 0 });
+        expect(found().results.map((r) => [r.id, r.count, r.hits.map((hit) => hit.role)])).toEqual([[HERE, 1, ["you"]]]);
+        // A note can be written on it.
+        stub.inputBox = () => "gone, but had the deploy steps";
+        boardView.receive({ type: "note", id: HERE });
+        await vi.waitFor(() => expect((purged() as { note?: string }[] | undefined)?.[0]?.note).toBe("gone, but had the deploy steps"), WAIT);
+        // Forgotten: gone from Purged and from the search; the note stays.
+        boardView.receive({ type: "forget", id: HERE });
+        await vi.waitFor(() => expect(purged()).toEqual([]), WAIT);
+        boardView.receive({ type: "search", query: "deploy", zone: 0 });
+        expect(found().results.map((r) => [r.id, r.hits.map((hit) => hit.role)])).toEqual([[HERE, ["note"]]]);
+        // Nothing more to forget.
+        await stub.commands.get("lookout.forgetPurged")!();
+        expect(infoMessages().at(-1)).toBe("Lookout keeps no purged conversation.");
+      }, 60_000);
+
+      it("lets a conversation go with its transcript when nothing is kept, and forgets every purged one on the command", async () => {
+        stub.config["lookout.history.keep"] = false;
+        activate(context());
+        const { boardView, listed } = openBoard();
+        await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+        const purged = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { purged?: unknown[] } | undefined)?.purged;
+        boardView.receive({ type: "search", query: "deploy", zone: 0 });
+        boardView.receive({ type: "search", query: "" });
+        fs.unlinkSync(transcriptOf(HERE));
+        await vi.waitFor(() => expect(listed()?.past).toEqual([]), WAIT);
+        await settle();
+        expect(purged()).toEqual([]);
+        boardView.receive({ type: "search", query: "deploy", zone: 0 });
+        const found = boardView.posted.filter((m) => (m as { type: string }).type === "search").at(-1) as { results: unknown[] };
+        expect(found.results).toEqual([]);
+      }, 60_000);
+    });
 
     it("takes a session out of the archive once it runs again", async () => {
       savedGlobal["lookout.archive"] = [ELSEWHERE, HERE];

@@ -26,6 +26,8 @@ export interface Config {
   typedQuestions: boolean;
   /** A session idle or finished this long goes under Parked; 0: never on its own. */
   parkAfterMs: number;
+  /** Keep what was said in a conversation after the agent deletes its transcript, under Purged. */
+  historyKeep: boolean;
   /** Watch Claude Code: its sessions and its usage. */
   claudeEnabled: boolean;
   /** The Claude Code config directory to read sessions and transcripts from. */
@@ -91,6 +93,7 @@ export function readConfig(): Config {
     notifyCooldownMs: Math.max(0, lookout.get<number>("notifications.cooldownSeconds", 30)) * 1000,
     typedQuestions: lookout.get<boolean>("state.typedQuestions", true),
     parkAfterMs: Math.max(0, lookout.get<number>("parkAfterHours", 24)) * 3_600_000,
+    historyKeep: lookout.get<boolean>("history.keep", true),
     claudeEnabled: lookout.get<boolean>("agents.claude", true),
     claudeConfigDir,
     agentMarkers: markerSetting(lookout.get<string>("agentMarkers")),

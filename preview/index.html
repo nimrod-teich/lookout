@@ -53,6 +53,8 @@
   let favouriteIds = [];
   /** The archived sessions' ids, newest first: &archived=2 archives the fixture's first two earlier sessions. */
   let archiveIds = [];
+  /** The purged sessions' ids: &purged=2 takes the fixture's next two earlier sessions as ones whose transcript the agent deleted. */
+  let purgedIds = [];
   let earlierScope = "folders";
   /** As the extension keeps it: &sort=name|project|recent|custom; a drag makes it "custom". */
   let sort = { by: params.get("sort") ?? "time", order: [] };
@@ -93,7 +95,7 @@
         post(earlierScope);
       }
     },
-    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), folded: (params.get("fold") ?? "").split(",").filter(Boolean), parked: params.get("parkedOpen") === "1", earlier: params.get("earlier") === "1", archive: params.get("archiveOpen") === "1", agents: (params.get("hideAgents") ?? "").split(",").filter(Boolean) }),
+    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), folded: (params.get("fold") ?? "").split(",").filter(Boolean), parked: params.get("parkedOpen") === "1", earlier: params.get("earlier") === "1", archive: params.get("archiveOpen") === "1", purged: params.get("purgedOpen") === "1", agents: (params.get("hideAgents") ?? "").split(",").filter(Boolean) }),
     setState: () => {},
   });
   window.addEventListener("load", async () => {
@@ -135,17 +137,19 @@
     if (params.get("capped") === "1") earlier.capped = true;
     favouriteIds = fixture.favourites ?? [];
     archiveIds = (fixture.past ?? []).slice(0, Number(params.get("archived") ?? 0)).map((p) => p.id);
+    purgedIds = (fixture.past ?? []).slice(archiveIds.length, archiveIds.length + Number(params.get("purged") ?? 0)).map((p) => p.id);
     favouriteIds = favouriteIds.filter((id) => !archiveIds.includes(id));
     post = (scope) => {
       earlierScope = scope;
       earlier.scope = scope;
       // As the extension sends them: newest first.
-      const past = (fixture.past ?? []).filter((p) => (scope === "all" || p.resumable !== false) && !archiveIds.includes(p.id)).sort((a, b) => b.modifiedAt - a.modifiedAt);
+      const past = (fixture.past ?? []).filter((p) => (scope === "all" || p.resumable !== false) && !archiveIds.includes(p.id) && !purgedIds.includes(p.id)).sort((a, b) => b.modifiedAt - a.modifiedAt);
       const archive = archiveIds.map((id) => (fixture.past ?? []).find((p) => p.id === id)).filter(Boolean);
-      fixtureSessions = [...fixture.sessions, ...past, ...archive];
+      const purged = purgedIds.map((id) => (fixture.past ?? []).find((p) => p.id === id)).filter(Boolean).map((p) => ({ ...p, resumable: false, purged: true }));
+      fixtureSessions = [...fixture.sessions, ...past, ...archive, ...purged];
       // Starred sessions that are not running and that the scope does not list come along.
       const favourites = { ids: favouriteIds, past: (fixture.past ?? []).filter((p) => favouriteIds.includes(p.id) && !past.includes(p)) };
-      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, markers, earlier: { ...earlier }, favourites, archive, sort, group: groupBy }, "*");
+      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, markers, earlier: { ...earlier }, favourites, archive, purged, sort, group: groupBy }, "*");
     };
     post(earlier.scope);
     const q = params.get("q");

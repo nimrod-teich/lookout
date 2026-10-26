@@ -1,5 +1,6 @@
 import type { BackgroundReads } from "../background";
 import type { HistoryMessage, SearchResult, SnippetSize } from "../history";
+import type { Searchable } from "../search";
 import type { Query } from "../terms";
 import type { UsageSnapshot } from "../usage";
 import type { Background, Evidence, Reason, TypedQuestion } from "../types";
@@ -152,6 +153,10 @@ export interface AgentProvider {
   search?(query: Query, limit: number, budgetMs: number, snippet?: SnippetSize, background?: BackgroundReads): SearchOutcome;
   /** Has `background` read the conversations the search covers, before anyone searches. */
   readAhead?(background: BackgroundReads): void;
+  /** The conversations a search covers, the live sessions' first: for a search answered from the store. */
+  conversations?(): Iterable<Searchable>;
+  /** The conversation file of a live or a past session, when the agent keeps one the reading thread reads. */
+  fileOf?(id: string): string | undefined;
   /** The sessions of the scope that are not running, newest first, without the ids in `exclude`. */
   past?(scope: PastScope, exclude: ReadonlySet<string>): PastList;
   /**

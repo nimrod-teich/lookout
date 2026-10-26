@@ -1,8 +1,10 @@
 // Searching an agent's conversations, live and past: the same for every agent.
 import type { SearchOutcome } from "./agents/agent";
+import { runScan } from "./agents/lineReaders";
 import type { BackgroundReads } from "./background";
 import type { HistoryIndex, SearchResult, SnippetSize } from "./history";
 import { projectOf } from "./model";
+import type { ConversationStore } from "./store";
 import { hasFilters, type Query } from "./terms";
 
 /** A message is stamped before its line is written, so it is never newer than the file; a second covers rounding. */
@@ -18,6 +20,8 @@ export interface Searchable {
   branch?: string;
   /** Its messages, read on the first search; undefined while its file is not known. */
   index(): HistoryIndex | undefined;
+  /** Its conversation file, when the store may hold it: one the reading thread reads. */
+  file?: string;
 }
 
 /** The session's project and branch fit the query's `project:` and `branch:`, any of their values. */
@@ -77,6 +81,86 @@ export function searchConversations(conversations: Iterable<Searchable>, parsed:
     } else if (!timed || index.hasMessageIn(range)) results.push({ id: conversation.id, count: 0, hits: [] });
   }
   return { results, pending };
+}
+
+/**
+ * The same search, answered from the store for the conversations it holds:
+ * one query over their files, and the in-memory index for the rest (a
+ * conversation the reading thread has not written yet, or one it never
+ * reads). A file the store holds is still read on, in the background or
+ * here, so the store follows the conversation.
+ */
+export function searchWithStore(conversations: Iterable<Searchable>, parsed: Query, limit: number, budgetMs: number, snippet: SnippetSize | undefined, background: BackgroundReads | undefined, store: ConversationStore, build: string): SearchOutcome {
+  if (parsed.terms.length === 0 && !hasFilters(parsed)) return { results: [], pending: 0 };
+  const range = { since: parsed.since, before: parsed.before };
+  const timed = parsed.since !== undefined || parsed.before !== undefined;
+  const words = parsed.terms.length > 0;
+  const started = Date.now();
+  const results: SearchResult[] = [];
+  let pending = 0;
+  const stored: { id: string; file: string }[] = [];
+  for (const conversation of conversations) {
+    const past = conversation.pastModifiedAt;
+    if (past !== undefined && parsed.since !== undefined && past + MTIME_SLACK_MS < parsed.since) continue;
+    if ((parsed.projects.length > 0 || parsed.branches.length > 0) && !picked(parsed, conversation.cwd, conversation.branch)) continue;
+    const index = conversation.index();
+    const file = conversation.file ?? index?.file;
+    if (index) {
+      // Kept up to date: in the background, which writes the store; or here, through the store, while the budget allows.
+      if (background) index.update(background);
+      else if (file && (!index.ready || index.changed()) && Date.now() - started < budgetMs) refreshThrough(index, { file: store.file, build });
+    }
+    if (file && store.has(file)) {
+      stored.push({ id: conversation.id, file });
+      continue;
+    }
+    if (!index) continue;
+    if (!index.ready) {
+      // Not read yet: it comes in a later search.
+      if (background ? background.has(index) : Date.now() - started >= budgetMs) pending++;
+      else if (!background) {
+        index.refresh();
+        if (!index.ready) continue;
+        results.push(...searchIndex(conversation.id, index, parsed, limit, snippet, range, timed, words));
+      }
+      continue;
+    }
+    results.push(...searchIndex(conversation.id, index, parsed, limit, snippet, range, timed, words));
+  }
+  const files = stored.map((s) => s.file);
+  const touched = parsed.files.length > 0 ? store.touched(files, parsed.files) : undefined;
+  const found = words ? store.search(files, parsed.terms, limit, range, snippet) : undefined;
+  const inTime = !words && timed ? store.withMessagesIn(files, range) : undefined;
+  for (const { id, file } of stored) {
+    if (touched && !touched.has(file)) continue;
+    if (found) {
+      const result = found.get(file);
+      if (result && result.count > 0) results.push({ id, count: result.count, hits: result.hits });
+    } else if (!inTime || inTime.has(file)) results.push({ id, count: 0, hits: [] });
+  }
+  return { results, pending };
+}
+
+/** What one in-memory index gives a search; empty when it holds no match. */
+function searchIndex(id: string, index: HistoryIndex, parsed: Query, limit: number, snippet: SnippetSize | undefined, range: { since?: number; before?: number }, timed: boolean, words: boolean): SearchResult[] {
+  if (parsed.files.length > 0 && !index.touched(parsed.files)) return [];
+  if (words) {
+    const { count, hits } = index.search(parsed.terms, limit, range, snippet);
+    return count > 0 ? [{ id, count, hits }] : [];
+  }
+  return !timed || index.hasMessageIn(range) ? [{ id, count: 0, hits: [] }] : [];
+}
+
+/** Reads what the index's file gained, here and now, through the store, so the store follows. */
+function refreshThrough(index: HistoryIndex, store: { file: string; build: string }): void {
+  const job = index.scan();
+  if (!job) {
+    index.refresh();
+    return;
+  }
+  job.store = store;
+  const scanned = runScan(job);
+  if (scanned) index.apply(scanned, job);
 }
 
 /**

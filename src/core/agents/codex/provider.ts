@@ -202,16 +202,21 @@ export class CodexProvider implements AgentProvider {
   }
 
   /** The threads a search covers: the live ones, then the past ones last listed. */
-  private *conversations(): Iterable<Searchable> {
+  *conversations(): Iterable<Searchable> {
     for (const [id, file] of this.liveFiles) {
       const cwd = this.tracked.get(file)?.state.cwd ?? "";
-      yield { id, cwd, branch: cwd ? branchAt(cwd) : undefined, index: () => this.indexFor(id) };
+      yield { id, cwd, branch: cwd ? branchAt(cwd) : undefined, index: () => this.indexFor(id), file };
     }
     for (const [id, past] of this.pastListed) {
       if (this.liveFiles.has(id)) continue;
       // Codex records no branch: `branch:` picks only the live sessions, whose branch git tells.
-      yield { id, pastModifiedAt: past.modifiedAt, cwd: past.cwd, index: () => this.indexFor(id) };
+      yield { id, pastModifiedAt: past.modifiedAt, cwd: past.cwd, index: () => this.indexFor(id), file: past.file };
     }
+  }
+
+  /** The rollout of a live or a past thread. */
+  fileOf(id: string): string | undefined {
+    return this.liveFiles.get(id) ?? this.pastListed.get(id)?.file;
   }
 
   history(id: string, background?: BackgroundReads): HistoryMessage[] | undefined {

@@ -362,17 +362,26 @@ export class CopilotProvider implements AgentProvider {
   }
 
   /** The sessions a search covers: the live ones, the past ones last listed, and VS Code's Local chats. */
-  private *conversations(): Iterable<Searchable> {
+  *conversations(): Iterable<Searchable> {
     for (const [id, file] of this.liveFiles) {
       const cwd = this.tracked.get(file)?.state.cwd ?? "";
-      yield { id, cwd, branch: cwd ? branchAt(cwd) : undefined, index: () => this.indexFor(id) };
+      yield { id, cwd, branch: cwd ? branchAt(cwd) : undefined, index: () => this.indexFor(id), file };
     }
     for (const [id, past] of this.pastListed) {
       if (this.liveFiles.has(id)) continue;
       // Copilot records no branch: `branch:` picks only the live sessions.
-      yield { id, pastModifiedAt: Math.round(past.mtimeMs), cwd: past.cwd, index: () => this.indexFor(id) };
+      yield { id, pastModifiedAt: Math.round(past.mtimeMs), cwd: past.cwd, index: () => this.indexFor(id), file: eventsFile(past.dir) };
     }
+    // VS Code's Local chats are read from its own storage, not by the reading thread: no file for the store.
     for (const [id, chat] of this.localListed) yield { id, pastModifiedAt: chat.state === "idle" ? Math.round(chat.mtimeMs) : undefined, cwd: chat.cwd, index: () => this.indexFor(id) };
+  }
+
+  /** The events file of a live or a past session; none for VS Code's Local chats. */
+  fileOf(id: string): string | undefined {
+    const live = this.liveFiles.get(id);
+    if (live) return live;
+    const past = this.pastListed.get(id);
+    return past ? eventsFile(past.dir) : undefined;
   }
 
   history(id: string, background?: BackgroundReads): HistoryMessage[] | undefined {

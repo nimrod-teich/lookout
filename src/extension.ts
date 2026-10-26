@@ -39,6 +39,7 @@ const SEARCH = "lookout.search";
 const SORT = "lookout.sortSessions";
 const GROUP = "lookout.groupSessions";
 const SHOW_NOTES = "lookout.showNotes";
+const FORGET_PURGED = "lookout.forgetPurged";
 /** How the board makes its sections; kept for every window. */
 const GROUP_KEY = "lookout.group";
 /** How the board orders the sessions in each group, and the user's own order; kept for every window. */
@@ -75,6 +76,7 @@ export function activate(context: vscode.ExtensionContext): void {
       readerScript: fs.existsSync(readerScript) ? readerScript : undefined,
       savedPositionsDir: path.join(context.globalStorageUri.fsPath, "search-positions"),
       recordsDir: path.join(context.globalStorageUri.fsPath, "sessions"),
+      storeFile: path.join(context.globalStorageUri.fsPath, "history.sqlite"),
     },
     terminals,
     log,
@@ -162,6 +164,10 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.window.showWarningMessage("Lookout could not resume that session: it is no longer listed under Earlier.");
       return;
     }
+    if (view.purged) {
+      void vscode.window.showInformationMessage(`The agent deleted the transcript of "${view.title}". Lookout kept what was said, under Purged on the board, but the session cannot be resumed.`);
+      return;
+    }
     if (!view.resumable) {
       void vscode.window.showInformationMessage(`"${view.title}" is from ${view.cwd || "another project"}, not one of this window's folders: the agent resumes it from a window open on that folder.`);
       return;
@@ -189,7 +195,8 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     openable: (id) => {
       const live = controller.sessions.find((view) => view.id === id);
-      return !live || !unreachable(live);
+      // A purged session has nothing to bring forward.
+      return live ? !unreachable(live) : !controller.purged.some((view) => view.id === id);
     },
   });
   /** The notes on a session, on a page of their own: a thread, each note with its time. */
@@ -272,6 +279,8 @@ export function activate(context: vscode.ExtensionContext): void {
     orderFavourites: (ids) => controller.orderFavourites(ids),
     toggleArchive: (id) => controller.toggleArchive(id),
     editNote: (id) => editNote(id),
+    purged: () => controller.purged,
+    forget: (id) => controller.forget(id),
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
     usageBar: () => pickBar(controller.usageGroups, config.usageAgent)?.group.agent,
@@ -386,6 +395,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(SEARCH, () => searchPage.show("")),
     // Every session with a note, on the search page: the notes first among each one's matches.
     vscode.commands.registerCommand(SHOW_NOTES, () => searchPage.show("has:note")),
+    vscode.commands.registerCommand(FORGET_PURGED, async () => {
+      const count = controller.purged.length;
+      if (count === 0) {
+        void vscode.window.showInformationMessage(controller.keepsConversations ? "Lookout keeps no purged conversation." : "Lookout keeps no conversations on this runtime: it has no node:sqlite.");
+        return;
+      }
+      const choice = await vscode.window.showWarningMessage(`Forget ${count === 1 ? "the purged conversation" : `all ${count} purged conversations`}?`, { modal: true, detail: "What was said in them goes from Lookout's store; the agents deleted their transcripts already. Notes on them stay." }, "Forget");
+      if (choice === "Forget") controller.forgetPurged();
+    }),
     // The card's context menu: the same acts as its buttons, named in words.
     ...cardCommands({
       "lookout.card.jump": (view) => jump(view),
