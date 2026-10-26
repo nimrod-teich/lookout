@@ -55,8 +55,10 @@ const FAVOURITES_KEY = "lookout.favourites";
 const ARCHIVE_KEY = "lookout.archive";
 /** The sessions parked, and those brought back from Parked; kept for every window. */
 const PARKING_KEY = "lookout.parking";
-/** The earlier sessions listed at most, the newest. */
+/** The earlier sessions listed and searched at most, the newest, while their messages are held in memory: without the store. */
 const EARLIER_LIMIT = 500;
+/** With the store, the database is the index: every earlier session is listed and searched. */
+const NO_LIMIT = Number.MAX_SAFE_INTEGER;
 /** While the earlier sessions are still being read, the next slice is listed this soon. */
 const FILL_MS = 300;
 /** A window not in front leaves a usage alert this long to a window that is. */
@@ -285,7 +287,11 @@ export class Controller implements vscode.Disposable {
     const saved = !this.store && script && host.savedPositionsDir ? new SavedPositions(host.savedPositionsDir, this.build) : undefined;
     const into = this.store ? { file: this.store.file, build: this.build } : undefined;
     // Every index reads through the store from now on: a read on its own would leave the store behind.
-    if (into) readThroughStore({ scan: runScan, store: into });
+    // The store is the index: the indexes keep no messages, and read them from it.
+    if (into && this.store) {
+      const store = this.store;
+      readThroughStore({ scan: runScan, store: into, messages: (file) => store.messages(file) });
+    }
     this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error), saved, into) : undefined;
     if (saved) this.pruneTimer = setTimeout(() => void saved.prune(), PRUNE_AFTER_MS);
     this.vault = host.vaultDir ? new TranscriptVault(host.vaultDir) : undefined;
@@ -293,6 +299,11 @@ export class Controller implements vscode.Disposable {
     this.records = host.recordsDir ? new SessionRecords(host.recordsDir) : undefined;
     // A note written in another window shows here too.
     this.recordsWatch = this.records?.watch(() => this.schedulePoll());
+  }
+
+  /** The earlier sessions listed and searched at most: every one while the store is the index, else the newest 500. */
+  private get earlierLimit(): number {
+    return this.store ? NO_LIMIT : EARLIER_LIMIT;
   }
 
   /** A search's results fill in as the conversations are read in the background, so nobody needs to ask again. */
@@ -323,7 +334,7 @@ export class Controller implements vscode.Disposable {
 
   /** Which earlier sessions are listed, the most listed, and whether older ones were left out. */
   get earlier(): { scope: EarlierScope; limit: number; capped: boolean; notes?: string[] } {
-    return { scope: this.earlierScope, limit: EARLIER_LIMIT, capped: this.earlierCapped, notes: this.earlierNotes.length ? this.earlierNotes : undefined };
+    return { scope: this.earlierScope, limit: this.earlierLimit, capped: this.earlierCapped, notes: this.earlierNotes.length ? this.earlierNotes : undefined };
   }
 
   /** How to resume a session that is not running in a terminal, for an agent whose sessions resume there. */
@@ -924,7 +935,8 @@ export class Controller implements vscode.Disposable {
     const archived = new Set(archive);
     const stars = new Set(this.favouriteIds());
     // The starred, the archived and the noted sessions are asked for by id besides, wherever they ran.
-    const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit: EARLIER_LIMIT, also: [...new Set([...stars, ...archive, ...this.notedIds()])] };
+    const limit = this.earlierLimit;
+    const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit, also: [...new Set([...stars, ...archive, ...this.notedIds()])] };
     let capped = false;
     let incomplete = false;
     const notes: string[] = [];
@@ -950,7 +962,7 @@ export class Controller implements vscode.Disposable {
     const favouritePast = [...also.filter((view) => stars.has(view.id) && !archived.has(view.id)), ...this.purgedPast.filter((view) => stars.has(view.id) && !archived.has(view.id))];
     // Noted sessions no other list holds: not on the board, but searched and known by name.
     const notedPast = also.filter((view) => !stars.has(view.id) && !archived.has(view.id) && notRestored(view));
-    this.earlierCapped = capped || shownPast.length > EARLIER_LIMIT;
+    this.earlierCapped = capped || shownPast.length > limit;
     this.earlierNotes = notes;
     // An idle tab or terminal with nothing sent is not worth a card.
     const shown = update.views.filter((view) => !(view.empty && view.state === "idle"));
@@ -959,7 +971,7 @@ export class Controller implements vscode.Disposable {
     this.noticeVanished(update.views, past);
     this.keepStarred(stars, live);
     const mark = (views: PastView[]) => this.markKept(this.annotate(views));
-    this.publish(live, mark(shownPast.slice(0, EARLIER_LIMIT)), mark(favouritePast), mark(archivePast), mark(notedPast), mark(this.purgedPast));
+    this.publish(live, mark(shownPast.slice(0, limit)), mark(favouritePast), mark(archivePast), mark(notedPast), mark(this.purgedPast));
     for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast, ...this.purgedPast]) this.pastSeen.set(view.id, view);
     this.observeRecords(live, [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast, ...this.purgedPast]);
     if (incomplete) this.scheduleFill();

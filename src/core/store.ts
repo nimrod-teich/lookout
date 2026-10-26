@@ -210,6 +210,13 @@ export class ConversationStore {
     return this.progress(file) !== undefined;
   }
 
+  /** Of these files, those whose conversation the store holds: one question for all of them. */
+  held(files: readonly string[]): Set<string> {
+    if (files.length === 0) return new Set();
+    const rows = this.db.prepare("SELECT file FROM files WHERE file IN (SELECT value FROM json_each(?))").all(JSON.stringify(files)) as { file: string }[];
+    return new Set(rows.map((row) => row.file));
+  }
+
   /** The messages of a conversation file, oldest first; none when the store never read it. */
   messages(file: string): HistoryMessage[] | undefined {
     if (!this.has(file)) return undefined;

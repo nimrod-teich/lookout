@@ -120,3 +120,87 @@ describe.skipIf(!sqlite)("searchWithStore", () => {
     store.close();
   });
 });
+
+describe.skipIf(!sqlite)("the store as the index", () => {
+  beforeEach(() => readThroughStore(undefined));
+  afterEach(() => {
+    readThroughStore(undefined);
+    closeStores();
+  });
+
+  /** A store the indexes keep no messages beside: they read them from it, as the controller has it. */
+  function leanStore(): ConversationStore {
+    const store = ConversationStore.open(path.join(tempConfigDir(), "history.sqlite"));
+    if (!store) throw new Error("no store");
+    readThroughStore({ scan: runScan, store: { file: store.file, build: BUILD }, messages: (file) => store.messages(file) });
+    return store;
+  }
+
+  it("keeps no messages in an index: a read writes the store and answers with no lines, and the messages come from the store", () => {
+    const store = leanStore();
+    const file = transcript("a.jsonl", "write the retag recipe");
+    const index = new HistoryIndex(file, TRANSCRIPT_LINES);
+    expect(index.lean).toBe(true);
+    const job = index.scan()!;
+    expect(job.lean).toBe(true);
+    const scanned = runScan({ ...job, store: { file: store.file, build: BUILD } })!;
+    expect(scanned.lines).toEqual([]);
+    expect(index.apply(scanned, job)).toBe(true);
+    expect(index.ready).toBe(true);
+    expect(store.has(file)).toBe(true);
+    expect(index.messages.map((m) => m.text)).toEqual(["write the retag recipe", "Done with the recipe."]);
+    // What the file gains goes the same way.
+    appendEntries(file, [{ type: "user", timestamp: new Date(NOW).toISOString(), message: { content: "and the rollback" } }]);
+    index.refresh();
+    expect(index.messages.map((m) => m.text).at(-1)).toBe("and the rollback");
+    // A reader without a name (a chat log replayed whole) keeps its messages in memory all the same.
+    expect(new HistoryIndex(file, { mayHold: () => false, facts: () => undefined }).lean).toBe(false);
+  });
+
+  it("searches every stored conversation from the store, and reads again one whose rows the store let go", () => {
+    const store = leanStore();
+    const a = conversation("a", transcript("a.jsonl", "fix the billing webhook"));
+    const b = conversation("b", transcript("b.jsonl", "write the retag recipe"));
+    const query = parseQuery("retag", NOW);
+    expect(searchWithStore([a, b], query, 3, 1000, undefined, undefined, store).results.map((r) => [r.id, r.count])).toEqual([["b", 1]]);
+    // The store lets go of b (its session forgotten): the next search reads it again from the start.
+    store.rememberSession({ id: "b", agent: "claude-code", file: b.file!, title: "b", cwd: "/work/api" });
+    store.forget(["b"]);
+    expect(store.has(b.file!)).toBe(false);
+    expect(searchWithStore([a, b], query, 3, 1000, undefined, undefined, store).results.map((r) => [r.id, r.count])).toEqual([["b", 1]]);
+    expect(store.has(b.file!)).toBe(true);
+  });
+
+  it("does not look at a past conversation's file again while its listing says it was last written when it was read", () => {
+    const store = leanStore();
+    const file = transcript("a.jsonl", "write the retag recipe");
+    const a = conversation("a", file);
+    searchWithStore([a], parseQuery("retag", NOW), 3, 1000, undefined, undefined, store);
+    const listed = Math.round(fs.statSync(file).mtimeMs);
+    expect(a.held.seenAt(listed)).toBe(true);
+    // The file grows behind the listing's back: a past conversation the listing still shows unchanged is not read.
+    appendEntries(file, [{ type: "user", timestamp: new Date(NOW).toISOString(), message: { content: "grown since" } }]);
+    const unchanged = { ...a, pastModifiedAt: listed };
+    expect(searchWithStore([unchanged], parseQuery("grown", NOW), 3, 1000, undefined, undefined, store).results).toEqual([]);
+    // Once the listing shows the new time, it is.
+    const relisted = { ...a, pastModifiedAt: Math.round(fs.statSync(file).mtimeMs) };
+    expect(searchWithStore([relisted], parseQuery("grown", NOW), 3, 1000, undefined, undefined, store).results.map((r) => r.id)).toEqual(["a"]);
+  });
+
+  it("finds a phrase, its words in a row, and not the same words apart", () => {
+    const store = leanStore();
+    const together = conversation("t", transcript("t.jsonl", "the staging migrate failed again"));
+    const apart = conversation("p", transcript("p.jsonl", "migrate went fine, staging failed later"));
+    const found = searchWithStore([together, apart], parseQuery('"staging migrate" failed', NOW), 3, 1000, undefined, undefined, store);
+    expect(found.results.map((r) => r.id)).toEqual(["t"]);
+    expect(found.results[0]!.hits[0]!.ranges.length).toBeGreaterThan(0);
+  });
+
+  it("asks the store once for which files it holds", () => {
+    const store = leanStore();
+    const a = transcript("a.jsonl", "one");
+    store.record({ file: a, reader: TRANSCRIPT_LINES.name!, from: 0 }, scanFile(a, TRANSCRIPT_LINES, 0, "")!, BUILD);
+    expect(store.held([a, path.join(tempConfigDir(), "missing.jsonl")])).toEqual(new Set([a]));
+    expect(store.held([])).toEqual(new Set());
+  });
+});

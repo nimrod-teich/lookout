@@ -315,7 +315,7 @@ field.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" 
 const input = el("input", "");
 input.type = "search";
 input.placeholder = "Search the conversations";
-input.title = "Every word must appear in one message, or in the session's note. Narrow it with since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts; has:note lists the sessions with a note";
+input.title = "Every word must appear in one message, or in the session's note; a phrase in quotes, its words in a row. Narrow it with since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts; has:note lists the sessions with a note";
 input.setAttribute("aria-label", "Search the conversations");
 input.spellcheck = false;
 field.append(input);

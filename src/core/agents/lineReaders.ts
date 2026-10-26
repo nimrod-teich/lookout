@@ -57,6 +57,7 @@ export function runScan(job: Scan): Scanned | undefined {
  * file changed under it, or the index saw another file) is read whole.
  */
 function scanIntoStore(job: Scan, reader: LineReader, store: ConversationStore, build: string): Scanned | undefined {
+  if (job.lean) return scanLean(job, reader, store, build);
   const held = store.progress(job.file);
   const first = job.from === 0 && job.identity === "";
   const usable = held !== undefined && held.build === build && held.tail !== undefined && fitsStill(job.file, held) && (first || job.identity === held.identity);
@@ -79,6 +80,27 @@ function scanIntoStore(job: Scan, reader: LineReader, store: ConversationStore, 
   const messages = store.messages(job.file) ?? [];
   const restored = messages.slice(0, held.messages).map((message) => ({ facts: { message }, start: 0, length: 0 }));
   return { identity: scanned.identity, size: scanned.size, reset: true, end: scanned.end, lines: [...restored, ...fresh], restored: held.end, tail: scanned.tail };
+}
+
+/**
+ * Reads a file into the store for an index that keeps no messages: from
+ * where the store stopped, or whole when the store cannot continue it. The
+ * answer carries no lines, only how far the file was read; nothing when the
+ * store did not take the read, so the index asks again.
+ */
+function scanLean(job: Scan, reader: LineReader, store: ConversationStore, build: string): Scanned | undefined {
+  const held = store.progress(job.file);
+  const usable = held !== undefined && held.build === build && held.tail !== undefined && fitsStill(job.file, held);
+  const scanned = usable ? scanFile(job.file, reader, held.end, held.identity) : scanFile(job.file, reader, 0, "");
+  if (!scanned) return undefined;
+  const from = scanned.reset ? 0 : held!.end;
+  let taken: boolean;
+  try {
+    taken = store.record({ ...job, from }, scanned, build);
+  } catch {
+    return undefined;
+  }
+  return taken ? { ...scanned, lines: [] } : undefined;
 }
 
 /** Writes a scan into the store; the store is a copy, so a write that fails never stops the read from answering. */
