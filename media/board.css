@@ -1443,6 +1443,14 @@ body.vscode-reduce-motion .hover-card {
   line-height: 16px;
 }
 
+/* A session waiting on its own clock: the next task it scheduled. */
+.chip.schedule {
+  font-variant-numeric: tabular-nums;
+  /* A faint tint of the working colour: told apart from the other chips, without calling for attention. */
+  background: color-mix(in srgb, var(--working) 11%, transparent);
+  color: color-mix(in srgb, var(--working) 40%, var(--muted));
+}
+
 /* What the session costs. */
 .costs {
   display: flex;

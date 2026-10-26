@@ -226,7 +226,15 @@
         "at": 3000
       },
       "lastWriteAt": 4000,
-      "noteCount": 2
+      "noteCount": 2,
+      "schedules": [
+        {
+          "kind": "wakeup",
+          "label": "wakes once",
+          "prompt": "Look at the CI run on #247 and report.",
+          "nextAt": 480000
+        }
+      ]
     },
     {
       "id": "5",
@@ -306,7 +314,22 @@
       "evidence": {
         "source": "session file",
         "at": 2760000
-      }
+      },
+      "schedules": [
+        {
+          "kind": "wakeup",
+          "label": "wakes once",
+          "prompt": "Check whether the reviewer answered on #876; if not, wait again.",
+          "nextAt": 1500000
+        },
+        {
+          "kind": "cron",
+          "label": "every day at 09:13",
+          "prompt": "Daily Lookout list check: run scripts/list-check.sh and report any list that merged or closed.",
+          "nextAt": "tomorrow-09:13",
+          "expiresAt": 518400000
+        }
+      ]
     },
     {
       "id": "6r",

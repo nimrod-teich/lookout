@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardLine, contextLevel, contextPercent, groupSessions, HARBOUR, hostChip, isFoldKey, layoutBoats, pageOf, pulseBars, secondLine, waterline } from "../../src/webview/model";
+import { cardLine, contextLevel, contextPercent, formatWhen, groupSessions, HARBOUR, hostChip, isFoldKey, layoutBoats, pageOf, pulseBars, scheduleChip, secondLine, waterline } from "../../src/webview/model";
 import { view } from "../vscode/helpers";
 
 describe("groupSessions", () => {
@@ -177,5 +177,37 @@ describe("pageOf", () => {
     expect(pageOf(20, 1, 20)).toEqual({ page: 0, pages: 1, first: 0, end: 20 });
     expect(pageOf(0, 3, 20)).toEqual({ page: 0, pages: 1, first: 0, end: 0 });
     expect(pageOf(5, -1, 20)).toEqual({ page: 0, pages: 1, first: 0, end: 5 });
+  });
+});
+
+describe("the schedule chip", () => {
+  const at = (y: number, mo: number, d: number, h: number, mi: number) => new Date(y, mo - 1, d, h, mi).getTime();
+  const now = at(2026, 10, 26, 13, 42);
+
+  it("says a time to come from now, closer times in more detail", () => {
+    expect(formatWhen(now + 30_000, now)).toBe("now");
+    expect(formatWhen(now - 30_000, now)).toBe("now");
+    expect(formatWhen(now - 5 * 60_000, now)).toBe("due");
+    expect(formatWhen(now + 25 * 60_000, now)).toBe("in 25 min");
+    expect(formatWhen(at(2026, 10, 26, 15, 0), now)).toBe("at 15:00");
+    expect(formatWhen(at(2026, 10, 27, 9, 13), now)).toBe("09:13 tomorrow");
+    expect(formatWhen(at(2026, 10, 29, 8, 0), now)).toBe("Thu 08:00");
+    expect(formatWhen(at(2026, 11, 2, 9, 13), now)).toBe("Nov 2 09:13");
+    // Past midnight but under an hour away: still minutes.
+    expect(formatWhen(at(2026, 10, 27, 0, 10), at(2026, 10, 26, 23, 30))).toBe("in 40 min");
+  });
+
+  it("shows the next task on the chip, counts the rest, and lists them all in the hover", () => {
+    expect(scheduleChip(undefined, now)).toBeUndefined();
+    expect(scheduleChip([], now)).toBeUndefined();
+    const wakeup = { kind: "wakeup" as const, label: "wakes once", prompt: "Check the reviewer", nextAt: now + 25 * 60_000 };
+    const daily = { kind: "cron" as const, label: "every day at 09:13", prompt: "Daily list check", nextAt: at(2026, 10, 27, 9, 13), expiresAt: now + 6 * 86_400_000 };
+    const once = { kind: "cron" as const, label: "once, every day at 15:00", prompt: "Run the smoke", nextAt: at(2026, 10, 26, 15, 0) };
+    expect(scheduleChip([wakeup], now)).toEqual({ text: "◷ in 25 min", title: "Wakes in 25 min: Check the reviewer\nScheduled by the session for itself; gone when the session ends.", kind: "schedule" });
+    const chip = scheduleChip([wakeup, once, daily], now)!;
+    expect(chip.text).toBe("◷ in 25 min +2");
+    expect(chip.title!.split("\n")).toEqual(["Wakes in 25 min: Check the reviewer", "Runs at 15:00: Run the smoke", "Every day at 09:13, next 09:13 tomorrow: Daily list check", "Scheduled by the session for itself; gone when the session ends."]);
+    // A cron whose next run cannot be told, and a prompt that is empty.
+    expect(scheduleChip([{ kind: "cron", label: "cron 0 0 31 feb *", prompt: "" }], now)).toMatchObject({ text: "◷ scheduled", title: "Cron 0 0 31 feb *: (no prompt)\nScheduled by the session for itself; gone when the session ends." });
   });
 });

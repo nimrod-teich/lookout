@@ -209,3 +209,46 @@ export class JsonlTail {
     return { lines, reset, mtimeMs: st.mtimeMs };
   }
 }
+
+/**
+ * Passes every line in `[from, to)` that contains one of the needles to
+ * `onLine`, in order, reading the file forwards in chunks. A line longer
+ * than the chunk is passed whole all the same. Nothing when the file
+ * cannot be read.
+ */
+export function scanLines(file: string, from: number, to: number, needles: string[], onLine: (line: string) => void): void {
+  if (to <= from) return;
+  let fd: number;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch {
+    return;
+  }
+  try {
+    const chunk = 1024 * 1024;
+    let carry: Buffer = Buffer.alloc(0);
+    let at = from;
+    while (at < to) {
+      const buffer = Buffer.alloc(Math.min(chunk, to - at));
+      const read = fs.readSync(fd, buffer, 0, buffer.length, at);
+      if (read === 0) break;
+      at += read;
+      const data = carry.length ? Buffer.concat([carry, buffer.subarray(0, read)]) : buffer.subarray(0, read);
+      let lineStart = 0;
+      for (let i = 0; i < data.length; i++) {
+        if (data[i] !== NEWLINE) continue;
+        const line = data.subarray(lineStart, i);
+        if (needles.some((needle) => line.includes(needle))) onLine(line.toString("utf8"));
+        lineStart = i + 1;
+      }
+      carry = lineStart < data.length ? Buffer.from(data.subarray(lineStart)) : Buffer.alloc(0);
+      if (carry.length > MAX_LINE_BYTES) carry = Buffer.alloc(0);
+    }
+    // The last line, when `to` is the end of the file and no newline closes it.
+    if (carry.length && needles.some((needle) => carry.includes(needle))) onLine(carry.toString("utf8"));
+  } catch {
+    // Read as far as it went.
+  } finally {
+    fs.closeSync(fd);
+  }
+}

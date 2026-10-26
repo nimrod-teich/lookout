@@ -8,7 +8,7 @@ import type { PastView, SessionView } from "../core/types";
 import { barMeter, chosenGroup, groupHeading, pickBar, sortGroups, tabMeters } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
 import { Harbour } from "./harbour";
-import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isFoldKey, isGroupKey, pageOf, pulseBars, secondLine, type Chip, type FoldKey, type GroupKey } from "./model";
+import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isFoldKey, isGroupKey, pageOf, pulseBars, scheduleChip, secondLine, type Chip, type FoldKey, type GroupKey } from "./model";
 import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "./protocol";
 
 interface BoardState {
@@ -216,6 +216,8 @@ function chips(view: SessionView): Chip[] {
   if (view.contextTokens && !view.contextWindow) out.push({ text: `${formatTokens(view.contextTokens)} tokens` });
   if (view.agents > 0) out.push({ text: view.agents === 1 ? "1 agent" : `${view.agents} agents` });
   if (view.kept) out.push(keptChip());
+  const schedule = scheduleChip(view.schedules, now());
+  if (schedule) out.push(schedule);
   return out;
 }
 
@@ -1231,6 +1233,11 @@ function updateCard(card: HTMLElement, view: SessionView): void {
       .join(" ");
   }
   renderHits(card.querySelector(".hits")!, query === "" ? undefined : hits.get(view.id));
+  renderChips(card, view);
+}
+
+/** The card's chips, written only where they changed. */
+function renderChips(card: HTMLElement, view: SessionView): void {
   const chipsEl = card.querySelector(".chips")!;
   const values = chips(view);
   while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
@@ -1869,6 +1876,8 @@ function tick(): void {
       card.querySelector(".line .kind")!.textContent = cardLine(view, now()).label ?? "";
     }
     card.title = cardTitle(view);
+    // The time to a scheduled task counts down.
+    if (view.schedules?.length) renderChips(card, view);
   }
   for (const view of past) {
     const card = pastCards.get(view.id);

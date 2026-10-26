@@ -5,7 +5,7 @@ import { branchAt } from "../../git";
 import type { Query } from "../../terms";
 import type { BackgroundReads } from "../../background";
 import { readConversationsAhead, searchConversations, type Searchable } from "../../search";
-import { findLastLine, JsonlTail, lineStartAtOrAfter, readLineAt } from "../../jsonlTail";
+import { findLastLine, JsonlTail, lineStartAtOrAfter, readLineAt, scanLines } from "../../jsonlTail";
 import { TRANSCRIPT_LINES } from "./history";
 import { PastTranscripts } from "./past";
 import type { ProcessTable } from "../../proc";
@@ -14,7 +14,7 @@ import type { AgentProvider, AgentSession, Background, AgentStatus, PastList, Pa
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
-import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseMarksOf, pulseOf, spendOf, titleOf, type OpenTool, type TranscriptState } from "./transcript";
+import { activityOf, agentsOf, applyLine, applyScheduleLine, contextWindowOf, emptyTranscript, pulseMarksOf, pulseOf, SCHEDULE_NEEDLES, schedulesOf, spendOf, titleOf, type OpenTool, type TranscriptState } from "./transcript";
 import { planFileTitle, questionOf, reasonOf } from "./waiting";
 
 export const CLAUDE_CODE = "claude-code";
@@ -77,6 +77,16 @@ function evidenceOf(file: SessionFile, now: number): Evidence {
 }
 
 /** Applies the last title entries of each kind, wherever they are in the file; lines read later override them in order. */
+
+/**
+ * Nor the tasks the session scheduled for itself: the call that made one
+ * may sit any number of turns back, and a job lives a week. The lines that
+ * bear on them, between `from` and where the tail starts, are folded into
+ * the schedules alone.
+ */
+function seedSchedules(file: string, state: TranscriptState, from: number, to: number): void {
+  scanLines(file, from, to, SCHEDULE_NEEDLES, (line) => applyScheduleLine(state, line));
+}
 
 /** Whatever is skipped, the title must not be: Claude Code stamps it once, and again on resume just before a checkpoint. */
 function seedTitles(file: string, state: TranscriptState): void {
@@ -158,6 +168,7 @@ export class ClaudeProvider implements AgentProvider {
         pulse: pulseOf(transcript, now, file.startedAt),
         pulseMarks: pulseMarksOf(transcript, now, file.startedAt),
         spend: spendOf(transcript),
+        schedules: schedulesOf(transcript, now, file.startedAt),
       };
     });
     for (const id of this.tracked.keys()) if (!live.has(id)) this.tracked.delete(id);
@@ -373,15 +384,18 @@ export class ClaudeProvider implements AgentProvider {
     if (size <= BACKFILL_BYTES) return { tail: new JsonlTail(file, { startAt: 0 }) };
     seedTitles(file, state);
     const checkpoint = findLastLine(file, '"type":"cost-state"', CHECKPOINT_SEARCH_BYTES);
+    let start: number;
     if (checkpoint !== undefined && size - checkpoint <= CHECKPOINT_READ_BYTES) {
       // Claude Code writes a checkpoint right after a turn's last reply; read
       // from that reply so the board still knows what the session last said
       // and asked. Usage before the checkpoint is dropped when it is read.
       const reply = findLastLine(file, '"type":"assistant"', CHECKPOINT_SEARCH_BYTES);
-      const start = reply !== undefined && size - reply <= CHECKPOINT_READ_BYTES ? Math.min(reply, checkpoint) : checkpoint;
-      return { tail: new JsonlTail(file, { startAt: start }) };
+      start = reply !== undefined && size - reply <= CHECKPOINT_READ_BYTES ? Math.min(reply, checkpoint) : checkpoint;
+    } else {
+      state.joinedLate = true;
+      start = lineStartAtOrAfter(file, size - BACKFILL_BYTES);
     }
-    state.joinedLate = true;
-    return { tail: new JsonlTail(file, { startAt: lineStartAtOrAfter(file, size - BACKFILL_BYTES) }) };
+    seedSchedules(file, state, Math.max(0, size - CHECKPOINT_READ_BYTES), start);
+    return { tail: new JsonlTail(file, { startAt: start }) };
   }
 }

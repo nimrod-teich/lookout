@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ClaudeProvider } from "../../../../src/core/agents/claude/provider";
 import { inThreadScanner } from "../../../../src/core/agents/lineReaders";
@@ -222,6 +223,40 @@ describe("ClaudeProvider", () => {
     expect(provider.poll(0)[0]?.title).toBe("Renamed");
     appendEntries(transcript, [{ type: "custom-title", customTitle: "" }]);
     expect(provider.poll(1_000)[0]?.title).toBe("Wire the cache");
+  });
+
+  it("seeds the tasks a large transcript scheduled before its last checkpoint, and drops those of a process the session was resumed from", () => {
+    const { configDir, proc, provider } = setup();
+    const id = sessionId(1);
+    writeSession(configDir, proc, { pid: 11, sessionId: id, cwd: "/work/app", startedAt: 1_000 });
+    const t = new Date(10_000).toISOString();
+    const filler = Array.from({ length: 1200 }, () => ({ type: "progress", data: "x".repeat(1000) }));
+    appendEntries(transcriptPath(configDir, "/work/app", id), [
+      { type: "assistant", timestamp: t, message: { id: "m1", role: "assistant", content: [{ type: "tool_use", id: "w1", name: "ScheduleWakeup", input: { delaySeconds: 1800, prompt: "Look again" } }] } },
+      { type: "user", timestamp: t, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "w1", content: "Next wakeup scheduled for 00:30:10 (in 1800s)." }] } },
+      { type: "assistant", timestamp: t, message: { id: "m2", role: "assistant", content: [{ type: "tool_use", id: "c1", name: "CronCreate", input: { cron: "0 12 * * *", prompt: "Daily check" } }] } },
+      { type: "user", timestamp: t, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "c1", content: "Scheduled recurring job abcdef12 (Every day at 12:00 PM). Session-only. Auto-expires after 7 days." }] } },
+      { type: "assistant", timestamp: t, message: { id: "m3", role: "assistant", content: [{ type: "tool_use", id: "c2", name: "CronCreate", input: { cron: "0 9 * * *", prompt: "Gone" } }] } },
+      { type: "user", timestamp: t, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "c2", content: "Scheduled recurring job 99999999 (Every day at 9:00 AM)." }] } },
+      { type: "assistant", timestamp: t, message: { id: "m4", role: "assistant", content: [{ type: "tool_use", id: "d1", name: "CronDelete", input: { id: "99999999" } }] } },
+      ...filler,
+      { type: "cost-state", totalCostUSD: 1, modelUsage: {} },
+      { type: "user", cwd: "/work/app" },
+    ]);
+    const session = provider.poll(20_000)[0]!;
+    expect(session.schedules?.map((s) => [s.kind, s.prompt, s.nextAt])).toEqual([
+      ["wakeup", "Look again", 10_000 + 1800_000],
+      ["cron", "Daily check", session.schedules?.[1]?.nextAt],
+    ]);
+    // Noon, local time: in any zone that is the better part of a day past the epoch, so the wakeup comes first.
+    expect(session.schedules?.[1]?.label).toBe("every day at 12:00");
+    // The seed folded nothing but the schedules: the calls it read are no open tools of the session's.
+    expect(session.activity).toBeUndefined();
+    // Resumed by a process started after those calls: the tasks died with the old one.
+    proc.procs.delete(11);
+    fs.rmSync(path.join(configDir, "sessions", "11.json"));
+    writeSession(configDir, proc, { pid: 12, sessionId: id, cwd: "/work/app", startedAt: 15_000 });
+    expect(provider.poll(20_000)[0]?.schedules).toEqual([]);
   });
 
   it("reports the activity of a working session only", () => {

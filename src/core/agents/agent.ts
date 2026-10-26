@@ -3,7 +3,7 @@ import type { HistoryMessage, SearchResult, SnippetSize } from "../history";
 import type { Searchable } from "../search";
 import type { Query } from "../terms";
 import type { UsageSnapshot } from "../usage";
-import type { Background, Evidence, Reason, TypedQuestion } from "../types";
+import type { Background, Evidence, Reason, ScheduleView, TypedQuestion } from "../types";
 export type { Background };
 
 export type AgentStatus = "working" | "waiting" | "idle" | "unknown";
@@ -59,6 +59,8 @@ export interface AgentSession {
   pulseMarks?: number[];
   /** Tokens the session used so far, and what they cost. */
   spend?: SessionSpend;
+  /** The tasks it scheduled for itself and still to come, the next first. */
+  schedules?: ScheduleView[];
 }
 
 export interface SessionSpend {

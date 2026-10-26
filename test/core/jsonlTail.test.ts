@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { findLastLine, JsonlTail, readLineAt } from "../../src/core/jsonlTail";
+import { findLastLine, JsonlTail, readLineAt, scanLines } from "../../src/core/jsonlTail";
 import { tempConfigDir } from "./helpers";
 
 function file(): string {
@@ -108,5 +108,29 @@ describe("readLineAt", () => {
     expect(readLineAt(f, 400_000)).toBeUndefined();
     expect(readLineAt(f, 0, 100_000)).toBeUndefined();
     expect(readLineAt(f, 0)).toHaveLength(300_000);
+  });
+});
+
+describe("scanLines", () => {
+  it("passes the lines in the window that carry a needle, across chunk boundaries, with the last line unterminated", () => {
+    const f = file();
+    const long = `{"pad":"${"x".repeat(1024 * 1024 - 100)}","mark":"one"}`;
+    const lines = ['{"a":1,"mark":"zero"}', long, '{"b":2}', '{"c":3,"mark":"two"}', '{"d":4,"mark":"three"}'];
+    const text = lines.join("\n");
+    fs.writeFileSync(f, text);
+    const seen: string[] = [];
+    const mark = (line: string) => (JSON.parse(line) as { mark?: string }).mark ?? line;
+    scanLines(f, 0, text.length, ['"mark"'], (line) => seen.push(mark(line)));
+    expect(seen).toEqual(["zero", "one", "two", "three"]);
+    // A window that starts past the first line and ends before the last.
+    const from = lines[0]!.length + 1;
+    const to = text.length - lines[4]!.length - 1;
+    const inside: string[] = [];
+    scanLines(f, from, to, ['"mark"', '"b"'], (line) => inside.push(mark(line)));
+    expect(inside).toEqual(["one", '{"b":2}', "two"]);
+    const none: string[] = [];
+    scanLines(f, 10, 10, ['"mark"'], (line) => none.push(line));
+    scanLines("/nonexistent/lookout.jsonl", 0, 100, ['"mark"'], (line) => none.push(line));
+    expect(none).toEqual([]);
   });
 });
