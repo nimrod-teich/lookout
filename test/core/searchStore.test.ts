@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { TRANSCRIPT_LINES } from "../../src/core/agents/claude/history";
+import { closeStores } from "../../src/core/agents/lineReaders";
 import { HistoryIndex, scanFile } from "../../src/core/history";
 import { searchWithStore, type Searchable } from "../../src/core/search";
 import { loadSqlite } from "../../src/core/sqlite";
@@ -36,6 +37,9 @@ function conversation(id: string, file: string, more: Partial<Searchable> = {}):
 }
 
 describe.skipIf(!sqlite)("searchWithStore", () => {
+  // The reads through the store keep a connection of their own: closed, so the temporary files can go.
+  afterEach(() => closeStores());
+
   it("answers from the store for the files it holds, reads the others through it, and leaves out what nothing matches", () => {
     const store = openStore();
     const held = transcript("held.jsonl", "fix the billing webhook");

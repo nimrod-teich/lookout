@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { TRANSCRIPT_LINES } from "../../src/core/agents/claude/history";
-import { runScan } from "../../src/core/agents/lineReaders";
+import { closeStores, runScan } from "../../src/core/agents/lineReaders";
 import { scanFile } from "../../src/core/history";
 import { loadSqlite } from "../../src/core/sqlite";
 import { ConversationStore, ftsQuery } from "../../src/core/store";
@@ -48,6 +48,9 @@ describe("ftsQuery", () => {
 });
 
 describe.skipIf(!sqlite)("ConversationStore", () => {
+  // The reading code keeps its own connection: closed, so the temporary files can go (Windows holds an open one).
+  afterEach(() => closeStores());
+
   it("opens once per file, makes its tables, and is nothing where the file cannot be opened", () => {
     const dir = tempConfigDir();
     const store = ConversationStore.open(path.join(dir, "deeper", "history.sqlite"));

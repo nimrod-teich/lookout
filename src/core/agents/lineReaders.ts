@@ -11,12 +11,23 @@ import { EVENTS_LINES } from "./copilot/events";
 
 export const LINE_READERS: Readonly<Record<string, LineReader>> = Object.fromEntries([TRANSCRIPT_LINES, ROLLOUT_LINES, EVENTS_LINES].map((reader) => [reader.name!, reader]));
 
-/** The stores opened in this thread, by file: one connection each, kept. */
-const stores = new Map<string, ConversationStore | undefined>();
+/** The stores opened in this thread, by file: one connection each, kept until `closeStores`; an open that failed is tried again after a moment. */
+const stores = new Map<string, { store: ConversationStore | undefined; at: number }>();
+const REOPEN_MS = 5000;
 
 function storeAt(file: string): ConversationStore | undefined {
-  if (!stores.has(file)) stores.set(file, ConversationStore.open(file));
-  return stores.get(file);
+  const held = stores.get(file);
+  if (held?.store) return held.store;
+  if (held && Date.now() - held.at < REOPEN_MS) return undefined;
+  const store = ConversationStore.open(file);
+  stores.set(file, { store, at: Date.now() });
+  return store;
+}
+
+/** Closes the stores this thread opened: on the way out, so the files are free (Windows holds an open one against deletion). */
+export function closeStores(): void {
+  for (const held of stores.values()) held.store?.close();
+  stores.clear();
 }
 
 /**

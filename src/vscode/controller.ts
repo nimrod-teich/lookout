@@ -8,6 +8,7 @@ import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents
 import { BackgroundReads } from "../core/background";
 import { SavedPositions } from "../core/savedPositions";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
+import { closeStores } from "../core/agents/lineReaders";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
 import { chatStorageRoots, LocalChats } from "../core/agents/copilot/localChats";
@@ -1204,6 +1205,8 @@ export class Controller implements vscode.Disposable {
     this.recordsWatch?.dispose();
     this.background?.dispose();
     this.store?.close();
+    // The in-thread reads opened the store too.
+    closeStores();
     this.read.dispose();
     for (const timer of this.announcing) clearTimeout(timer);
     this.announcing.clear();
