@@ -33,6 +33,8 @@ export interface BoardActions {
   purged?(): readonly PastView[];
   /** Forgets a purged session: its kept conversation goes. */
   forget?(id: string): void;
+  /** Puts a purged session's kept transcript back for the agent. */
+  restore?(id: string): void;
   /** How the sessions are ordered inside each group. */
   sort?(): SessionSort;
   /** The user dragged a card: their own order, which the board now follows. */
@@ -213,11 +215,14 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         if (known) this.actions.toggleFavourite(id);
         return;
       }
-      case "forget": {
+      case "forget":
+      case "restore": {
         // Only a purged session the board was shown.
         const id = message.id;
         if (typeof id !== "string") return;
-        if ((this.actions.purged?.() ?? []).some((p) => p.id === id)) this.actions.forget?.(id);
+        if (!(this.actions.purged?.() ?? []).some((p) => p.id === id)) return;
+        if (message.type === "forget") this.actions.forget?.(id);
+        else this.actions.restore?.(id);
         return;
       }
       case "archive": {

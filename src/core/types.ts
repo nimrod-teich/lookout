@@ -112,6 +112,8 @@ export interface SessionView {
   noteAt?: number;
   /** How many notes it has. */
   noteCount?: number;
+  /** Lookout keeps a copy of its transcript, on the user's say-so. */
+  kept?: boolean;
 }
 
 /** A session that is not running, shown collapsed under the live ones. */
@@ -140,6 +142,8 @@ export interface PastView {
   noteCount?: number;
   /** The agent deleted its transcript; Lookout kept what was said. It cannot be resumed. */
   purged?: boolean;
+  /** Lookout keeps a copy of its transcript, on the user's say-so: a purged one can be put back. */
+  kept?: boolean;
 }
 
 export interface SessionSpend {

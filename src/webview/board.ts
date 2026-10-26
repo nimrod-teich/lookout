@@ -215,7 +215,13 @@ function chips(view: SessionView): Chip[] {
   // The ring shows the context when the window is known; the chip covers the rest.
   if (view.contextTokens && !view.contextWindow) out.push({ text: `${formatTokens(view.contextTokens)} tokens` });
   if (view.agents > 0) out.push({ text: view.agents === 1 ? "1 agent" : `${view.agents} agents` });
+  if (view.kept) out.push(keptChip());
   return out;
+}
+
+/** Lookout keeps a copy of the session's transcript. */
+function keptChip(): Chip {
+  return { text: "kept", title: "Lookout keeps a copy of this session's transcript, under its own storage, so the agent's deletion of it takes nothing. The card's menu stops the keeping, or puts the transcript back once the agent deleted it.", kind: "kept" };
 }
 
 /** The git branch a session works on. */
@@ -1054,6 +1060,35 @@ function setMenu(card: HTMLElement, view: SessionView): void {
     lookoutResting: view.state === "idle" || view.state === "done",
     lookoutParked: view.parked === true,
     lookoutNoted: view.note !== undefined,
+    lookoutCanResume: false,
+    lookoutCanArchive: false,
+    lookoutArchived: false,
+    lookoutPurged: false,
+    lookoutKept: view.kept === true,
+    lookoutCanKeep: view.empty !== true && view.restored !== true,
+  });
+  if (card.dataset.vscodeContext !== context) card.dataset.vscodeContext = context;
+}
+
+/** The same, on a card that is not running: resume, archive, keep and restore as they apply. */
+function setPastMenu(card: HTMLElement, view: PastView, kind: PastKind): void {
+  const context = JSON.stringify({
+    webviewSection: "card",
+    preventDefaultContextMenuItems: true,
+    sessionId: view.id,
+    lookoutCanJump: false,
+    lookoutCanRename: false,
+    lookoutFinished: false,
+    lookoutStarred: favourites.ids.includes(view.id),
+    lookoutResting: false,
+    lookoutParked: false,
+    lookoutNoted: view.note !== undefined,
+    lookoutCanResume: canResume(view) && view.purged !== true,
+    lookoutCanArchive: kind !== "purged",
+    lookoutArchived: kind === "archived",
+    lookoutPurged: view.purged === true,
+    lookoutKept: view.kept === true,
+    lookoutCanKeep: view.purged !== true,
   });
   if (card.dataset.vscodeContext !== context) card.dataset.vscodeContext = context;
 }
@@ -1271,6 +1306,24 @@ function forgetButton(id: string): HTMLElement {
   return button;
 }
 
+/** A box with an arrow in: the kept transcript goes back for the agent. */
+const RESTORE_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v7M5.3 6.5 8 9.2l2.7-2.7M3 9.5v3a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/** The button on a purged card whose transcript Lookout keeps: puts it back for the agent. Hidden while nothing is kept. */
+function restoreButton(id: string): HTMLElement {
+  const button = el("span", "restore hidden");
+  button.setAttribute("role", "button");
+  button.title = "Restore: put the kept transcript back where the agent keeps its transcripts, for the agent to resume";
+  button.setAttribute("aria-label", "Restore the transcript");
+  button.innerHTML = RESTORE_ICON;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "restore", id });
+  });
+  return button;
+}
+
 /** What a card that is not running is listed as: it changes which buttons it carries. */
 type PastKind = "earlier" | "archived" | "purged";
 
@@ -1285,8 +1338,10 @@ function createPastCard(view: PastView, kind: PastKind = "earlier"): HTMLElement
   const actions = el("span", "actions");
   actions.append(noteButton(view.id));
   if (kind !== "archived") actions.append(starButton(view.id));
-  actions.append(kind === "purged" ? forgetButton(view.id) : archiveButton(view.id, kind === "archived"));
+  if (kind === "purged") actions.append(restoreButton(view.id), forgetButton(view.id));
+  else actions.append(archiveButton(view.id, kind === "archived"));
   row.append(el("span", "title"), el("span", "elapsed"), actions);
+  card.dataset.kind = kind;
   main.append(row, noteLine(view.id), el("span", "chips"), el("span", "hits hidden"));
   card.append(main);
   markCard(card, row, view.agent);
@@ -1325,12 +1380,15 @@ function updatePastCard(card: HTMLElement, view: PastView): void {
   card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   setStar(card, view.id);
   setNoteButton(card, view);
+  setPastMenu(card, view, (card.dataset.kind as PastKind | undefined) ?? "earlier");
+  card.querySelector(".restore")?.classList.toggle("hidden", view.kept !== true);
   // While a search shows the note among the matches, the line under the title would say it twice.
   const result = query === "" ? undefined : hits.get(view.id);
   setNoteLine(card, result?.hits.some((hit) => hit.role === "note") ? undefined : view);
   const chipsEl = card.querySelector(".chips")!;
   const values: Chip[] = [{ text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
   if (view.branch) values.push(branchChip(view.branch));
+  if (view.kept) values.push(keptChip());
   while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
   values.forEach((value, i) => setChip((chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"))) as HTMLElement, value));
   renderHits(card.querySelector(".hits")!, result);
@@ -1385,8 +1443,11 @@ function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, v
   setNoteButton(card, shown);
   // A running favourite keeps its note in the hover, like any running card.
   setNoteLine(card, live ? undefined : shown);
+  if (live) setMenu(card, live);
+  else setPastMenu(card, view!, "earlier");
   const values: Chip[] = [{ text: shown.worktree ? `${shown.project} · ${shown.worktree}` : shown.project }];
   if (shown.branch) values.push(branchChip(shown.branch));
+  if (shown.kept) values.push(keptChip());
   const chipsEl = card.querySelector(".chips")!;
   while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
   values.forEach((value, i) => setChip((chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"))) as HTMLElement, value));

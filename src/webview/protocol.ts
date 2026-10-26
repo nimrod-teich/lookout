@@ -100,6 +100,8 @@ export type FromBoard =
   | { type: "note"; id: string }
   /** Forget a purged session: its kept conversation goes. */
   | { type: "forget"; id: string }
+  /** Put a purged session's kept transcript back where the agent keeps its transcripts. */
+  | { type: "restore"; id: string }
   /** The user dragged a card: their own order of the sessions, which the board now follows. */
   | { type: "order"; ids: string[] }
   /** The user dragged a starred card: the favourites in their new order. */

@@ -23,10 +23,11 @@ import { isParked, park, readParking, settle, unpark, type Parking } from "../co
 import { createProcessFinder, createProcessTable, type ProcessTable } from "../core/proc";
 import type { PastView, SessionView, State } from "../core/types";
 import { RefreshLedger } from "../core/refreshLedger";
-import { searchWithStore } from "../core/search";
+import { readThrough, searchWithStore } from "../core/search";
 import { latestNote, SessionRecords, type NoteEntry, type SessionSeen } from "../core/sessionRecords";
 import { ConversationStore, type StoredSession } from "../core/store";
 import { hasFilters, parseQuery } from "../core/terms";
+import { TranscriptVault, type Restore } from "../core/vault";
 import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
 import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../core/usageAlerts";
 import type { UsageGroup } from "../core/usageGroups";
@@ -111,6 +112,8 @@ export interface ControllerHost {
   storeFile?: string;
   /** How often the transcripts are looked for, for the tests. */
   sweepMs?: number;
+  /** Where the transcripts the user asked Lookout to keep are kept; without it, no keeping. */
+  vaultDir?: string;
   /**
    * The agent's tabs open in this window whose session is not running: after
    * a reload the agent restores its tabs but starts a session only once its
@@ -202,6 +205,12 @@ export class Controller implements vscode.Disposable {
   private readonly remembered = new Map<string, string>();
   /** The sessions listed under Earlier at the last poll: one gone since has its transcript looked for at once. */
   private listedBefore = new Set<string>();
+  /** The transcripts kept on the user's say-so. */
+  private readonly vault: TranscriptVault | undefined;
+  /** The sessions whose transcript is kept, as last read from the vault. */
+  private keptIds = new Set<string>();
+  /** Keep every starred session's transcript. */
+  private keepFavourites = false;
   private sweepSoon: ReturnType<typeof setTimeout> | undefined;
   private archived = new ArchivedSessions([]);
   private savedDone = "";
@@ -279,6 +288,8 @@ export class Controller implements vscode.Disposable {
     if (into) readThroughStore({ scan: runScan, store: into });
     this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error), saved, into) : undefined;
     if (saved) this.pruneTimer = setTimeout(() => void saved.prune(), PRUNE_AFTER_MS);
+    this.vault = host.vaultDir ? new TranscriptVault(host.vaultDir) : undefined;
+    this.readKept();
     this.records = host.recordsDir ? new SessionRecords(host.recordsDir) : undefined;
     // A note written in another window shows here too.
     this.recordsWatch = this.records?.watch(() => this.schedulePoll());
@@ -450,6 +461,97 @@ export class Controller implements vscode.Disposable {
     return this.store !== undefined;
   }
 
+  /** Where the kept transcripts are, when keeping is on. */
+  get keptTranscriptsDir(): string | undefined {
+    return this.host.vaultDir;
+  }
+
+  /** The sessions whose transcript Lookout keeps. */
+  get kept(): ReadonlySet<string> {
+    return this.keptIds;
+  }
+
+  /** A session's transcript can be kept: it is known, and there. */
+  canKeep(id: string): boolean {
+    return this.transcriptOf(id) !== undefined;
+  }
+
+  /** The transcript of a live or a past session, when there is one on disk. */
+  private transcriptOf(id: string): string | undefined {
+    const file = this.fileOf(id) ?? this.store?.session(id)?.file;
+    return file && fs.existsSync(file) ? file : undefined;
+  }
+
+  /** Keeps a session's transcript, on the user's say-so; false when there is none to keep, or it could not be. */
+  keepTranscript(id: string): boolean {
+    if (!this.vault) return false;
+    const view = this.current.find((v) => v.id === id) ?? this.pastView(id);
+    const file = this.transcriptOf(id);
+    if (!view || !file) return false;
+    const kept = this.vault.keep(id, view.agent, file);
+    if (kept) this.readIntoStore(id);
+    this.readKept();
+    this.poll();
+    return kept !== undefined;
+  }
+
+  /** Has the store read a session's conversation, so it holds what the transcript says before the agent deletes it. */
+  private readIntoStore(id: string): void {
+    if (!this.store) return;
+    for (const provider of this.providers) {
+      if (!provider.conversations) continue;
+      for (const conversation of provider.conversations()) {
+        if (conversation.id !== id) continue;
+        readThrough(conversation, this.background);
+        return;
+      }
+    }
+  }
+
+  /** Stops keeping a session's transcript: the copy goes. */
+  releaseTranscript(id: string): void {
+    if (!this.vault) return;
+    this.vault.release(id);
+    this.readKept();
+    this.poll();
+  }
+
+  /** Puts a purged session's kept transcript back where the agent keeps its transcripts; the session leaves Purged once the sweep finds it there. */
+  restoreTranscript(id: string): Restore {
+    if (!this.vault) return { ok: false, file: "", why: "is not kept" };
+    const outcome = this.vault.restore(id);
+    if (outcome.ok) this.sweepStore();
+    return outcome;
+  }
+
+  /** Reads which sessions the vault keeps: on start, after a change here, and at every sweep, for what other windows kept. */
+  private readKept(): void {
+    this.keptIds = new Set(this.vault ? this.vault.kept().map((record) => record.id) : []);
+  }
+
+  /** The starred sessions' transcripts, kept when the setting asks, and the kept transcripts of sessions whose file the agent replaced, kept again. */
+  private keepStarred(stars: ReadonlySet<string>, live: readonly SessionView[]): void {
+    if (!this.vault || !this.keepFavourites) return;
+    let changed = false;
+    for (const id of stars) {
+      if (this.keptIds.has(id)) continue;
+      const view = live.find((v) => v.id === id) ?? this.pastView(id);
+      const file = this.transcriptOf(id);
+      if (!view || !file) continue;
+      if (this.vault.keep(id, view.agent, file)) {
+        this.readIntoStore(id);
+        changed = true;
+      }
+    }
+    if (changed) this.readKept();
+  }
+
+  /** The views marked with what is kept of them. */
+  private markKept<T extends { id: string; kept?: boolean }>(views: T[]): T[] {
+    if (this.keptIds.size === 0) return views;
+    return views.map((view) => (this.keptIds.has(view.id) ? { ...view, kept: true } : view));
+  }
+
   /** Forgets a purged session: its kept conversation goes. */
   forget(id: string): void {
     if (!this.store) return;
@@ -472,9 +574,15 @@ export class Controller implements vscode.Disposable {
    * kept, is forgotten; one back comes back.
    */
   private sweepStore(): void {
-    if (!this.store || this.disposed) return;
+    if (this.disposed) return;
+    if (this.vault) {
+      // A kept transcript whose file the agent replaced is kept again from the new file.
+      for (const record of this.vault.kept()) if (fs.existsSync(record.file)) this.vault.refresh(record.id);
+      this.readKept();
+    }
+    if (!this.store) return;
     const letting = this.keepOffSince === undefined ? undefined : { after: this.keepOffSince, graceMs: this.host.sweepMs ?? SWEEP_MS };
-    this.store.sweep(Date.now(), new Set(), letting);
+    this.store.sweep(Date.now(), this.keptIds, letting);
     // With keeping off, nothing shows under Purged; what was kept before stays in the store until forgotten.
     const purged = this.historyKeep ? this.store.purged() : [];
     const key = JSON.stringify(purged);
@@ -700,6 +808,7 @@ export class Controller implements vscode.Disposable {
     this.parkAfterMs = config.parkAfterMs;
     this.historyKeep = config.historyKeep;
     this.keepOffSince = config.historyKeep ? undefined : (this.keepOffSince ?? Date.now());
+    this.keepFavourites = config.keepFavourites;
     this.claudeOn = config.claudeEnabled;
     this.remembered.clear();
     this.providers = config.claudeEnabled ? [new ClaudeProvider(config.claudeConfigDir, this.proc)] : [];
@@ -746,7 +855,7 @@ export class Controller implements vscode.Disposable {
       this.readAheadTimer = setTimeout(() => this.poll(), READ_AHEAD_AFTER_MS);
     }
     this.poll();
-    if (this.store) {
+    if (this.store || this.vault) {
       if (this.sweepTimer) clearInterval(this.sweepTimer);
       this.sweepTimer = setInterval(() => this.sweepStore(), this.host.sweepMs ?? SWEEP_MS);
       this.sweepStore();
@@ -768,6 +877,7 @@ export class Controller implements vscode.Disposable {
     const keep = this.historyKeep;
     this.historyKeep = config.historyKeep;
     if (keep !== this.historyKeep) this.keepOffSince = this.historyKeep ? undefined : Date.now();
+    this.keepFavourites = config.keepFavourites;
     this.poll();
     if (keep !== this.historyKeep) this.sweepStore();
   }
@@ -844,10 +954,12 @@ export class Controller implements vscode.Disposable {
     this.earlierNotes = notes;
     // An idle tab or terminal with nothing sent is not worth a card.
     const shown = update.views.filter((view) => !(view.empty && view.state === "idle"));
-    const live = this.annotate(sortViews(this.parkViews([...shown, ...restored], Date.now())));
+    const live = this.markKept(this.annotate(sortViews(this.parkViews([...shown, ...restored], Date.now()))));
     this.rememberSessions(live, [...past, ...also]);
     this.noticeVanished(update.views, past);
-    this.publish(live, this.annotate(shownPast.slice(0, EARLIER_LIMIT)), this.annotate(favouritePast), this.annotate(archivePast), this.annotate(notedPast), this.annotate(this.purgedPast));
+    this.keepStarred(stars, live);
+    const mark = (views: PastView[]) => this.markKept(this.annotate(views));
+    this.publish(live, mark(shownPast.slice(0, EARLIER_LIMIT)), mark(favouritePast), mark(archivePast), mark(notedPast), mark(this.purgedPast));
     for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast, ...this.purgedPast]) this.pastSeen.set(view.id, view);
     this.observeRecords(live, [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast, ...this.purgedPast]);
     if (incomplete) this.scheduleFill();

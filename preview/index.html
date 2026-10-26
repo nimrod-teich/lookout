@@ -146,10 +146,13 @@
       const past = (fixture.past ?? []).filter((p) => (scope === "all" || p.resumable !== false) && !archiveIds.includes(p.id) && !purgedIds.includes(p.id)).sort((a, b) => b.modifiedAt - a.modifiedAt);
       const archive = archiveIds.map((id) => (fixture.past ?? []).find((p) => p.id === id)).filter(Boolean);
       const purged = purgedIds.map((id) => (fixture.past ?? []).find((p) => p.id === id)).filter(Boolean).map((p) => ({ ...p, resumable: false, purged: true }));
+      // &kept=a,b: those sessions' transcripts are kept, as the extension marks them.
+      const keptIds = (params.get("kept") ?? "").split(",").filter(Boolean);
+      const mark = (list) => list.map((s) => (keptIds.includes(s.id) ? { ...s, kept: true } : s));
       fixtureSessions = [...fixture.sessions, ...past, ...archive, ...purged];
       // Starred sessions that are not running and that the scope does not list come along.
-      const favourites = { ids: favouriteIds, past: (fixture.past ?? []).filter((p) => favouriteIds.includes(p.id) && !past.includes(p)) };
-      window.postMessage({ type: "sessions", sessions: fixture.sessions, past, now, usage, markers, earlier: { ...earlier }, favourites, archive, purged, sort, group: groupBy }, "*");
+      const favourites = { ids: favouriteIds, past: mark((fixture.past ?? []).filter((p) => favouriteIds.includes(p.id) && !past.includes(p))) };
+      window.postMessage({ type: "sessions", sessions: mark(fixture.sessions), past: mark(past), now, usage, markers, earlier: { ...earlier }, favourites, archive: mark(archive), purged: mark(purged), sort, group: groupBy }, "*");
     };
     post(earlier.scope);
     const q = params.get("q");
