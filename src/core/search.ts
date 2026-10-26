@@ -88,7 +88,9 @@ export function searchConversations(conversations: Iterable<Searchable>, parsed:
  * conversation the reading thread has not written yet, or one it never
  * reads). A file the store holds is still read on, in the background or
  * here, so the store follows the conversation; one whose read is still to
- * come counts as pending, so the results are sent again once it is read.
+ * come counts as pending, so the results are sent again once it is read. A
+ * past conversation whose file was last written when it was last read is
+ * not looked at again: its listing says so.
  */
 export function searchWithStore(conversations: Iterable<Searchable>, parsed: Query, limit: number, budgetMs: number, snippet: SnippetSize | undefined, background: BackgroundReads | undefined, store: ConversationStore): SearchOutcome {
   if (parsed.terms.length === 0 && !hasFilters(parsed)) return { results: [], pending: 0 };
@@ -98,32 +100,44 @@ export function searchWithStore(conversations: Iterable<Searchable>, parsed: Que
   const started = Date.now();
   const results: SearchResult[] = [];
   let pending = 0;
-  const stored: { id: string; file: string }[] = [];
+  // The conversations the query's times and places pick, with their files.
+  const picks: { id: string; past: number | undefined; index: HistoryIndex | undefined; file: string | undefined }[] = [];
   for (const conversation of conversations) {
     const past = conversation.pastModifiedAt;
     if (past !== undefined && parsed.since !== undefined && past + MTIME_SLACK_MS < parsed.since) continue;
     if ((parsed.projects.length > 0 || parsed.branches.length > 0) && !picked(parsed, conversation.cwd, conversation.branch)) continue;
     const index = conversation.index();
-    const file = conversation.file ?? index?.file;
-    // A read still to come: the results are sent again once it is in.
-    let waiting = false;
-    if (index) {
-      // Kept up to date: in the background, which writes the store; or here, through the store, while the budget allows.
-      if (background) {
-        index.update(background);
-        waiting = background.has(index);
-      } else if (!index.ready || index.changed()) {
-        if (Date.now() - started < budgetMs) index.refresh();
-        else waiting = true;
-      }
+    picks.push({ id: conversation.id, past, index, file: conversation.file ?? index?.file });
+  }
+  const filesOf = () => picks.flatMap((pick) => (pick.file ? [pick.file] : []));
+  // One question to the store for every file, not one per conversation.
+  const before = store.held(filesOf());
+  for (const pick of picks) {
+    const { index, file } = pick;
+    if (!index) continue;
+    // A lean index read once, whose rows the store no longer has (forgotten meanwhile): read again from the start.
+    if (index.lean && index.ready && file && !before.has(file)) index.forgetPlace();
+    if (index.seenAt(pick.past)) continue;
+    // Kept up to date: in the background, which writes the store, a live session's first; or here, through the store, while the budget allows.
+    if (background) {
+      index.update(background, pick.past === undefined);
+      // A read still to come: the results are sent again once it is in.
+      if (background.has(index)) pending++;
+    } else if (!index.ready || index.changed()) {
+      if (Date.now() - started < budgetMs) index.refresh();
+      else pending++;
     }
-    if (waiting) pending++;
-    if (file && store.has(file)) {
-      stored.push({ id: conversation.id, file });
+  }
+  // Reads here may have brought files into the store: asked again.
+  const held = background ? before : store.held(filesOf());
+  const stored: { id: string; file: string }[] = [];
+  for (const { id, index, file } of picks) {
+    if (file && held.has(file) && !index?.keptInMemory) {
+      stored.push({ id, file });
       continue;
     }
-    if (!index?.ready) continue;
-    results.push(...searchIndex(conversation.id, index, parsed, limit, snippet, range, timed, words));
+    if (!index?.ready || index.lean) continue;
+    results.push(...searchIndex(id, index, parsed, limit, snippet, range, timed, words));
   }
   const files = stored.map((s) => s.file);
   const touched = parsed.files.length > 0 ? store.touched(files, parsed.files) : undefined;
@@ -162,6 +176,6 @@ function searchIndex(id: string, index: HistoryIndex, parsed: Query, limit: numb
 export function readConversationsAhead(conversations: Iterable<Searchable>, background: BackgroundReads): void {
   for (const conversation of conversations) {
     const index = conversation.index();
-    if (index && (conversation.pastModifiedAt === undefined || !index.ready)) index.update(background);
+    if (index && (conversation.pastModifiedAt === undefined || !index.ready)) index.update(background, conversation.pastModifiedAt === undefined);
   }
 }

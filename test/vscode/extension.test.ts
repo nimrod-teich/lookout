@@ -602,7 +602,8 @@ describe("the extension", () => {
       activate(context());
       const { boardView, listed } = openBoard();
       await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
-      expect(listed()?.earlier).toEqual({ scope: "folders", limit: 500, capped: false });
+      // With the store as the index, every earlier session is listed and searched: no limit.
+      expect(listed()?.earlier).toEqual({ scope: "folders", limit: Number.MAX_SAFE_INTEGER, capped: false });
       boardView.receive({ type: "search", query: "deploy" });
       expect(boardView.posted.at(-1)).toMatchObject({ type: "search", query: "deploy", results: [{ id: HERE, count: 1 }] });
 

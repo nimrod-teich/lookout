@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasFilters, inRange, parseQuery, termsOf, timeOf } from "../../src/core/terms";
+import { firstMatchOf, hasFilters, inRange, matchesAll, matchRanges, parseQuery, termsOf, timeOf } from "../../src/core/terms";
 
 const NOW = new Date(2026, 9, 16, 15, 30).getTime();
 const midnight = (y: number, m: number, d: number) => new Date(y, m, d).getTime();
@@ -95,5 +95,34 @@ describe("has:note", () => {
     expect(parseQuery("has:star", NOW)).toEqual({ terms: ["has:star"], projects: [], branches: [], files: [] });
     expect(hasFilters(parseQuery("has:star", NOW))).toBe(false);
     expect(termsOf("has:note cache")).toEqual(["cache"]);
+  });
+});
+
+describe("phrases", () => {
+  it("takes a quoted phrase as one term, its words in a row, and an unclosed or empty one as it can", () => {
+    expect(parseQuery('"Staging   Migrate" failed').terms).toEqual(["staging migrate", "failed"]);
+    expect(parseQuery('"retag recipe').terms).toEqual(["retag recipe"]);
+    expect(parseQuery('"" deploy').terms).toEqual(["deploy"]);
+    // An operator's quoted value is still the operator's.
+    expect(parseQuery('branch:"fix login" "the error"')).toMatchObject({ branches: ["fix login"], terms: ["the error"] });
+  });
+
+  it("matches and marks a phrase whatever the whitespace between its words", () => {
+    expect(matchesAll("The staging\n  migrate failed", ["staging migrate"])).toBe(true);
+    expect(matchesAll("staging then migrate", ["staging migrate"])).toBe(false);
+    expect(matchRanges("The staging\n migrate failed", ["staging migrate", "failed"])).toEqual([
+      [4, 20],
+      [21, 27],
+    ]);
+    // Punctuation and symbols between the words, as the database's search takes them.
+    expect(matchesAll("ran the staging-migrate step", ["staging migrate"])).toBe(true);
+    expect(matchRanges("fix: login", ["fix login"])).toEqual([[0, 10]]);
+    // A word on its own is looked for as it is, punctuation and all.
+    expect(matchesAll('relation "billing_events"', ["billing_events"])).toBe(true);
+    // The first place alone, without marking the rest of the text.
+    expect(firstMatchOf("the staging-migrate, then staging migrate", "staging migrate")).toEqual([4, 19]);
+    expect(firstMatchOf("a retry, a retry", "retry")).toEqual([2, 7]);
+    expect(firstMatchOf("nothing here", "retry")).toBeUndefined();
+    expect(firstMatchOf("anything", "")).toBeUndefined();
   });
 });

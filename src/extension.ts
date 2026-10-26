@@ -101,7 +101,7 @@ export function activate(context: vscode.ExtensionContext): void {
   /** Tell the agents apart, as `lookout.agentMarkers` says: by default once the board shows two or more, running, earlier or in the usage. */
   const markers = () => markersShown(config.agentMarkers, boardAgents({ sessions: controller.sessions, past: controller.past, usage: controller.usageGroups }));
   /** The agent of a live or a past session. */
-  const agentOf = (id: string) => (controller.sessions.find((view) => view.id === id) ?? controller.pastView(id))?.agent;
+  const agentOf = (id: string) => controller.agentOf(id);
 
   // Sessions hosted by the other windows on this host are jumped to through those windows.
   const crossWindow = new CrossWindowJumps({
@@ -240,10 +240,7 @@ export function activate(context: vscode.ExtensionContext): void {
     markers,
     whereOf: (id) => controller.whereOf(id),
     isLive: (id) => controller.sessions.some((view) => view.id === id && !view.restored),
-    spanOf: (id) => {
-      const times = (controller.history(id) ?? []).map((message) => message.at).filter((at): at is number => at !== undefined);
-      return times.length ? { started: Math.min(...times), lastActive: Math.max(...times) } : {};
-    },
+    spansOf: (ids) => controller.spansOf(ids),
     open: openHit,
     editNote: (id) => editNote(id),
     follows: () => controller.follows,

@@ -315,7 +315,7 @@ field.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" 
 const input = el("input", "");
 input.type = "search";
 input.placeholder = "Search the conversations";
-input.title = "Every word must appear in one message, or in the session's note. Narrow it with since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts; has:note lists the sessions with a note";
+input.title = "Every word must appear in one message, or in the session's note; a phrase in quotes, its words in a row. Narrow it with since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts; has:note lists the sessions with a note";
 input.setAttribute("aria-label", "Search the conversations");
 input.spellcheck = false;
 field.append(input);
@@ -581,8 +581,17 @@ function receiveSearch(message: { query: string; results: SearchResult[]; pendin
 let results: SearchResult[] = [];
 
 /** The agent of a session the board holds, running or not. */
+/** Every session the board holds, by id, to its agent: looked up per search result, so a map rather than a scan of the lists. */
+let agentById = new Map<string, string>();
+
+function indexAgents(): void {
+  const byId = new Map<string, string>();
+  for (const list of [allSessions, past, favourites.past, archivePast, purgedPast]) for (const view of list) if (!byId.has(view.id)) byId.set(view.id, view.agent);
+  agentById = byId;
+}
+
 function agentOfId(id: string): string | undefined {
-  return (allSessions.find((view) => view.id === id) ?? past.find((view) => view.id === id) ?? favourites.past.find((view) => view.id === id) ?? archivePast.find((view) => view.id === id) ?? purgedPast.find((view) => view.id === id))?.agent;
+  return agentById.get(id);
 }
 
 /** How much the search found, among the sessions the board holds and the agents shown: a session the board has no card for, and those hidden in the legend, are left out of the count as of the cards. */
@@ -1894,6 +1903,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   groupPicker.set(groupBy);
   archivePast = message.archive ?? [];
   purgedPast = message.purged ?? [];
+  indexAgents();
   // One group, from an extension that knew only Claude's usage, or one per agent.
   usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);
   usageBar = message.usageBar;

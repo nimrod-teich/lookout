@@ -1,14 +1,15 @@
 // Pure text helpers shared by the extension and the webviews; nothing from Node here.
 
 /**
- * A search, parsed: the words every matching message must contain, and the
- * operators that narrow it. `since:` and `before:` bound the time of the
+ * A search, parsed: the words every matching message must contain (a
+ * quoted phrase is one of them, its words in a row), and the operators that
+ * narrow it. `since:` and `before:` bound the time of the
  * messages; `project:`, `branch:` and `file:` pick sessions, any of their
  * values (`project:api project:web` is either); `has:note` keeps the
  * sessions the user wrote a note on.
  */
 export interface Query {
-  /** Lowercased. */
+  /** Lowercased; a phrase holds single spaces between its words. */
   terms: string[];
   /** Epoch ms: messages at or after it. */
   since?: number;
@@ -29,9 +30,15 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const UNITS: Record<string, number> = { h: HOUR, d: DAY, w: 7 * DAY };
 
-/** The tokens of a query: runs of non-space; an operator's value in quotes may hold spaces. */
+/** The tokens of a query: runs of non-space; an operator's value in quotes, and a phrase in quotes, may hold spaces. */
 function tokensOf(query: string): string[] {
-  return query.match(/(?:since|before|project|branch|file|has):"[^"]*"?|\S+/gi) ?? [];
+  return query.match(/(?:since|before|project|branch|file|has):"[^"]*"?|"[^"]*"?|\S+/gi) ?? [];
+}
+
+/** A phrase as a term: its words in a row, lowercased, one space between them; nothing for an empty one. */
+function phraseOf(token: string): string | undefined {
+  const words = token.replace(/^"|"$/g, "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return words.length ? words.join(" ") : undefined;
 }
 
 /**
@@ -92,6 +99,11 @@ export function inRange(at: number | undefined, range: TimeRange | undefined): b
 export function parseQuery(query: string, now: number = Date.now(), zone?: number): Query {
   const parsed: Query = { terms: [], projects: [], branches: [], files: [] };
   for (const token of tokensOf(query)) {
+    if (token.startsWith('"')) {
+      const phrase = phraseOf(token);
+      if (phrase) parsed.terms.push(phrase);
+      continue;
+    }
     const operator = OPERATOR.exec(token);
     const key = operator?.[1]?.toLowerCase();
     const value = (operator?.[2] ?? "").replace(/^"|"$/g, "").trim().toLowerCase();
@@ -125,14 +137,57 @@ export function termsOf(query: string): string[] {
   return parseQuery(query).terms;
 }
 
+/**
+ * A term as a pattern over lowercased text: a phrase's words with any run
+ * of whitespace, punctuation or symbols between them, as the database's
+ * search takes them. Nothing for a single word, which is looked for as it
+ * is.
+ */
+function phrasePattern(term: string): RegExp | undefined {
+  if (!term.includes(" ")) return undefined;
+  return new RegExp(term.split(" ").map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s\\p{P}\\p{S}]+"), "gu");
+}
+
+/** [start, end) of each place the term is in the lowercased text. */
+function placesOf(lower: string, term: string): [number, number][] {
+  const out: [number, number][] = [];
+  if (term === "") return out;
+  const pattern = phrasePattern(term);
+  if (pattern) {
+    for (const match of lower.matchAll(pattern)) out.push([match.index, match.index + match[0].length]);
+    return out;
+  }
+  for (let at = lower.indexOf(term); at >= 0; at = lower.indexOf(term, at + term.length)) out.push([at, at + term.length]);
+  return out;
+}
+
+/** [start, end) of the term's first place in the lowercased text; undefined when it is not there. */
+export function firstMatchOf(lower: string, term: string): [number, number] | undefined {
+  if (term === "") return undefined;
+  const pattern = phrasePattern(term);
+  if (!pattern) {
+    const at = lower.indexOf(term);
+    return at < 0 ? undefined : [at, at + term.length];
+  }
+  const match = pattern.exec(lower);
+  return match ? [match.index, match.index + match[0].length] : undefined;
+}
+
+/** Where the term is first in the lowercased text; -1 when it is not. */
+export function firstPlaceOf(lower: string, term: string): number {
+  return firstMatchOf(lower, term)?.[0] ?? -1;
+}
+
+/** The lowercased text holds the term: a word as it is, a phrase's words in a row whatever the whitespace between them. */
+export function holds(lower: string, term: string): boolean {
+  return firstPlaceOf(lower, term) >= 0;
+}
+
 /** [start, end) of every term in the text, in order, overlaps merged. */
 export function matchRanges(text: string, terms: string[]): [number, number][] {
   const lower = text.toLowerCase();
   const found: [number, number][] = [];
-  for (const term of terms) {
-    if (term === "") continue;
-    for (let at = lower.indexOf(term); at >= 0; at = lower.indexOf(term, at + term.length)) found.push([at, at + term.length]);
-  }
+  for (const term of terms) found.push(...placesOf(lower, term));
   found.sort((a, b) => a[0] - b[0]);
   const ranges: [number, number][] = [];
   for (const range of found) {
@@ -147,5 +202,5 @@ export function matchRanges(text: string, terms: string[]): [number, number][] {
 export function matchesAll(text: string, terms: string[]): boolean {
   if (terms.length === 0) return false;
   const lower = text.toLowerCase();
-  return terms.every((term) => lower.includes(term));
+  return terms.every((term) => holds(lower, term));
 }

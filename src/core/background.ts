@@ -15,7 +15,8 @@ export interface Scanner {
 const NOTIFY_MS = 200;
 
 export class BackgroundReads {
-  /** Waiting to be read, in the order asked for. */
+  /** Waiting to be read, in the order asked for: the urgent ones (live sessions, one in view) before the rest. */
+  private readonly urgent = new Set<HistoryIndex>();
   private readonly queue = new Set<HistoryIndex>();
   private current: HistoryIndex | undefined;
   private draining = false;
@@ -44,18 +45,22 @@ export class BackgroundReads {
 
   /** The index waits to be read, or is being read. */
   has(index: HistoryIndex): boolean {
-    return this.current === index || this.queue.has(index);
+    return this.current === index || this.urgent.has(index) || this.queue.has(index);
   }
 
   /** How many files wait to be read, or are being read. */
   get pending(): number {
-    return this.queue.size + (this.current ? 1 : 0);
+    return this.urgent.size + this.queue.size + (this.current ? 1 : 0);
   }
 
-  /** Reads what the index's file gained, after the files asked for before it. */
-  read(index: HistoryIndex): void {
-    if (this.disposed || this.broken || this.has(index)) return;
-    this.queue.add(index);
+  /** Reads what the index's file gained, after the files asked for before it; an urgent one after the urgent ones only, and one waiting moves up when it turns urgent. */
+  read(index: HistoryIndex, urgent = false): void {
+    if (this.disposed || this.broken || this.current === index || this.urgent.has(index)) return;
+    if (urgent) {
+      this.queue.delete(index);
+      this.urgent.add(index);
+    } else if (!this.queue.has(index)) this.queue.add(index);
+    else return;
     void this.drain();
   }
 
@@ -64,10 +69,11 @@ export class BackgroundReads {
     this.draining = true;
     try {
       for (;;) {
-        const next = this.queue.values().next();
+        const from = this.urgent.size > 0 ? this.urgent : this.queue;
+        const next = from.values().next();
         if (next.done || this.disposed || this.broken) return;
         const index = next.value;
-        this.queue.delete(index);
+        from.delete(index);
         this.current = index;
         const job = index.scan();
         if (job && this.store) job.store = this.store;
@@ -93,6 +99,7 @@ export class BackgroundReads {
       // Whatever broke it (a thread out of memory on a file, a bundle that does not load), it is not tried again:
       // the owner goes back to reading the way it did without one.
       this.brokenBy = error ?? new Error("The scanner failed");
+      this.urgent.clear();
       this.queue.clear();
       this.scanner.dispose();
       this.onBroken?.(this.brokenBy);
@@ -122,6 +129,7 @@ export class BackgroundReads {
 
   dispose(): void {
     this.disposed = true;
+    this.urgent.clear();
     this.queue.clear();
     if (this.notifyTimer) clearTimeout(this.notifyTimer);
     this.notifyTimer = undefined;

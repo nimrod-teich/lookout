@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import type { BackgroundReads } from "./background";
-import { inRange, matchRanges, termsOf, type TimeRange } from "./terms";
+import { firstMatchOf, holds, inRange, matchRanges, termsOf, type TimeRange } from "./terms";
 
 export { termsOf, type TimeRange };
 
@@ -54,6 +54,12 @@ export interface Scan {
    * from.
    */
   store?: { file: string; build: string };
+  /**
+   * The index keeps no messages: they are in the store, which the read
+   * writes, and the answer says only how far the file was read. A read the
+   * store could not take is answered with nothing, and tried again.
+   */
+  lean?: boolean;
 }
 
 /** A line that holds facts, and where it sits in its file. */
@@ -75,6 +81,8 @@ export interface Scanned {
   identity: string;
   /** The file's size when it was looked at. */
   size: number;
+  /** Its modified time when it was looked at. */
+  mtimeMs?: number;
   /** The file was replaced or cut short, or is read for the first time: `lines` hold its whole conversation, and what was read before goes. */
   reset: boolean;
   /** Where the next read starts. */
@@ -84,6 +92,13 @@ export interface Scanned {
   restored?: number;
   /** What the file holds just before `end` (see `tailOf`); none when the file could not be read. */
   tail?: string;
+  /**
+   * A lean read the store could not take (it refused the write, or could
+   * not be opened): the file was read whole, its lines are here, and the
+   * index keeps them in memory from now on, so the conversation is still
+   * found.
+   */
+  inMemory?: boolean;
 }
 
 /** Where a conversation's messages and paths sit in its file, as a window saved them: positions, no text. */
@@ -128,20 +143,20 @@ export function scanFile(file: string, reader: LineReader, from: number, identit
     const restored = restoreLines(file, reader, saved);
     if (restored) {
       const after = scanFile(file, reader, saved.end, now);
-      if (after && !after.reset) return { identity: now, size: after.size, reset: true, end: after.end, lines: [...restored, ...after.lines], restored: saved.end, tail: after.tail };
+      if (after && !after.reset) return { identity: now, size: after.size, mtimeMs: after.mtimeMs, reset: true, end: after.end, lines: [...restored, ...after.lines], restored: saved.end, tail: after.tail };
     }
   }
   const reset = now !== identity || st.size < from;
   const start = reset ? 0 : from;
   const lines: FactLine[] = [];
-  if (st.size === start) return { identity: now, size: st.size, reset, end: start, lines, tail: tailOf(file, start) };
+  if (st.size === start) return { identity: now, size: st.size, mtimeMs: st.mtimeMs, reset, end: start, lines, tail: tailOf(file, start) };
   try {
     const end = readLines(file, start, reader, (line) => lines.push(line));
-    return { identity: now, size: st.size, reset, end, lines, tail: tailOf(file, end) };
+    return { identity: now, size: st.size, mtimeMs: st.mtimeMs, reset, end, lines, tail: tailOf(file, end) };
   } catch {
     // A file that cannot be read (not ours to read, held by another process) is tried again once it changes,
     // not at every look; a replaced one is at least emptied of what was read before.
-    return { identity: now, size: st.size, reset, end: start, lines: [] };
+    return { identity: now, size: st.size, mtimeMs: st.mtimeMs, reset, end: start, lines: [] };
   }
 }
 
@@ -247,6 +262,12 @@ const CHUNK_BYTES = 1024 * 1024;
 export interface ReadThrough {
   scan(job: Scan): Scanned | undefined;
   store: { file: string; build: string };
+  /**
+   * A conversation's messages from the store, oldest first. With this, the
+   * indexes made from now on keep no messages of their own: the store is
+   * the index, searched and read from where it is.
+   */
+  messages?(file: string): HistoryMessage[] | undefined;
 }
 
 let through: ReadThrough | undefined;
@@ -305,13 +326,15 @@ export const PAGE_SNIPPET: SnippetSize = { before: 120, after: 360 };
 /** Cuts a message around its first match and marks every term in the cut. */
 export function snippetOf(text: string, terms: string[], size: SnippetSize = CARD_SNIPPET): { snippet: string; ranges: [number, number][] } {
   const lower = text.toLowerCase();
-  let first = -1;
+  // The earliest match of any term; of two at the same place, the longer.
+  let first: [number, number] | undefined;
   for (const term of terms) {
-    const at = lower.indexOf(term);
-    if (at >= 0 && (first < 0 || at < first)) first = at;
+    const match = firstMatchOf(lower, term);
+    if (match && (!first || match[0] < first[0] || (match[0] === first[0] && match[1] > first[1]))) first = match;
   }
-  const start = first < 0 ? 0 : Math.max(0, first - size.before);
-  const end = Math.min(text.length, (first < 0 ? 0 : first) + size.after);
+  const start = first ? Math.max(0, first[0] - size.before) : 0;
+  // At least to the end of the first match: a long phrase is shown whole.
+  const end = Math.min(text.length, first ? Math.max(first[0] + size.after, first[1]) : size.after);
   let snippet = text.slice(start, end).replace(/\s+/g, " ").trim();
   if (start > 0) snippet = `…${snippet}`;
   if (end < text.length) snippet = `${snippet}…`;
@@ -389,14 +412,24 @@ function readLines(file: string, from: number, reader: LineReader, onLine: (line
 }
 
 /**
- * The messages of one conversation file, kept in memory for searching. The
- * file is read once, then only what was appended; a replaced or truncated
- * file is read again from the start.
+ * The messages of one conversation file, for searching. The file is read
+ * once, then only what was appended; a replaced or truncated file is read
+ * again from the start. While the store is the index (see `ReadThrough`),
+ * the index keeps only how far the file was read, and its messages are the
+ * store's; else it keeps them in memory.
  */
 export class HistoryIndex {
-  readonly messages: HistoryMessage[] = [];
-  /** Each message's text lowercased, once, for matching. */
+  private readonly held: HistoryMessage[] = [];
+  /** Each message's text lowercased, whitespace runs made one space, once, for matching. */
   private readonly lowered: string[] = [];
+  /** The messages are the store's, read from it when asked for; none are kept here. */
+  private leanNow: boolean;
+  /** The store's messages as last read, until the next read changes them. */
+  private fromStore: HistoryMessage[] | undefined;
+  /** The store could not take a read of this file: the index keeps it in memory, and is searched there. */
+  private fellBack = false;
+  /** The file's modified time at the last read. */
+  private seenMtimeMs: number | undefined;
   /** The paths the conversation's tool calls worked on, lowercased, with forward slashes. */
   readonly paths = new Set<string>();
   private offset = 0;
@@ -415,7 +448,26 @@ export class HistoryIndex {
   constructor(
     readonly file: string,
     private readonly reader: LineReader,
-  ) {}
+  ) {
+    this.leanNow = through?.messages !== undefined && reader.name !== undefined;
+  }
+
+  /** The messages are the store's, read from it when asked for; none are kept here. False from the moment the store could not take a read of the file. */
+  get lean(): boolean {
+    return this.leanNow;
+  }
+
+  /** The store could not take a read of the file, and the index keeps it in memory instead: search it there, not in what the store holds of it. */
+  get keptInMemory(): boolean {
+    return this.fellBack;
+  }
+
+  /** The conversation's messages, oldest first: the store's for a lean index (read once until the next read changes them), else the ones read into memory. */
+  get messages(): HistoryMessage[] {
+    if (!this.lean) return this.held;
+    this.fromStore ??= through?.messages?.(this.file);
+    return this.fromStore ?? [];
+  }
 
   /** The file was read at least once; before that a refresh reads it whole. */
   get ready(): boolean {
@@ -439,14 +491,39 @@ export class HistoryIndex {
   /**
    * Reads what the file gained: in the background when `background` is given
    * and the reader has a name, else here and now. A file that did not change
-   * since it was last read is not read.
+   * since it was last read is not read. `urgent` (a live session's, or one in
+   * view) goes ahead of the reads already waiting.
    */
-  update(background?: BackgroundReads): void {
+  update(background?: BackgroundReads, urgent = false): void {
     if (!background || !this.reader.name) {
       this.refresh();
       return;
     }
-    if (!background.has(this) && this.changed()) background.read(this);
+    if ((urgent || !background.has(this)) && this.changed()) background.read(this, urgent);
+  }
+
+  /**
+   * The file was read, and was last written when the read saw it: a list
+   * that says when each file was last written tells which need a look
+   * without one being taken here.
+   */
+  seenAt(modifiedAt: number | undefined): boolean {
+    return this.ready && modifiedAt !== undefined && this.seenMtimeMs !== undefined && Math.round(this.seenMtimeMs) === modifiedAt;
+  }
+
+  /** Forgets how far the file was read: the next read takes it from its start. */
+  forgetPlace(): void {
+    this.fromStore = undefined;
+    this.replaceMessages([]);
+    this.paths.clear();
+    this.messageAt.length = 0;
+    this.pathAt.length = 0;
+    this.pathLineAt.length = 0;
+    this.offset = 0;
+    this.identity = "";
+    this.seenSize = -1;
+    this.seenMtimeMs = undefined;
+    this.tail = undefined;
   }
 
   /** The file is not as it was at the last read: replaced, grown or cut short, or never read. */
@@ -461,12 +538,21 @@ export class HistoryIndex {
 
   /** The read that takes the index from where it is; none for a reader without a name. */
   scan(): Scan | undefined {
-    return this.reader.name ? { file: this.file, reader: this.reader.name, from: this.offset, identity: this.identity } : undefined;
+    if (!this.reader.name) return undefined;
+    const job: Scan = { file: this.file, reader: this.reader.name, from: this.offset, identity: this.identity };
+    if (this.lean) job.lean = true;
+    return job;
   }
 
   /** Takes in what a scan found, unless the index moved since the scan was asked for; true when it did. */
   apply(scanned: Scanned, job: Scan): boolean {
     if (job.from !== this.offset || job.identity !== this.identity) return false;
+    this.fromStore = undefined;
+    // The store could not take the read: this conversation is kept in memory from now on.
+    if (scanned.inMemory && this.leanNow) {
+      this.leanNow = false;
+      this.fellBack = true;
+    }
     if (scanned.reset) {
       this.replaceMessages([]);
       this.paths.clear();
@@ -474,10 +560,12 @@ export class HistoryIndex {
       this.pathAt.length = 0;
       this.pathLineAt.length = 0;
     }
-    for (const line of scanned.lines) this.record(line);
+    // A lean index takes no lines: they went into the store.
+    if (!this.lean) for (const line of scanned.lines) this.record(line);
     this.offset = scanned.end;
     this.identity = scanned.identity;
     this.seenSize = scanned.size;
+    this.seenMtimeMs = scanned.mtimeMs;
     this.tail = scanned.tail;
     return true;
   }
@@ -505,14 +593,14 @@ export class HistoryIndex {
 
   /** Holds these messages instead of the ones it held. */
   protected replaceMessages(messages: readonly HistoryMessage[]): void {
-    this.messages.length = 0;
+    this.held.length = 0;
     this.lowered.length = 0;
     for (const message of messages) this.add(message);
   }
 
   private add(message: HistoryMessage): void {
-    this.messages.push(message);
-    this.lowered.push(message.text.toLowerCase());
+    this.held.push(message);
+    this.lowered.push(message.text.toLowerCase().replace(/\s+/g, " "));
   }
 
   /** The messages containing every term, written within `range`, newest first; `limit` of them cut into snippets. */
@@ -520,11 +608,11 @@ export class HistoryIndex {
     if (terms.length === 0) return { count: 0, hits: [] };
     let count = 0;
     const hits: SearchHit[] = [];
-    for (let i = this.messages.length - 1; i >= 0; i--) {
-      const message = this.messages[i]!;
+    for (let i = this.held.length - 1; i >= 0; i--) {
+      const message = this.held[i]!;
       if (!inRange(message.at, range)) continue;
       const lower = this.lowered[i]!;
-      if (!terms.every((term) => lower.includes(term))) continue;
+      if (!terms.every((term) => (term.includes(" ") ? holds(lower, term) : lower.includes(term)))) continue;
       count++;
       if (hits.length < limit) hits.push({ index: i, role: message.role, at: message.at, ...snippetOf(message.text, terms, size) });
     }
@@ -533,7 +621,7 @@ export class HistoryIndex {
 
   /** A message was written within the range. */
   hasMessageIn(range: TimeRange): boolean {
-    return this.messages.some((message) => inRange(message.at, range));
+    return this.held.some((message) => inRange(message.at, range));
   }
 
   /** A tool call worked on a path that contains any of the parts (lowercased, forward slashes). */

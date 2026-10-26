@@ -47,7 +47,7 @@ field.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" 
 const input = el("input", "");
 input.type = "search";
 input.placeholder = "Search the conversations";
-input.title = `Every word must appear in one message. Narrow it with ${OPERATORS}`;
+input.title = `Every word must appear in one message; a phrase in quotes, its words in a row. Narrow it with ${OPERATORS}`;
 input.setAttribute("aria-label", "Search the conversations");
 input.spellcheck = false;
 field.append(input);
