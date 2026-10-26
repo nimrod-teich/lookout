@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <img src="media/readme/window.png" width="100%" alt="VS Code with the Lookout board in the side bar: the harbour with one boat per session, the legend, the search box with its Group by and Sort by chips, each agent's usage limits, and the cards: one Claude session waiting on a permission, and a Claude, a Codex and a Copilot session finished; the terminal below shows the prompt it waits on">
+  <img src="media/readme/window.png" width="100%" alt="VS Code with the Lookout board in the side bar: the harbour with one boat per session, the legend, the search box with its Group by, Sort by and Notes chips, each agent's usage limits, and the cards: a starred earlier session with its newest note and +2 for two more, one Claude session waiting on a permission to write a file, and a finished Claude session whose clock chip says its scheduled check runs at 09:43 tomorrow; the terminal below shows the prompt it waits on">
 </p>
 
 Running several AI coding agents at once means clicking through tabs and terminals to find out which one finished and which one is stuck on a question. Lookout keeps that answer on one board in the side bar, takes you to the right tab or terminal with one keystroke, and finds any conversation, running or not, by a word you remember from it. Claude Code in its VS Code panel or a terminal, Codex in its extension's panel, VS Code's Chat or a terminal, Copilot in VS Code's Chat or a terminal: one board, one jump key, one search, each agent with its own colour and boat once more than one is on the board. It reads only what the agents already write on disk.
