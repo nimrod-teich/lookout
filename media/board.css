@@ -1468,7 +1468,9 @@ body.vscode-reduce-motion .hover-card {
 .action,
 .star,
 .note-btn,
-.archive {
+.archive,
+.restore,
+.forget {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -1490,7 +1492,9 @@ body.vscode-reduce-motion .hover-card {
 .action svg,
 .star svg,
 .note-btn svg,
-.archive svg {
+.archive svg,
+.restore svg,
+.forget svg {
   width: 12px;
   height: 12px;
 }
@@ -1855,20 +1859,8 @@ body.vscode-high-contrast-light .card {
 
 /* The forget button on a purged card's title row, shown on hover like the archive button; red when pointed at. */
 .forget {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  margin-left: 2px;
-  padding: 1px 3px;
-  border-radius: 3px;
-  color: var(--muted);
   opacity: 0;
   transition: opacity 120ms ease;
-}
-
-.forget svg {
-  width: 12px;
-  height: 12px;
 }
 
 .card:hover .forget,
@@ -1883,24 +1875,12 @@ body.vscode-high-contrast-light .card {
 
 /* The restore button on a purged card whose transcript Lookout keeps, shown on hover; green when pointed at. */
 .restore {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  margin-left: 2px;
-  padding: 1px 3px;
-  border-radius: 3px;
-  color: var(--muted);
   opacity: 0;
   transition: opacity 120ms ease;
 }
 
 .restore.hidden {
   display: none;
-}
-
-.restore svg {
-  width: 12px;
-  height: 12px;
 }
 
 .card:hover .restore,
