@@ -17,6 +17,7 @@ import { readConfig } from "./vscode/config";
 import { panelAdapter } from "./vscode/agents";
 import { claudeTabLabel, claudeTabLabels } from "./vscode/agents/claudePanel";
 import { Findings } from "./vscode/findings";
+import { NotePage } from "./vscode/notePage";
 import { Controller } from "./vscode/controller";
 import { CrossWindowJumps, raiseWindow } from "./vscode/crossWindow";
 import { jumpToSession, renameSession, revealed } from "./vscode/jump";
@@ -37,6 +38,7 @@ const REFRESH_USAGE = "lookout.refreshUsage";
 const SEARCH = "lookout.search";
 const SORT = "lookout.sortSessions";
 const GROUP = "lookout.groupSessions";
+const SHOW_NOTES = "lookout.showNotes";
 /** How the board makes its sections; kept for every window. */
 const GROUP_KEY = "lookout.group";
 /** How the board orders the sessions in each group, and the user's own order; kept for every window. */
@@ -72,6 +74,7 @@ export function activate(context: vscode.ExtensionContext): void {
       restoredTabs: () => ({ labels: claudeTabLabels(), label: claudeTabLabel }),
       readerScript: fs.existsSync(readerScript) ? readerScript : undefined,
       savedPositionsDir: path.join(context.globalStorageUri.fsPath, "search-positions"),
+      recordsDir: path.join(context.globalStorageUri.fsPath, "sessions"),
     },
     terminals,
     log,
@@ -189,6 +192,28 @@ export function activate(context: vscode.ExtensionContext): void {
       return !live || !unreachable(live);
     },
   });
+  /** The notes on a session, on a page of their own: a thread, each note with its time. */
+  const notePage = new NotePage(context.extensionUri, {
+    titleOf: (id) => controller.titleOf(id) ?? id,
+    agentOf,
+    markers,
+    whereOf: (id) => controller.whereOf(id),
+    notesOf: (id) => controller.notesOf(id),
+    addNote: (id, text) => controller.addNote(id, text),
+    editNote: (id, noteId, text) => controller.editNote(id, noteId, text),
+    removeNote: (id, noteId) => controller.removeNote(id, noteId),
+    isLive: (id) => controller.sessions.some((view) => view.id === id),
+    open: async (id) => {
+      const live = controller.sessions.find((view) => view.id === id);
+      if (live) await jump(live);
+      else await resume(id);
+    },
+    openable: (id) => {
+      const live = controller.sessions.find((view) => view.id === id);
+      return !live || !unreachable(live);
+    },
+  });
+  const editNote = (id: string) => notePage.show(id);
   /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
   const openHit = (query: string, id: string, index?: number) => {
     if (!findings.show(id, query, index)) void vscode.window.showInformationMessage(`Lookout has not found the transcript of "${controller.titleOf(id) ?? id}" yet.`);
@@ -205,6 +230,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return times.length ? { started: Math.min(...times), lastActive: Math.max(...times) } : {};
     },
     open: openHit,
+    editNote: (id) => editNote(id),
     follows: () => controller.follows,
   });
   /**
@@ -245,6 +271,7 @@ export function activate(context: vscode.ExtensionContext): void {
     setGroup,
     orderFavourites: (ids) => controller.orderFavourites(ids),
     toggleArchive: (id) => controller.toggleArchive(id),
+    editNote: (id) => editNote(id),
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
     usageBar: () => pickBar(controller.usageGroups, config.usageAgent)?.group.agent,
@@ -288,6 +315,7 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     board,
     findings,
+    notePage,
     searchPage,
     controller.onDidChangeUsage(render),
     controller.onDidReachUsageThreshold((alert) => {
@@ -298,6 +326,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(BOARD_VIEW, board),
     controller.onDidChange(render),
     controller.onDidChange(() => findings.refresh()),
+    controller.onDidChange(() => notePage.refresh()),
     // More conversations read: what is being searched or shown fills in.
     controller.onDidRead(() => {
       board.followSearch();
@@ -355,6 +384,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(MARK_ALL_SEEN, markAllSeen),
     vscode.commands.registerCommand(SHOW_BOARD, () => vscode.commands.executeCommand(`${BOARD_VIEW}.focus`)),
     vscode.commands.registerCommand(SEARCH, () => searchPage.show("")),
+    // Every session with a note, on the search page: the notes first among each one's matches.
+    vscode.commands.registerCommand(SHOW_NOTES, () => searchPage.show("has:note")),
     // The card's context menu: the same acts as its buttons, named in words.
     ...cardCommands({
       "lookout.card.jump": (view) => jump(view),
@@ -367,6 +398,8 @@ export function activate(context: vscode.ExtensionContext): void {
       "lookout.card.unstar": (view) => controller.toggleFavourite(view.id),
       "lookout.card.park": (view) => controller.togglePark(view.id),
       "lookout.card.unpark": (view) => controller.togglePark(view.id),
+      "lookout.card.addNote": (view) => editNote(view.id),
+      "lookout.card.showNotes": (view) => editNote(view.id),
     }),
     vscode.commands.registerCommand(SORT, async () => {
       const current = sort();

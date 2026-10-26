@@ -72,9 +72,17 @@ let groupBy: GroupBy = "state";
 let favouritesEl: HTMLElement | undefined;
 const favouriteCards = new Map<string, HTMLElement>();
 
+const STAR_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.9l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.7l-3.8 2 .7-4.3-3.1-3 4.3-.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+
+/** A page with lines: the note the user wrote on a session. */
+const NOTE_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5.5L13 6v7a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 2.5V6H13M6 8.6h4M6 11h2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+
 /** The star that marks a favourite; a click stars the session or takes its star away. */
 function starButton(id: string): HTMLElement {
-  const star = el("span", "star", "☆");
+  const star = el("span", "star");
+  star.innerHTML = STAR_ICON;
   star.setAttribute("role", "button");
   star.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -88,7 +96,6 @@ function setStar(card: HTMLElement, id: string): void {
   if (!star) return;
   const on = favourites.ids.includes(id);
   star.classList.toggle("on", on);
-  star.textContent = on ? "★" : "☆";
   (star as HTMLElement).title = on ? "Take the star away" : "Star this session: it stays under Favourites";
 }
 /** The user opened the Earlier group; kept across reloads. */
@@ -293,7 +300,7 @@ field.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" 
 const input = el("input", "");
 input.type = "search";
 input.placeholder = "Search the conversations";
-input.title = "Every word must appear in one message. Narrow it with since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts";
+input.title = "Every word must appear in one message, or in the session's note. Narrow it with since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts; has:note lists the sessions with a note";
 input.setAttribute("aria-label", "Search the conversations");
 input.spellcheck = false;
 field.append(input);
@@ -458,9 +465,29 @@ const groupPicker = picker<GroupBy>("Group by:", "Group the sessions by", "How t
   vscode.postMessage({ type: "group", by });
   render();
 });
-// The two chips move as a pair: beside the field, or under it on a narrow board.
+// A toggle beside the pickers: only the sessions with a note, through the search's has:note.
+const HAS_NOTE = /(^|\s)has:note(?=\s|$)/i;
+const notesChip = el("button", "chip-button toggle notes");
+notesChip.type = "button";
+notesChip.title = "Only the sessions with a note, wherever they ran: has:note in the search box";
+notesChip.setAttribute("aria-pressed", "false");
+notesChip.innerHTML = NOTE_ICON;
+notesChip.append(el("span", "label", "Notes"));
+notesChip.addEventListener("click", () => {
+  const current = input.value;
+  input.value = HAS_NOTE.test(current) ? current.replace(HAS_NOTE, " ").replace(/\s+/g, " ").trim() : `has:note ${current.trim()}`.trim();
+  if (searchTimer) clearTimeout(searchTimer);
+  runSearch();
+});
+/** The chip is lit while the query asks for the noted sessions, typed or clicked. */
+function setNotesChip(): void {
+  const on = HAS_NOTE.test(query);
+  notesChip.classList.toggle("on", on);
+  notesChip.setAttribute("aria-pressed", String(on));
+}
+// The chips move together: beside the field, or under it on a narrow board.
 const pickers = el("span", "pickers");
-pickers.append(groupPicker.element, sortPicker.element);
+pickers.append(groupPicker.element, sortPicker.element, notesChip);
 search.append(field, clear, summary, pickers);
 beam.append(search);
 
@@ -480,6 +507,7 @@ function runSearch(): void {
     return;
   }
   query = next;
+  setNotesChip();
   hits = new Map();
   earlierPage = 0;
   archivePage = 0;
@@ -542,9 +570,12 @@ function agentOfId(id: string): string | undefined {
   return (allSessions.find((view) => view.id === id) ?? past.find((view) => view.id === id) ?? favourites.past.find((view) => view.id === id) ?? archivePast.find((view) => view.id === id))?.agent;
 }
 
-/** How much the search found, among the agents shown: those hidden in the legend are left out of the count as of the cards. */
+/** How much the search found, among the sessions the board holds and the agents shown: a session the board has no card for, and those hidden in the legend, are left out of the count as of the cards. */
 function summarise(): void {
-  const shown = results.filter((result) => agentShown(agentOfId(result.id)));
+  const shown = results.filter((result) => {
+    const agent = agentOfId(result.id);
+    return agent !== undefined && agentShown(agent);
+  });
   const matches = shown.reduce((sum, result) => sum + result.count, 0);
   const picked = `${shown.length} ${shown.length === 1 ? "session" : "sessions"}`;
   // Operators alone pick sessions without words to match.
@@ -899,7 +930,7 @@ function createCard(view: SessionView): HTMLElement {
     if (stayingFinished.delete(view.id)) render();
     vscode.postMessage({ type: card.classList.contains("typed") ? "dismiss" : "seen", id: view.id });
   });
-  actions.append(seen, parkButton(view.id), starButton(view.id));
+  actions.append(seen, parkButton(view.id), noteButton(view.id), starButton(view.id));
   // In the title row, after the time: the same place as the star on earlier cards.
   row.append(actions);
   markCard(card, row, view.agent);
@@ -927,6 +958,77 @@ function parkButton(id: string): HTMLElement {
   return button;
 }
 
+
+/** The first line of a note, for a card; the rest reads in the hover and on the note's page. */
+function noteHead(note: string): string {
+  const lines = note.split("\n").filter((line) => line.trim() !== "");
+  return lines.length > 1 ? `${lines[0]} …` : (lines[0] ?? "");
+}
+
+/** What a card knows of a session's notes: the newest, when it was written, and how many there are. */
+interface NotesOnCard {
+  note?: string;
+  noteAt?: number;
+  noteCount?: number;
+}
+
+/** "3 notes, the newest 2h ago", for a hover. */
+function notesSummary(view: NotesOnCard): string {
+  const count = view.noteCount ?? (view.note === undefined ? 0 : 1);
+  const age = view.noteAt === undefined ? "" : `, the newest ${formatElapsed(now() - view.noteAt)} ago`;
+  return count === 1 ? `1 note${view.noteAt === undefined ? "" : `, ${formatElapsed(now() - view.noteAt)} ago`}` : `${count} notes${age}`;
+}
+
+/** The button on a card's title row that opens the session's notes; lit while there are any. */
+function noteButton(id: string): HTMLElement {
+  const button = el("span", "note-btn");
+  button.setAttribute("role", "button");
+  button.innerHTML = NOTE_ICON;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "note", id });
+  });
+  return button;
+}
+
+function setNoteButton(card: HTMLElement, view: NotesOnCard): void {
+  const button = card.querySelector<HTMLElement>(".note-btn");
+  if (!button) return;
+  const noted = view.note !== undefined;
+  button.classList.toggle("on", noted);
+  const title = noted ? `${notesSummary(view)}:\n${view.note}\nClick to read or add notes` : "Add a note: a line to remember the session by";
+  if (button.title !== title) button.title = title;
+  button.setAttribute("aria-label", noted ? "The notes" : "Add a note");
+}
+
+/** Under the title row of a card that is not running: the newest note, its first line, and how many more; a click opens them all. */
+function noteLine(id: string): HTMLElement {
+  const line = el("span", "note-line hidden");
+  line.setAttribute("role", "button");
+  line.innerHTML = NOTE_ICON;
+  line.append(el("span", "note-text"), el("span", "note-more hidden"));
+  line.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "note", id });
+  });
+  return line;
+}
+
+function setNoteLine(card: HTMLElement, view: NotesOnCard | undefined): void {
+  const line = card.querySelector<HTMLElement>(".note-line");
+  if (!line) return;
+  const note = view?.note;
+  line.classList.toggle("hidden", note === undefined);
+  const text = line.querySelector(".note-text")!;
+  const head = note === undefined ? "" : noteHead(note);
+  if (text.textContent !== head) text.textContent = head;
+  const more = line.querySelector<HTMLElement>(".note-more")!;
+  const extra = (view?.noteCount ?? 1) - 1;
+  more.classList.toggle("hidden", note === undefined || extra < 1);
+  more.textContent = extra > 0 ? `+${extra}` : "";
+  line.title = note === undefined || !view ? "" : `${notesSummary(view)}:\n${note}\nClick to read or add notes`;
+}
+
 /**
  * What VS Code's context menu offers on a card: the extension's card
  * commands, each shown when it applies, named in words.
@@ -942,6 +1044,7 @@ function setMenu(card: HTMLElement, view: SessionView): void {
     lookoutStarred: favourites.ids.includes(view.id),
     lookoutResting: view.state === "idle" || view.state === "done",
     lookoutParked: view.parked === true,
+    lookoutNoted: view.note !== undefined,
   });
   if (card.dataset.vscodeContext !== context) card.dataset.vscodeContext = context;
 }
@@ -965,6 +1068,7 @@ function cardTitle(view: SessionView): string {
   if (quiet !== undefined) lines.push(`Nothing written to its transcript for ${formatElapsed(quiet)}.`);
   const evidence = describeEvidence(view.evidence, now());
   if (evidence) lines.push(evidence);
+  if (view.note !== undefined) lines.push(`${(view.noteCount ?? 1) > 1 ? `Notes (${view.noteCount}), the newest` : "Note"}: ${noteHead(view.note)}`);
   return lines.join("\n");
 }
 
@@ -1006,6 +1110,8 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = elapsedText(view);
   setStar(card, view.id);
+  // On a running card the note is in the hover only: the board stays quiet.
+  setNoteButton(card, view);
   const line = card.querySelector(".line")!;
   const second = cardLine(view, now());
   line.querySelector(".mark")!.textContent = MARKS[view.state];
@@ -1087,13 +1193,15 @@ function renderHits(hitsEl: Element, result: SearchResult | undefined): void {
   const id = (hitsEl.closest(".card") as HTMLElement).dataset.id!;
   for (const hit of result.hits) {
     const line = el("span", `hit ${hit.role}`);
-    line.title = "Open the conversation here, in a tab";
+    // The session's note is no message: a click changes it rather than opening the conversation.
+    line.title = hit.role === "note" ? "The note on this session; click to change it" : "Open the conversation here, in a tab";
     line.setAttribute("role", "button");
     line.addEventListener("click", (event) => {
       event.stopPropagation();
-      vscode.postMessage({ type: "openHit", query, id, index: hit.index });
+      if (hit.role === "note") vscode.postMessage({ type: "note", id });
+      else vscode.postMessage({ type: "openHit", query, id, index: hit.index });
     });
-    line.append(el("i", "who", hit.role === "you" ? "you" : "agent"));
+    line.append(el("i", "who", hit.role));
     const text = el("span", "snippet");
     let at = 0;
     for (const [start, end] of hit.ranges) {
@@ -1144,10 +1252,12 @@ function createPastCard(view: PastView, archived = false): HTMLElement {
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  row.append(el("span", "title"), el("span", "elapsed"));
-  if (!archived) row.append(starButton(view.id));
-  row.append(archiveButton(view.id, archived));
-  main.append(row, el("span", "chips"), el("span", "hits hidden"));
+  const actions = el("span", "actions");
+  actions.append(noteButton(view.id));
+  if (!archived) actions.append(starButton(view.id));
+  actions.append(archiveButton(view.id, archived));
+  row.append(el("span", "title"), el("span", "elapsed"), actions);
+  main.append(row, noteLine(view.id), el("span", "chips"), el("span", "hits hidden"));
   card.append(main);
   markCard(card, row, view.agent);
   card.addEventListener("click", () => {
@@ -1183,12 +1293,16 @@ function updatePastCard(card: HTMLElement, view: PastView): void {
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   setStar(card, view.id);
+  setNoteButton(card, view);
+  // While a search shows the note among the matches, the line under the title would say it twice.
+  const result = query === "" ? undefined : hits.get(view.id);
+  setNoteLine(card, result?.hits.some((hit) => hit.role === "note") ? undefined : view);
   const chipsEl = card.querySelector(".chips")!;
   const values: Chip[] = [{ text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
   if (view.branch) values.push(branchChip(view.branch));
   while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
   values.forEach((value, i) => setChip((chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"))) as HTMLElement, value));
-  renderHits(card.querySelector(".hits")!, query === "" ? undefined : hits.get(view.id));
+  renderHits(card.querySelector(".hits")!, result);
 }
 
 /** A starred session as the board has it now: running, or not. */
@@ -1207,8 +1321,10 @@ function createFavouriteCard(id: string, agent: string): HTMLElement {
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  row.append(el("span", "title"), el("span", "elapsed"), starButton(id));
-  main.append(row, el("span", "chips"));
+  const actions = el("span", "actions");
+  actions.append(noteButton(id), starButton(id));
+  row.append(el("span", "title"), el("span", "elapsed"), actions);
+  main.append(row, noteLine(id), el("span", "chips"));
   card.append(main);
   markCard(card, row, agent);
   card.addEventListener("click", () => {
@@ -1235,6 +1351,9 @@ function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, v
   card.querySelector(".title")!.textContent = shown.title;
   card.querySelector(".elapsed")!.textContent = live ? `${stateTitle(live)}${elapsedText(live) ? ` · ${elapsedText(live)}` : ""}` : pastElapsed(view!);
   setStar(card, shown.id);
+  setNoteButton(card, shown);
+  // A running favourite keeps its note in the hover, like any running card.
+  setNoteLine(card, live ? undefined : shown);
   const values: Chip[] = [{ text: shown.worktree ? `${shown.project} · ${shown.worktree}` : shown.project }];
   if (shown.branch) values.push(branchChip(shown.branch));
   const chipsEl = card.querySelector(".chips")!;
@@ -1481,7 +1600,7 @@ function render(): void {
     groupsEl.clear();
     cards.clear();
     const empty = el("div", "nothing");
-    if (query !== "") empty.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message; since:, before:, project:, branch: and file: narrow the search. Esc clears it."));
+    if (query !== "") empty.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message, or in a session's note; since:, before:, project:, branch:, file: and has:note narrow the search. Esc clears it."));
     else if (watching === 0) {
       const open = el("button", "link", "Turn one on in the settings");
       open.addEventListener("click", () => vscode.postMessage({ type: "openAgentSettings" }));

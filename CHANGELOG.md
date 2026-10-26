@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- **Notes.** Notes on any session, running or not, like comments: as many as you like, each with the time it was written. A note button on every card's title row shows when you point at the card and stays lit once there are notes; a click opens the session's notes in an editor tab, as do **Add Note…** and **Show Notes** in its menu: the thread, oldest first, each note with its time and **edited** once changed, **Edit** and **Remove** on each (a removal asks for a second click), and a box for the next note, kept with **Add note** or Ctrl+Enter. On a card that is not running the newest note's first line reads under the title, in a colour of its own, with **+2** when there are more; a running card keeps its notes in its hover, so the board stays quiet. Lookout keeps the notes for the machine, one small file per noted session under its own storage with the session's title, project and branch, so every window shows them and they outlive the agent's transcript. The search reads each note as one more line of its session's conversation: a word in a note finds the session, with the notes that hold it first among its matches, marked **note**; the **Notes** chip beside **Group by** and **Sort by**, or `has:note` in the box, lists every session with notes, wherever it ran, each with its notes, and takes the other operators, the times going by when each note was written (a note names no file, so with `file:` it counts only for a session whose conversation touched one); `Lookout: Show Session Notes`, the note icon on the board's title bar, opens the search page on them.
+
 ## 0.1.2
 
 A search that is ready as soon as a window opens and never holds up VS Code, and group and sort menus that fit the board.

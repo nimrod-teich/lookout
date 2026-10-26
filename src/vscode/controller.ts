@@ -15,12 +15,14 @@ import { CopilotProvider } from "../core/agents/copilot/provider";
 import type { HistoryMessage, SnippetSize } from "../core/history";
 import { Attention } from "../core/attention";
 import { clockTime } from "../core/format";
-import { buildPastView, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
+import { buildPastView, projectOf, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
 import { Monitor } from "../core/monitor";
+import { withNotes, type NotedSession } from "../core/notes";
 import { isParked, park, readParking, settle, unpark, type Parking } from "../core/parking";
 import { createProcessFinder, createProcessTable, type ProcessTable } from "../core/proc";
 import type { PastView, SessionView, State } from "../core/types";
 import { RefreshLedger } from "../core/refreshLedger";
+import { latestNote, SessionRecords, type NoteEntry, type SessionSeen } from "../core/sessionRecords";
 import { hasFilters, parseQuery } from "../core/terms";
 import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
 import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../core/usageAlerts";
@@ -98,6 +100,8 @@ export interface ControllerHost {
   readerScript?: string;
   /** Where the places of each conversation's messages are kept for the next window (positions, no text), when they are read in a thread of their own. */
   savedPositionsDir?: string;
+  /** Where Lookout keeps what is its own about each session, the user's note first of all, for every window; without it, no notes. */
+  recordsDir?: string;
   /**
    * The agent's tabs open in this window whose session is not running: after
    * a reload the agent restores its tabs but starts a session only once its
@@ -168,6 +172,11 @@ export class Controller implements vscode.Disposable {
   private favouritePast: PastView[] = [];
   /** The archived sessions that are not running, wherever they ran. */
   private archivePast: PastView[] = [];
+  /** The sessions with a note that are not running and that no other list holds, wherever they ran: searched, and named on the search page. */
+  private notedPast: PastView[] = [];
+  /** What Lookout keeps about the sessions itself: the user's notes, with each session's title and place as last seen. */
+  private readonly records: SessionRecords | undefined;
+  private readonly recordsWatch: { dispose(): void } | undefined;
   private archived = new ArchivedSessions([]);
   private savedDone = "";
   private savedDismissed = "";
@@ -238,6 +247,9 @@ export class Controller implements vscode.Disposable {
     const saved = build && host.savedPositionsDir ? new SavedPositions(host.savedPositionsDir, build) : undefined;
     this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error), saved) : undefined;
     if (saved) this.pruneTimer = setTimeout(() => void saved.prune(), PRUNE_AFTER_MS);
+    this.records = host.recordsDir ? new SessionRecords(host.recordsDir) : undefined;
+    // A note written in another window shows here too.
+    this.recordsWatch = this.records?.watch(() => this.schedulePoll());
   }
 
   /** A search's results fill in as the conversations are read in the background, so nobody needs to ask again. */
@@ -383,9 +395,113 @@ export class Controller implements vscode.Disposable {
     return this.current.find((view) => view.id === id)?.title ?? this.pastView(id)?.title;
   }
 
-  /** A session that is not running, as listed now or, when the scope has changed since, as last listed. */
+  /** A session that is not running, as listed now or, when the scope has changed since, as last listed; failing those, as its record remembers it. */
   pastView(id: string): PastView | undefined {
-    return this.pastViews.find((view) => view.id === id) ?? this.favouritePast.find((view) => view.id === id) ?? this.archivePast.find((view) => view.id === id) ?? this.pastSeen.get(id);
+    return (
+      this.pastViews.find((view) => view.id === id) ??
+      this.favouritePast.find((view) => view.id === id) ??
+      this.archivePast.find((view) => view.id === id) ??
+      this.notedPast.find((view) => view.id === id) ??
+      this.pastSeen.get(id) ??
+      this.recordedView(id)
+    );
+  }
+
+  /** What a session's record says it was called and where it worked, for a session no agent lists any more. */
+  private recordedView(id: string): PastView | undefined {
+    const record = this.records?.get(id);
+    if (!record) return undefined;
+    const cwd = record.cwd ?? "";
+    const latest = latestNote(record);
+    return { id, agent: record.agent, title: record.title ?? "Untitled session", ...projectOf(cwd), branch: record.branch, cwd, resumable: false, modifiedAt: record.modifiedAt ?? latest?.at ?? 0, ...noteFields(record.notes) };
+  }
+
+  /** The user's notes on a live or a past session, oldest first. */
+  notesOf(id: string): NoteEntry[] {
+    return this.records?.notesOf(id) ?? [];
+  }
+
+  /** What the board knows a session as, for its record: as it runs, or as last listed. */
+  private seenFor(id: string): SessionSeen | undefined {
+    const live = this.current.find((view) => view.id === id);
+    if (live) return seenOf(live);
+    const past = this.pastView(id);
+    return past ? seenOf(past) : undefined;
+  }
+
+  /**
+   * Adds a note to a session's thread, with the session's title and place
+   * as the board has them. False when Lookout keeps no records, knows
+   * nothing of the session, or the note is blank.
+   */
+  addNote(id: string, text: string): boolean {
+    if (!this.records) return false;
+    const seen = this.seenFor(id);
+    if (!seen && !this.records.get(id)) return false;
+    if (!this.records.addNote(id, text, seen)) return false;
+    this.poll();
+    return true;
+  }
+
+  /** Changes one note; a blank text takes it away. False when Lookout cannot. */
+  editNote(id: string, noteId: string, text: string): boolean {
+    if (!this.records?.editNote(id, noteId, text)) return false;
+    this.poll();
+    return true;
+  }
+
+  /** Takes one note away. False when Lookout cannot. */
+  removeNote(id: string, noteId: string): boolean {
+    if (!this.records?.removeNote(id, noteId)) return false;
+    this.poll();
+    return true;
+  }
+
+  /** Takes every note on a session away. */
+  removeNotes(id: string): boolean {
+    if (!this.records) return false;
+    this.records.removeNotes(id);
+    this.poll();
+    return true;
+  }
+
+  /** The ids of the sessions with a note. */
+  private notedIds(): string[] {
+    return this.records ? this.records.noted().map((record) => record.id) : [];
+  }
+
+  /** The views with the user's notes on them: the newest, and how many there are. */
+  private annotate<T extends { id: string; note?: string; noteCount?: number }>(views: T[]): T[] {
+    if (!this.records) return views;
+    return views.map((view) => {
+      const fields = noteFields(this.records!.notesOf(view.id));
+      return fields.note === undefined ? view : { ...view, ...fields };
+    });
+  }
+
+  /** The records follow the sessions they are about: a title or a branch that changed is written down. A running session's time is not, since it changes with every line its transcript gains. */
+  private observeRecords(live: readonly SessionView[], past: readonly PastView[]): void {
+    if (!this.records) return;
+    for (const view of live) this.records.observe(view.id, seenOf(view, false));
+    for (const view of past) this.records.observe(view.id, seenOf(view));
+  }
+
+  /** The sessions with a note, as the search sees them: those on the board, and those only a record remembers. */
+  private noteCandidates(): NotedSession[] {
+    if (!this.records) return [];
+    const out: NotedSession[] = [];
+    const seen = new Set<string>();
+    const take = (id: string, cwd: string, branch: string | undefined) => {
+      if (seen.has(id)) return;
+      const notes = this.records!.notesOf(id);
+      if (notes.length === 0) return;
+      seen.add(id);
+      out.push({ id, notes, cwd, branch });
+    };
+    for (const view of this.current) take(view.id, view.cwd, view.branch);
+    for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast]) take(view.id, view.cwd, view.branch);
+    for (const record of this.records.noted()) take(record.id, record.cwd ?? "", record.branch);
+    return out;
   }
 
   /** The usage numbers, or nothing when there are none to show: none cached, unreadable, or another account's. */
@@ -561,8 +677,9 @@ export class Controller implements vscode.Disposable {
       void this.host.globalState.update(ARCHIVE_KEY, archive);
     }
     const archived = new Set(archive);
-    // The starred and the archived sessions are asked for by id besides, wherever they ran.
-    const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit: EARLIER_LIMIT, also: [...this.favouriteIds(), ...archive] };
+    const stars = new Set(this.favouriteIds());
+    // The starred, the archived and the noted sessions are asked for by id besides, wherever they ran.
+    const scope = { folders: this.host.workspaceFolders(), all: this.earlierScope === "all", limit: EARLIER_LIMIT, also: [...new Set([...stars, ...archive, ...this.notedIds()])] };
     let capped = false;
     let incomplete = false;
     const notes: string[] = [];
@@ -584,13 +701,17 @@ export class Controller implements vscode.Disposable {
     // The archived leave Earlier for the Archived group, newest archive first.
     const shownPast = past.filter((view) => !archived.has(view.id) && notRestored(view));
     const archivePast = [...past, ...also].filter((view) => archived.has(view.id) && notRestored(view)).sort((a, b) => archive.indexOf(a.id) - archive.indexOf(b.id));
-    const favouritePast = also.filter((view) => !archived.has(view.id));
+    const favouritePast = also.filter((view) => stars.has(view.id) && !archived.has(view.id));
+    // Noted sessions no other list holds: not on the board, but searched and known by name.
+    const notedPast = also.filter((view) => !stars.has(view.id) && !archived.has(view.id) && notRestored(view));
     this.earlierCapped = capped || shownPast.length > EARLIER_LIMIT;
     this.earlierNotes = notes;
     // An idle tab or terminal with nothing sent is not worth a card.
     const shown = update.views.filter((view) => !(view.empty && view.state === "idle"));
-    this.publish(sortViews(this.parkViews([...shown, ...restored], Date.now())), shownPast.slice(0, EARLIER_LIMIT), favouritePast, archivePast);
-    for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast]) this.pastSeen.set(view.id, view);
+    const live = this.annotate(sortViews(this.parkViews([...shown, ...restored], Date.now())));
+    this.publish(live, this.annotate(shownPast.slice(0, EARLIER_LIMIT)), this.annotate(favouritePast), this.annotate(archivePast), this.annotate(notedPast));
+    for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast]) this.pastSeen.set(view.id, view);
+    this.observeRecords(live, [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast]);
     if (incomplete) this.scheduleFill();
     this.saveDone();
     for (const view of update.finished) this.announceFinished(view);
@@ -801,14 +922,17 @@ export class Controller implements vscode.Disposable {
     const parsed = parseQuery(query, started, zone);
     const outcome: SearchOutcome = { results: [], pending: 0 };
     if (parsed.terms.length === 0 && !hasFilters(parsed)) return outcome;
-    for (const provider of this.providers) {
+    // `has:note` without words asks for the notes alone: the conversations have nothing to add, nor to be read for.
+    const notesOnly = parsed.hasNote === true && parsed.terms.length === 0;
+    for (const provider of notesOnly ? [] : this.providers) {
       const left = Math.max(0, SEARCH_BUDGET_MS - (Date.now() - started));
       const part = provider.search?.(parsed, page?.hits ?? SEARCH_HITS, left, page?.snippet, this.background);
       if (!part) continue;
       outcome.results.push(...part.results);
       outcome.pending += part.pending;
     }
-    return outcome;
+    // The notes count as one more line of their sessions' conversations.
+    return this.records ? withNotes(outcome, this.noteCandidates(), parsed, page?.hits ?? SEARCH_HITS, page?.snippet) : outcome;
   }
 
   /** The conversation of one live session, oldest first. */
@@ -899,14 +1023,15 @@ export class Controller implements vscode.Disposable {
     }, DEBOUNCE_MS);
   }
 
-  private publish(views: SessionView[], past: PastView[], favouritePast: PastView[], archivePast: PastView[]): void {
-    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.earlierNotes, this.favouriteIds(), favouritePast, archivePast]);
+  private publish(views: SessionView[], past: PastView[], favouritePast: PastView[], archivePast: PastView[], notedPast: PastView[]): void {
+    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.earlierNotes, this.favouriteIds(), favouritePast, archivePast, notedPast]);
     if (snapshot === this.snapshot) return;
     this.snapshot = snapshot;
     this.current = views;
     this.pastViews = past;
     this.favouritePast = favouritePast;
     this.archivePast = archivePast;
+    this.notedPast = notedPast;
     this.changed.fire(views);
   }
 
@@ -936,6 +1061,7 @@ export class Controller implements vscode.Disposable {
     if (this.fill) clearTimeout(this.fill);
     if (this.readAheadTimer) clearTimeout(this.readAheadTimer);
     if (this.pruneTimer) clearTimeout(this.pruneTimer);
+    this.recordsWatch?.dispose();
     this.background?.dispose();
     this.read.dispose();
     for (const timer of this.announcing) clearTimeout(timer);
@@ -952,6 +1078,22 @@ export class Controller implements vscode.Disposable {
     this.finished.dispose();
     this.waiting.dispose();
   }
+}
+
+/** What a session is called and where it works, as the board has it, for its record; `withTime`: when its transcript was last written, too. */
+/** The note fields of a view: the newest note's text and time, and how many notes there are; none without notes. */
+function noteFields(notes: readonly NoteEntry[] | undefined): { note?: string; noteAt?: number; noteCount?: number } {
+  const latest = notes?.at(-1);
+  if (!latest) return {};
+  return { note: latest.text, noteAt: latest.at, noteCount: notes!.length };
+}
+
+function seenOf(view: SessionView | PastView, withTime = true): SessionSeen {
+  const seen: SessionSeen = { agent: view.agent, title: view.title, cwd: view.cwd };
+  if (view.branch !== undefined) seen.branch = view.branch;
+  const modifiedAt = "modifiedAt" in view ? view.modifiedAt : view.lastWriteAt;
+  if (withTime && modifiedAt !== undefined) seen.modifiedAt = modifiedAt;
+  return seen;
 }
 
 /** The build of the reading thread's bundle, which saved places must come from; none when it cannot be read. */

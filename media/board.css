@@ -11,6 +11,8 @@
   --lamp: #ffb000;
   --ink: var(--vscode-foreground);
   --muted: var(--vscode-descriptionForeground);
+  /* The user's notes: a colour of their own, apart from the states'. */
+  --note: var(--vscode-charts-purple, #b180d7);
 }
 
 body.vscode-light,
@@ -574,6 +576,22 @@ body.vscode-reduce-motion .hover-card {
   color: var(--ink);
 }
 
+/* A toggle chip: its icon before its word, lit in the note's colour while it is on. */
+.chip-button.toggle svg {
+  width: 11px;
+  height: 11px;
+}
+
+.chip-button.toggle.on {
+  border-color: color-mix(in srgb, var(--note) 55%, transparent);
+  background: color-mix(in srgb, var(--note) 12%, transparent);
+  color: var(--note);
+}
+
+.chip-button.toggle.on .label {
+  color: var(--note);
+}
+
 .chip-button .caret {
   font-size: 8px;
   opacity: 0.7;
@@ -700,6 +718,14 @@ body.vscode-reduce-motion .hover-card {
 
 .hit.agent .who {
   color: var(--working);
+}
+
+.hit.note .who {
+  color: var(--note);
+}
+
+.hit.note .snippet {
+  font-style: italic;
 }
 
 .hit .snippet {
@@ -1424,11 +1450,13 @@ body.vscode-reduce-motion .hover-card {
 }
 
 /* At the end of the title row, after the time; the context ring keeps the card's right edge below. */
+/* The title row's buttons: one box each, the same size, centred on the row's text. */
 .actions {
   flex: none;
   display: flex;
-  align-items: baseline;
-  gap: 2px;
+  align-items: center;
+  align-self: center;
+  gap: 4px;
 }
 
 
@@ -1437,11 +1465,34 @@ body.vscode-reduce-motion .hover-card {
   opacity: 1;
 }
 
-.action {
-  padding: 0 5px;
+.action,
+.star,
+.note-btn,
+.archive {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
   border-radius: 3px;
   color: var(--muted);
+  line-height: 1;
+}
+
+.action {
   font-weight: 700;
+}
+
+.action svg,
+.star svg,
+.note-btn svg,
+.archive svg {
+  width: 12px;
+  height: 12px;
 }
 
 .action:hover {
@@ -1456,7 +1507,7 @@ body.vscode-reduce-motion .hover-card {
 
 .state-done .action.seen,
 .card.typed .action.seen {
-  display: inline;
+  display: inline-flex;
 }
 
 .action.seen:hover {
@@ -1466,11 +1517,6 @@ body.vscode-reduce-motion .hover-card {
 /* Park: only while the session's turn is over. */
 .action.park {
   display: none;
-  align-self: center;
-  padding: 1px 3px;
-  /* Centred in the row it sits a little low: lifted so its ink centres with the check's and the star's. */
-  position: relative;
-  top: -0.12em;
 }
 
 .state-idle .action.park,
@@ -1478,9 +1524,79 @@ body.vscode-reduce-motion .hover-card {
   display: inline-flex;
 }
 
-.action.park svg {
-  width: 12px;
-  height: 12px;
+
+/* The note button on a card's title row: shown on hover like the star, lit while the session has a note. */
+.note-btn {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.card:hover .note-btn,
+.card:focus-within .note-btn,
+.note-btn.on {
+  opacity: 1;
+}
+
+.note-btn.on {
+  color: var(--note);
+}
+
+.note-btn:hover {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--note);
+}
+
+/* The note on a session that is not running, under its title row: one line; a click changes it. */
+.note-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: calc(var(--vscode-font-size) - 1px);
+  font-style: italic;
+  cursor: pointer;
+}
+
+.note-line.hidden {
+  display: none;
+}
+
+.note-line svg {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  color: var(--note);
+}
+
+/* How many notes more than the one shown. */
+.note-line .note-more {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--note) 16%, transparent);
+  color: var(--note);
+  font-size: calc(var(--vscode-font-size) - 2px);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  line-height: 15px;
+}
+
+.note-line .note-more.hidden {
+  display: none;
+}
+
+.note-line .note-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-line:hover .note-text {
+  color: var(--ink);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 
 /* Dragging a card into another place in its group: a line where it goes. */
@@ -1698,14 +1814,12 @@ body.vscode-high-contrast-light .card {
 
 /* The star on a card's title row: shown on hover, lit once starred. */
 .star {
-  flex: none;
-  margin-left: 2px;
-  padding: 0 3px;
-  border-radius: 3px;
-  color: var(--muted);
-  line-height: 1;
   opacity: 0;
   transition: opacity 120ms ease;
+}
+
+.star.on svg path {
+  fill: currentColor;
 }
 
 .card:hover .star,
@@ -1725,20 +1839,8 @@ body.vscode-high-contrast-light .card {
 
 /* The archive button on an earlier card's title row, shown on hover like the star. */
 .archive {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  margin-left: 2px;
-  padding: 1px 3px;
-  border-radius: 3px;
-  color: var(--muted);
   opacity: 0;
   transition: opacity 120ms ease;
-}
-
-.archive svg {
-  width: 12px;
-  height: 12px;
 }
 
 .card:hover .archive,
@@ -1773,13 +1875,6 @@ body.vscode-high-contrast-light .card {
 
 .row .elapsed {
   margin-left: auto;
-}
-
-/* Every card's star, in the row or with the other actions, looks the same. */
-.row .star {
-  margin: 0;
-  padding: 0 4px;
-  font-weight: 700;
 }
 
 /* A lit star stays in view; the other actions show on hover. */

@@ -17,6 +17,8 @@
   --agent-codex: #7ae8df;
   --agent-copilot: #9373ea;
   --agent-other: #9fb0c0;
+  /* The user's notes on sessions. */
+  --note: #c9a2ff;
 }
 
 body {
@@ -280,6 +282,14 @@ body {
 
 .hit.agent .who {
   color: var(--beam);
+}
+
+.hit.note .who {
+  color: var(--note);
+}
+
+.hit.note .text {
+  font-style: italic;
 }
 
 .hit .text {

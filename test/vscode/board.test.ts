@@ -242,3 +242,19 @@ describe("Board", () => {
     expect(webviewView.posted).toHaveLength(1);
   });
 });
+
+describe("Board notes", () => {
+  beforeEach(() => stub.reset());
+
+  it("asks for a note only on a session it was shown, running or not", () => {
+    const shown = view({ id: "00000000-0000-4000-8000-000000000001" });
+    const editNote = vi.fn();
+    const { webviewView } = setup([shown], undefined, { editNote, archive: () => ({ ids: [], past: [] }) });
+    webviewView.receive({ type: "note", id: shown.id });
+    webviewView.receive({ type: "note", id: PAST[0]!.id });
+    webviewView.receive({ type: "note", id: STARRED.id });
+    webviewView.receive({ type: "note", id: "00000000-0000-4000-8000-000000000002" });
+    webviewView.receive({ type: "note", id: 7 });
+    expect(editNote.mock.calls.map(([id]) => id)).toEqual([shown.id, PAST[0]!.id, STARRED.id]);
+  });
+});

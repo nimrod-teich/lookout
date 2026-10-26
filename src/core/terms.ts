@@ -4,7 +4,8 @@
  * A search, parsed: the words every matching message must contain, and the
  * operators that narrow it. `since:` and `before:` bound the time of the
  * messages; `project:`, `branch:` and `file:` pick sessions, any of their
- * values (`project:api project:web` is either).
+ * values (`project:api project:web` is either); `has:note` keeps the
+ * sessions the user wrote a note on.
  */
 export interface Query {
   /** Lowercased. */
@@ -19,16 +20,18 @@ export interface Query {
   branches: string[];
   /** Parts of a path a tool call worked on, lowercased, with forward slashes. */
   files: string[];
+  /** Only the sessions with a note (`has:note`). */
+  hasNote?: boolean;
 }
 
-const OPERATOR = /^(since|before|project|branch|file):(.*)$/is;
+const OPERATOR = /^(since|before|project|branch|file|has):(.*)$/is;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const UNITS: Record<string, number> = { h: HOUR, d: DAY, w: 7 * DAY };
 
 /** The tokens of a query: runs of non-space; an operator's value in quotes may hold spaces. */
 function tokensOf(query: string): string[] {
-  return query.match(/(?:since|before|project|branch|file):"[^"]*"?|\S+/gi) ?? [];
+  return query.match(/(?:since|before|project|branch|file|has):"[^"]*"?|\S+/gi) ?? [];
 }
 
 /**
@@ -103,14 +106,18 @@ export function parseQuery(query: string, now: number = Date.now(), zone?: numbe
       else parsed.before = Math.min(parsed.before ?? at, at);
     } else if (key === "project") parsed.projects.push(value);
     else if (key === "branch") parsed.branches.push(value);
-    else parsed.files.push(value.replace(/\\/g, "/"));
+    else if (key === "has") {
+      // The one thing a session can have for the search: a note. Anything else stays a word.
+      if (value === "note") parsed.hasNote = true;
+      else parsed.terms.push(token.toLowerCase());
+    } else parsed.files.push(value.replace(/\\/g, "/"));
   }
   return parsed;
 }
 
 /** The query narrows the sessions or the time, not only the words. */
 export function hasFilters(query: Query): boolean {
-  return query.since !== undefined || query.before !== undefined || query.projects.length > 0 || query.branches.length > 0 || query.files.length > 0;
+  return query.since !== undefined || query.before !== undefined || query.projects.length > 0 || query.branches.length > 0 || query.files.length > 0 || query.hasNote === true;
 }
 
 /** The words of a query, lowercased, without its operators. A message matches when it contains every one of them. */

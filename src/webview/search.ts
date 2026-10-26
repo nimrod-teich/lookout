@@ -21,7 +21,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   return node;
 }
 
-const OPERATORS = "since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts";
+const OPERATORS = "since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts, has:note";
+/** What a match's label says of who wrote it. */
+const WHO = { you: "you", agent: "agent", note: "note" } as const;
 
 /** The query whose results are on show, or asked for. */
 let query = "";
@@ -144,13 +146,14 @@ function sessionBlock(session: SearchPageSession): HTMLElement {
   for (const hit of session.hits) {
     const item = el("button", `hit ${hit.role}`);
     item.type = "button";
-    item.title = "Open the conversation at this message";
+    // The session's note is no message: a click changes it rather than opening the conversation.
+    item.title = hit.role === "note" ? "The note on this session; click to change it" : "Open the conversation at this message";
     const meta = el("span", "meta");
-    meta.append(el("span", "who", hit.role === "you" ? "you" : "agent"), el("span", "when", timeText(hit.at)));
+    meta.append(el("span", "who", WHO[hit.role]), el("span", "when", timeText(hit.at)));
     const text = el("span", "text");
     text.append(marked(hit));
     item.append(meta, text);
-    item.addEventListener("click", () => open(session.id, hit.index));
+    item.addEventListener("click", () => (hit.role === "note" ? vscode.postMessage({ type: "note", id: session.id }) : open(session.id, hit.index)));
     block.append(item);
   }
   const more = session.count - session.hits.length;

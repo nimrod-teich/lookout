@@ -251,9 +251,10 @@ export interface HistoryMessage {
 }
 
 export interface SearchHit {
-  /** Position of the message in the conversation. */
-  index: number;
-  role: "you" | "agent";
+  /** Position of the message in the conversation; none for the session's note, which is no message. */
+  index?: number;
+  /** Who wrote it: the user, the agent, or the user's note on the session. */
+  role: "you" | "agent" | "note";
   at?: number;
   /** The matching message, cut around its first match, whitespace collapsed. */
   snippet: string;

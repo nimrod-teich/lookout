@@ -94,6 +94,8 @@ export type FromBoard =
   | { type: "archive"; id: string }
   /** Park a running session whose turn is over, or bring a parked one back. */
   | { type: "park"; id: string }
+  /** Write a note on a session, running or not, or change the one it has. */
+  | { type: "note"; id: string }
   /** The user dragged a card: their own order of the sessions, which the board now follows. */
   | { type: "order"; ids: string[] }
   /** The user dragged a starred card: the favourites in their new order. */

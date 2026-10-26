@@ -182,6 +182,7 @@
       "agent": "claude-code",
       "pid": 4,
       "title": "Split the usage rollup query",
+      "note": "Starred for the rollup CTE rewrite: reuse it for the admin usage page",
       "state": "working",
       "since": 1920000,
       "project": "api",
@@ -224,7 +225,8 @@
         "source": "session file",
         "at": 3000
       },
-      "lastWriteAt": 4000
+      "lastWriteAt": 4000,
+      "noteCount": 2
     },
     {
       "id": "5",
@@ -360,16 +362,19 @@
       "id": "p2",
       "agent": "claude-code",
       "title": "Solana peak research",
+      "note": "Has the peak-TPS numbers and the provider list we sent to sales",
       "project": "lava-connect",
       "cwd": "/home/bob/projects/lava-connect",
       "branch": "solana-peak",
       "resumable": true,
-      "modifiedAt": 1814400000
+      "modifiedAt": 1814400000,
+      "noteCount": 3
     },
     {
       "id": "p3",
       "agent": "claude-code",
       "title": "Smart-router-infra redis cache support",
+      "note": "Superseded by the infra PR that landed the cache",
       "project": "smart-router-infrastructure",
       "worktree": "redis",
       "cwd": "/home/bob/projects/smart-router-infrastructure/.claude/worktrees/redis",
@@ -401,6 +406,7 @@
       "id": "p6",
       "agent": "claude-code",
       "title": "Trace the cold-start latency",
+      "note": "Dead end: the latency was the DNS resolver, fixed in infra",
       "project": "api",
       "worktree": "cold-start",
       "cwd": "/home/bob/projects/api/.claude/worktrees/cold-start",

@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Dev preview of the notes page outside VS Code: npm run build, then open this file. ?empty=1 for no notes yet, &live=0, &agent=codex&markers=1, &theme=light -->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="theme-dark.css" id="theme">
+<link rel="stylesheet" href="../media/note.css">
+<style>html { background: var(--vscode-editor-background); }</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  const params = new URLSearchParams(location.search);
+  if (params.get("theme") === "light") {
+    document.getElementById("theme").href = "theme-light.css";
+    document.body.className = "vscode-light";
+  } else {
+    document.body.className = "vscode-dark";
+  }
+  const now = Date.now();
+  let notes = params.get("empty") === "1" ? [] : [
+    { id: "n1", text: "Kept for the webhook signature fix: the raw-body parser is scoped to /billing/webhook and every other route keeps the JSON parser.", at: now - 3 * 86_400_000 - 2 * 3600_000 },
+    { id: "n2", text: "Still to do from this session:\n- the checkout-sync fallback needs a test for a late checkout.session.completed\n- ask about moving the tax_id_collection gate to the config", at: now - 86_400_000 - 5 * 3600_000, editedAt: now - 86_400_000 },
+    { id: "n3", text: "The smoke passed (14 routes). Good to merge once the fallback test lands.", at: now - 35 * 60_000 },
+  ];
+  const session = { id: "1", title: "Migrate billing webhooks", where: "api · ⎇ billing-webhooks", agent: params.get("agent") ?? "claude-code", live: params.get("live") !== "0" };
+  const send = () => window.postMessage({ type: "notes", session, notes, max: 8000, markers: params.get("markers") === "1" }, "*");
+  window.acquireVsCodeApi = () => ({
+    postMessage: (m) => {
+      console.log("to extension:", JSON.stringify(m));
+      if (m.type === "ready") setTimeout(send, 0);
+      if (m.type === "add" && m.text.trim()) notes = [...notes, { id: `n${Date.now()}`, text: m.text.trim(), at: Date.now() }];
+      if (m.type === "edit") notes = m.text.trim() ? notes.map((n) => (n.id === m.noteId ? { ...n, text: m.text.trim(), editedAt: Date.now() } : n)) : notes.filter((n) => n.id !== m.noteId);
+      if (m.type === "remove") notes = notes.filter((n) => n.id !== m.noteId);
+      if (m.type !== "ready" && m.type !== "open") setTimeout(send, 100);
+    },
+  });
+</script>
+<script src="../dist/note.js"></script>
+</body>
+</html>

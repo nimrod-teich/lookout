@@ -4,10 +4,12 @@
 !dist/board.js
 !dist/findings.js
 !dist/search.js
+!dist/note.js
 !media/icon.png
 !media/board.css
 !media/findings.css
 !media/search.css
+!media/note.css
 !media/activity.svg
 !media/lookout-icons.woff
 !package.json
