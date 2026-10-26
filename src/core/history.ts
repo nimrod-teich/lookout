@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import type { BackgroundReads } from "./background";
-import { firstPlaceOf, holds, inRange, matchRanges, termsOf, type TimeRange } from "./terms";
+import { firstMatchOf, holds, inRange, matchRanges, termsOf, type TimeRange } from "./terms";
 
 export { termsOf, type TimeRange };
 
@@ -326,15 +326,15 @@ export const PAGE_SNIPPET: SnippetSize = { before: 120, after: 360 };
 /** Cuts a message around its first match and marks every term in the cut. */
 export function snippetOf(text: string, terms: string[], size: SnippetSize = CARD_SNIPPET): { snippet: string; ranges: [number, number][] } {
   const lower = text.toLowerCase();
-  let first = -1;
+  // The earliest match of any term; of two at the same place, the longer.
+  let first: [number, number] | undefined;
   for (const term of terms) {
-    const at = firstPlaceOf(lower, term);
-    if (at >= 0 && (first < 0 || at < first)) first = at;
+    const match = firstMatchOf(lower, term);
+    if (match && (!first || match[0] < first[0] || (match[0] === first[0] && match[1] > first[1]))) first = match;
   }
-  const start = first < 0 ? 0 : Math.max(0, first - size.before);
+  const start = first ? Math.max(0, first[0] - size.before) : 0;
   // At least to the end of the first match: a long phrase is shown whole.
-  const matchEnd = first < 0 ? 0 : (matchRanges(text.slice(first), terms)[0]?.[1] ?? 0) + first;
-  const end = Math.min(text.length, Math.max((first < 0 ? 0 : first) + size.after, matchEnd));
+  const end = Math.min(text.length, first ? Math.max(first[0] + size.after, first[1]) : size.after);
   let snippet = text.slice(start, end).replace(/\s+/g, " ").trim();
   if (start > 0) snippet = `…${snippet}`;
   if (end < text.length) snippet = `${snippet}…`;

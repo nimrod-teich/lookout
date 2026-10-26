@@ -161,12 +161,21 @@ function placesOf(lower: string, term: string): [number, number][] {
   return out;
 }
 
+/** [start, end) of the term's first place in the lowercased text; undefined when it is not there. */
+export function firstMatchOf(lower: string, term: string): [number, number] | undefined {
+  if (term === "") return undefined;
+  const pattern = phrasePattern(term);
+  if (!pattern) {
+    const at = lower.indexOf(term);
+    return at < 0 ? undefined : [at, at + term.length];
+  }
+  const match = pattern.exec(lower);
+  return match ? [match.index, match.index + match[0].length] : undefined;
+}
+
 /** Where the term is first in the lowercased text; -1 when it is not. */
 export function firstPlaceOf(lower: string, term: string): number {
-  const pattern = phrasePattern(term);
-  if (!pattern) return lower.indexOf(term);
-  const match = pattern.exec(lower);
-  return match ? match.index : -1;
+  return firstMatchOf(lower, term)?.[0] ?? -1;
 }
 
 /** The lowercased text holds the term: a word as it is, a phrase's words in a row whatever the whitespace between them. */
