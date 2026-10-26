@@ -1,0 +1,245 @@
+/* The note page wears the harbour's night, like the conversation tab and the search page. */
+:root {
+  --paper: #0a1521;
+  --paper-2: #0d1b2b;
+  --well: #060d16;
+  --ink: #e6f0f7;
+  --muted: #8ea5b8;
+  --line: rgba(160, 200, 230, 0.18);
+  --line-strong: rgba(160, 200, 230, 0.32);
+  --lamp: #ffb000;
+  --beam: #5fb4ff;
+  --danger: #ff7a7a;
+  /* Each agent's accent on the night palette (src/core/agents/catalog.ts lists the same values). */
+  --agent-claude: #f7906c;
+  --agent-codex: #7ae8df;
+  --agent-copilot: #9373ea;
+  --agent-other: #9fb0c0;
+  /* The user's notes on sessions. */
+  --note: #c9a2ff;
+}
+
+body {
+  margin: 0;
+  padding: 0 0 48px;
+  color: var(--ink);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  background: var(--paper);
+}
+
+#root {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* The top: the session the note is on, and the way to it -------------------- */
+
+.top {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "eyebrow open"
+    "heading open"
+    "where open";
+  align-items: center;
+  column-gap: 16px;
+  margin: 0 -24px 20px;
+  padding: 18px 24px 14px;
+  background:
+    radial-gradient(1px 1px at 12% 28%, rgba(255, 255, 255, 0.55) 50%, transparent 51%),
+    radial-gradient(1px 1px at 31% 62%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    radial-gradient(1px 1px at 47% 20%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 63% 70%, rgba(255, 255, 255, 0.3) 50%, transparent 51%),
+    radial-gradient(1px 1px at 78% 34%, rgba(255, 255, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(1px 1px at 91% 58%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    linear-gradient(180deg, #0f2238 0%, #0b1726 70%, var(--paper) 100%);
+  border-bottom: 1px solid var(--line-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.eyebrow {
+  grid-area: eyebrow;
+  color: var(--note);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.heading {
+  grid-area: heading;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.heading .glyph {
+  flex: none;
+}
+
+.title {
+  margin: 2px 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.where {
+  grid-area: where;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.open {
+  grid-area: open;
+  align-self: center;
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 176, 0, 0.45);
+  border-radius: 6px;
+  background: rgba(255, 176, 0, 0.12);
+  color: var(--lamp);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.open:hover {
+  background: rgba(255, 176, 0, 0.22);
+}
+
+/* The note ------------------------------------------------------------------- */
+
+.editor {
+  position: relative;
+}
+
+.note {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 240px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--well);
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(var(--vscode-font-size) + 1px);
+  line-height: 1.6;
+  resize: none;
+  overflow: hidden;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.note::placeholder {
+  color: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.note:focus {
+  border-color: color-mix(in srgb, var(--note) 60%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--note) 18%, transparent);
+}
+
+/* Under it: how the note stands, and what to do with it ---------------------- */
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.status.dirty {
+  color: var(--lamp);
+}
+
+.status.failed {
+  color: var(--danger);
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.count.near {
+  color: var(--lamp);
+  opacity: 1;
+}
+
+.btn {
+  padding: 6px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn:disabled:hover {
+  background: transparent;
+}
+
+.btn.save {
+  border-color: rgba(255, 176, 0, 0.45);
+  background: rgba(255, 176, 0, 0.12);
+  color: var(--lamp);
+}
+
+.btn.save:not(:disabled):hover {
+  background: rgba(255, 176, 0, 0.22);
+}
+
+.btn.remove {
+  color: var(--muted);
+}
+
+.btn.remove:hover {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  color: var(--danger);
+}
+
+@media (max-width: 480px) {
+  .top {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "eyebrow"
+      "heading"
+      "where"
+      "open";
+    row-gap: 6px;
+  }
+  .open {
+    justify-self: start;
+  }
+}

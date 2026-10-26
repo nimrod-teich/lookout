@@ -29,12 +29,13 @@ const board = {
   logLevel: "info",
 };
 
-// The findings tab and the search page are webviews too, bundled the same way.
+// The findings tab, the search page and the note page are webviews too, bundled the same way.
 const findings = { ...board, entryPoints: ["src/webview/findings.ts"], outfile: "dist/findings.js" };
 const search = { ...board, entryPoints: ["src/webview/search.ts"], outfile: "dist/search.js" };
+const note = { ...board, entryPoints: ["src/webview/note.ts"], outfile: "dist/note.js" };
 
 if (watch) {
-  for (const options of [extension, reader, board, findings, search]) await (await esbuild.context(options)).watch();
+  for (const options of [extension, reader, board, findings, search, note]) await (await esbuild.context(options)).watch();
 } else {
-  await Promise.all([esbuild.build(extension), esbuild.build(reader), esbuild.build(board), esbuild.build(findings), esbuild.build(search)]);
+  await Promise.all([esbuild.build(extension), esbuild.build(reader), esbuild.build(board), esbuild.build(findings), esbuild.build(search), esbuild.build(note)]);
 }

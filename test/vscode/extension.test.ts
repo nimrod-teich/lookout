@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpMailbox } from "../../src/core/jumpMailbox";
-import { SessionRecords } from "../../src/core/sessionRecords";
+import { NOTE_MAX, SessionRecords } from "../../src/core/sessionRecords";
 import { activate } from "../../src/extension";
 import { buildReader } from "../readerBundle";
 import { createWebviewView, stub, TabInputWebview, workspace } from "./stub-vscode";
@@ -743,17 +743,21 @@ describe("the extension", () => {
       await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
       const noted = () => (listed()?.past as { id: string; note?: string }[] | undefined)?.find((p) => p.id === HERE)?.note;
       expect(noted()).toBeUndefined();
-      stub.inputBox = () => "  has the deploy  recipe ";
+      const notePanels = () => stub.panels.filter((panel) => panel.viewType === "lookout.note");
+      const notePanel = () => notePanels().at(-1)!;
+      const shown = () => notePanel().posted.at(-1) as { type: string; note?: string };
+      // The note button opens the note's own page, which says there is no note yet; a save keeps what was typed, line by line.
       boardView.receive({ type: "note", id: HERE });
-      await vi.waitFor(() => expect(noted()).toBe("has the deploy recipe"), WAIT);
-      const asked = () => stub.ops.filter(([target, action]) => target === "inputBox" && action === "show").map(([, , options]) => options as { title: string; value: string });
-      expect(asked()).toHaveLength(1);
-      expect(asked()[0]).toMatchObject({ title: 'Note on "tune the deploy script"', value: "" });
+      await vi.waitFor(() => expect(shown()).toMatchObject({ type: "note", session: { id: HERE, title: "tune the deploy script", live: false }, note: undefined, max: NOTE_MAX }), WAIT);
+      expect(notePanel().title).toBe("Note: tune the deploy script");
+      notePanel().receive({ type: "save", id: HERE, text: "  has the deploy  recipe \n\nsecond line  " });
+      await vi.waitFor(() => expect(noted()).toBe("has the deploy  recipe\n\nsecond line"), WAIT);
+      await vi.waitFor(() => expect(shown()).toMatchObject({ type: "saved", id: HERE, note: "has the deploy  recipe\n\nsecond line" }), WAIT);
       // Kept for the machine: one file per noted session under the extension's storage.
       expect(fs.readdirSync(recordsDir)).toHaveLength(2);
-      // A session the board was not shown gets no input box.
+      // A session the board was not shown gets no page.
       boardView.receive({ type: "note", id: "nope" });
-      expect(asked()).toHaveLength(1);
+      expect(notePanels()).toHaveLength(1);
       // The search finds the note, first among the session's matches, and has:note lists every noted session, the other project's included.
       boardView.receive({ type: "search", query: "deploy recipe", zone: 0 });
       const found = () => boardView.posted.filter((m) => (m as { type: string }).type === "search").at(-1) as { query: string; results: { id: string; count: number; hits: { role: string; snippet: string }[] }[] };
@@ -765,27 +769,29 @@ describe("the extension", () => {
           .results.map((r) => [r.id, r.count, r.hits[0]?.snippet])
           .sort(),
       ).toEqual([
-        [HERE, 0, "has the deploy recipe"],
+        [HERE, 0, "has the deploy  recipe\n\nsecond line"],
         [ELSEWHERE, 0, "the other service's deploy, kept for its runbook"],
       ]);
       // The command opens the search page on them.
       await stub.commands.get("lookout.showNotes")!();
       expect(stub.panels.find((panel) => panel.viewType === "lookout.search")?.posted.at(-1)).toEqual({ type: "query", query: "has:note" });
-      // Changing the note starts from the note as it is; an empty box takes it away; a dismissed box changes nothing.
-      stub.inputBox = (options) => `${(options as { value: string }).value}, done`;
+      // The page again, the same tab, starting from the note as it is; Remove note takes it away; a save of blanks is a removal too.
       boardView.receive({ type: "note", id: HERE });
-      await vi.waitFor(() => expect(noted()).toBe("has the deploy recipe, done"), WAIT);
-      stub.inputBox = () => "";
-      boardView.receive({ type: "note", id: HERE });
+      expect(notePanels()).toHaveLength(1);
+      await vi.waitFor(() => expect(shown()).toMatchObject({ type: "note", note: "has the deploy  recipe\n\nsecond line" }), WAIT);
+      notePanel().receive({ type: "remove", id: HERE });
       await vi.waitFor(() => expect(noted()).toBeUndefined(), WAIT);
       expect(fs.readdirSync(recordsDir)).toHaveLength(1);
-      stub.inputBox = () => undefined;
-      boardView.receive({ type: "note", id: HERE });
-      expect(asked()).toHaveLength(4);
+      notePanel().receive({ type: "save", id: HERE, text: "again" });
+      await vi.waitFor(() => expect(noted()).toBe("again"), WAIT);
+      notePanel().receive({ type: "save", id: HERE, text: " \n " });
+      await vi.waitFor(() => expect(noted()).toBeUndefined(), WAIT);
       expect(fs.readdirSync(recordsDir)).toHaveLength(1);
       // A note written in another window shows on the card here, through the watch on the records.
       new SessionRecords(recordsDir).setNote(HERE, "written elsewhere", { agent: "claude-code", title: "tune the deploy script", cwd: "/work/app" });
       await vi.waitFor(() => expect(noted()).toBe("written elsewhere"), WAIT);
+      // The open page hears of it too.
+      await vi.waitFor(() => expect(shown()).toMatchObject({ type: "note", note: "written elsewhere" }), WAIT);
     }, 60_000);
 
     it("takes a session out of the archive once it runs again", async () => {
@@ -923,21 +929,28 @@ describe("the extension", () => {
     const shown = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions?: { id: string; note?: string }[] } | undefined)?.sessions?.[0];
     await vi.waitFor(() => expect(shown()).toMatchObject({ id: SESSION }), WAIT);
     const card = { webviewSection: "card", sessionId: SESSION };
-    stub.inputBox = () => "kept for the migration";
+    const notePanels = () => stub.panels.filter((panel) => panel.viewType === "lookout.note");
+    const notePanel = () => notePanels().at(-1)!;
+    // Add Note… opens the note's page on the session, which says it is running; a save from the page keeps the note.
     await stub.commands.get("lookout.card.addNote")!(card);
+    await vi.waitFor(() => expect(notePanel()?.posted.at(-1)).toMatchObject({ type: "note", session: { id: SESSION, title: "Empty tab", live: true }, note: undefined }), WAIT);
+    notePanel().receive({ type: "save", id: SESSION, text: "kept for the migration" });
     await vi.waitFor(() => expect(shown()?.note).toBe("kept for the migration"), WAIT);
     // The record names the session as the board does.
     const records = new SessionRecords(path.join(configDir, "global-storage", "sessions"));
     expect(records.get(SESSION)).toMatchObject({ agent: "claude-code", title: "Empty tab", cwd: "/work/app", note: "kept for the migration" });
-    stub.inputBox = (options) => `${(options as { value: string }).value}, done`;
+    // Change Note… brings the same page forward, with the note as it is.
     await stub.commands.get("lookout.card.editNote")!(card);
+    expect(notePanels()).toHaveLength(1);
+    await vi.waitFor(() => expect(notePanel().posted.at(-1)).toMatchObject({ type: "note", note: "kept for the migration" }), WAIT);
+    notePanel().receive({ type: "save", id: SESSION, text: "kept for the migration, done" });
     await vi.waitFor(() => expect(shown()?.note).toBe("kept for the migration, done"), WAIT);
     await stub.commands.get("lookout.card.removeNote")!(card);
     await vi.waitFor(() => expect(shown()?.note).toBeUndefined(), WAIT);
     // Not running, or no card at all: nothing happens.
     await stub.commands.get("lookout.card.addNote")!({ ...card, sessionId: "gone" });
     await stub.commands.get("lookout.card.addNote")!();
-    expect(stub.ops.filter(([target]) => target === "inputBox")).toHaveLength(2);
+    expect(notePanels()).toHaveLength(1);
   }, 60_000);
 
   it("parks a session from its card, brings it back, and lets it leave Parked when it works again", async () => {

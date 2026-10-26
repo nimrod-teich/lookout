@@ -18,7 +18,9 @@ const SEEN = { agent: "claude-code", title: "Wire the cache", cwd: "/work/app", 
 
 describe("cleanNote", () => {
   it("trims a note, joins its lines, and keeps at most one line's worth; nothing for nothing", () => {
-    expect(cleanNote("  has the\n retag  recipe ")).toBe("has the retag recipe");
+    // Lines stay lines: only a line's trailing blanks, the blank lines at either end and the line-end kind change.
+    expect(cleanNote("  has the  \r\n retag  recipe \n\n")).toBe("has the\n retag  recipe");
+    expect(cleanNote("one\n\n\ntwo")).toBe("one\n\n\ntwo");
     expect(cleanNote("x".repeat(NOTE_MAX + 5))).toHaveLength(NOTE_MAX);
     expect(cleanNote("")).toBeUndefined();
     expect(cleanNote("  \n ")).toBeUndefined();
@@ -35,8 +37,8 @@ describe("SessionRecords", () => {
     const other = new SessionRecords(dir);
     expect(other.noteOf("s1")).toBe("has the retag recipe");
     expect(other.noted().map((record) => record.id)).toEqual(["s1"]);
-    // The same note again, however it is spaced: nothing changes, and the note keeps its time.
-    expect(other.setNote("s1", " has the  retag recipe ", SEEN, 9000)).toBe(true);
+    // The same note again, with blanks around it: nothing changes, and the note keeps its time.
+    expect(other.setNote("s1", "  has the retag recipe \n\n", SEEN, 9000)).toBe(true);
     expect(other.get("s1")?.noteAt).toBe(5000);
   });
 
@@ -88,7 +90,7 @@ describe("SessionRecords", () => {
     fs.writeFileSync(path.join(dir, "odd.json"), JSON.stringify({ v: 1, id: "odd", agent: "codex", title: 7, cwd: "/w", note: "  spaced \n out ", noteAt: "soon", extra: true }));
     const records = new SessionRecords(dir);
     expect([...records.all().keys()]).toEqual(["odd"]);
-    expect(records.get("odd")).toEqual({ v: 1, id: "odd", agent: "codex", cwd: "/w", note: "spaced out" });
+    expect(records.get("odd")).toEqual({ v: 1, id: "odd", agent: "codex", cwd: "/w", note: "spaced\n out" });
   });
 
   it("reads the directory again when another window writes to it", async () => {

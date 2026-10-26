@@ -8,7 +8,6 @@ import { nextAttention } from "./core/model";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
 import { GROUPINGS, readGroupBy, type GroupBy } from "./core/grouping";
-import { NOTE_MAX } from "./core/sessionRecords";
 import { readSort, SORTS, type SessionSort } from "./core/sorting";
 import type { SessionView } from "./core/types";
 import { pickBar } from "./core/usageGroups";
@@ -18,6 +17,7 @@ import { readConfig } from "./vscode/config";
 import { panelAdapter } from "./vscode/agents";
 import { claudeTabLabel, claudeTabLabels } from "./vscode/agents/claudePanel";
 import { Findings } from "./vscode/findings";
+import { NotePage } from "./vscode/notePage";
 import { Controller } from "./vscode/controller";
 import { CrossWindowJumps, raiseWindow } from "./vscode/crossWindow";
 import { jumpToSession, renameSession, revealed } from "./vscode/jump";
@@ -176,21 +176,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     if (!(await panelAdapter(view.agent)?.resume(id, log, view))) void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}".`);
   };
-  /** Asks for the note on a session in VS Code's input box and keeps it; an empty box takes the note away. */
-  const editNote = async (id: string) => {
-    const title = controller.titleOf(id) ?? id;
-    const current = controller.noteOf(id);
-    const text = await vscode.window.showInputBox({
-      title: `Note on "${title}"`,
-      value: current ?? "",
-      prompt: current === undefined ? "One line to remember the session by. Lookout keeps it for the machine, with the session's title and project." : "Change the note, or empty the box to take it away.",
-      placeHolder: "Why it matters, what it holds, what came of it",
-      ignoreFocusOut: true,
-      validateInput: (value) => (value.trim().length > NOTE_MAX ? `A note is at most ${NOTE_MAX} characters` : undefined),
-    });
-    if (text === undefined) return;
-    if (!controller.setNote(id, text)) void vscode.window.showWarningMessage(`Lookout could not keep a note on "${title}".`);
-  };
   const findings = new Findings(context.extensionUri, {
     titleOf: (id) => controller.titleOf(id) ?? id,
     agentOf,
@@ -207,6 +192,26 @@ export function activate(context: vscode.ExtensionContext): void {
       return !live || !unreachable(live);
     },
   });
+  /** The note on a session, on a page of its own: as many lines as it takes. */
+  const notePage = new NotePage(context.extensionUri, {
+    titleOf: (id) => controller.titleOf(id) ?? id,
+    agentOf,
+    markers,
+    whereOf: (id) => controller.whereOf(id),
+    noteOf: (id) => controller.noteRecordOf(id),
+    setNote: (id, note) => controller.setNote(id, note),
+    isLive: (id) => controller.sessions.some((view) => view.id === id),
+    open: async (id) => {
+      const live = controller.sessions.find((view) => view.id === id);
+      if (live) await jump(live);
+      else await resume(id);
+    },
+    openable: (id) => {
+      const live = controller.sessions.find((view) => view.id === id);
+      return !live || !unreachable(live);
+    },
+  });
+  const editNote = (id: string) => notePage.show(id);
   /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
   const openHit = (query: string, id: string, index?: number) => {
     if (!findings.show(id, query, index)) void vscode.window.showInformationMessage(`Lookout has not found the transcript of "${controller.titleOf(id) ?? id}" yet.`);
@@ -223,7 +228,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return times.length ? { started: Math.min(...times), lastActive: Math.max(...times) } : {};
     },
     open: openHit,
-    editNote: (id) => void editNote(id),
+    editNote: (id) => editNote(id),
     follows: () => controller.follows,
   });
   /**
@@ -264,7 +269,7 @@ export function activate(context: vscode.ExtensionContext): void {
     setGroup,
     orderFavourites: (ids) => controller.orderFavourites(ids),
     toggleArchive: (id) => controller.toggleArchive(id),
-    editNote: (id) => void editNote(id),
+    editNote: (id) => editNote(id),
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
     usageBar: () => pickBar(controller.usageGroups, config.usageAgent)?.group.agent,
@@ -308,6 +313,7 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     board,
     findings,
+    notePage,
     searchPage,
     controller.onDidChangeUsage(render),
     controller.onDidReachUsageThreshold((alert) => {
@@ -318,6 +324,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(BOARD_VIEW, board),
     controller.onDidChange(render),
     controller.onDidChange(() => findings.refresh()),
+    controller.onDidChange(() => notePage.refresh()),
     // More conversations read: what is being searched or shown fills in.
     controller.onDidRead(() => {
       board.followSearch();

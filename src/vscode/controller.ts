@@ -420,6 +420,13 @@ export class Controller implements vscode.Disposable {
     return this.records?.noteOf(id);
   }
 
+  /** The note on a session and when it was written, for the note's page; nothing for none. */
+  noteRecordOf(id: string): { note: string; noteAt?: number } | undefined {
+    const record = this.records?.get(id);
+    if (record?.note === undefined) return undefined;
+    return record.noteAt === undefined ? { note: record.note } : { note: record.note, noteAt: record.noteAt };
+  }
+
   /**
    * Keeps the user's note on a session, with the session's title and place
    * as the board has them, or takes the note away for an empty one. False

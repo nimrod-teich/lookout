@@ -38,16 +38,22 @@ export interface SessionSeen {
   modifiedAt?: number;
 }
 
-/** The longest note: one line on a card. */
-export const NOTE_MAX = 280;
+/** The longest note: a page of its own, the first line of it on the card. */
+export const NOTE_MAX = 8000;
 /** One write is several file events: the listener hears once, this long after the last. */
 const WATCH_SETTLE_MS = 100;
 /** Without a watch, the directory is looked at this often at most. */
 const DIR_CHECK_MS = 1000;
 
-/** A note as the user typed it, trimmed and kept to one line; undefined for nothing to keep. */
+/** A note as the user typed it: one kind of line end, no blanks at a line's end nor blank lines at either end, cut to the longest; undefined for nothing to keep. */
 export function cleanNote(text: string | undefined): string | undefined {
-  const note = (text ?? "").replace(/\s+/g, " ").trim().slice(0, NOTE_MAX);
+  const note = (text ?? "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/, ""))
+    .join("\n")
+    .trim()
+    .slice(0, NOTE_MAX);
   return note === "" ? undefined : note;
 }
 
