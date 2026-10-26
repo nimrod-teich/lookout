@@ -114,5 +114,10 @@ describe("phrases", () => {
       [4, 20],
       [21, 27],
     ]);
+    // Punctuation and symbols between the words, as the database's search takes them.
+    expect(matchesAll("ran the staging-migrate step", ["staging migrate"])).toBe(true);
+    expect(matchRanges("fix: login", ["fix login"])).toEqual([[0, 10]]);
+    // A word on its own is looked for as it is, punctuation and all.
+    expect(matchesAll('relation "billing_events"', ["billing_events"])).toBe(true);
   });
 });

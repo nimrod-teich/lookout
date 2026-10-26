@@ -137,10 +137,15 @@ export function termsOf(query: string): string[] {
   return parseQuery(query).terms;
 }
 
-/** A term as a pattern over lowercased text: a phrase's words with any run of whitespace between them. Nothing for a single word, which is looked for as it is. */
+/**
+ * A term as a pattern over lowercased text: a phrase's words with any run
+ * of whitespace, punctuation or symbols between them, as the database's
+ * search takes them. Nothing for a single word, which is looked for as it
+ * is.
+ */
 function phrasePattern(term: string): RegExp | undefined {
   if (!term.includes(" ")) return undefined;
-  return new RegExp(term.split(" ").map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"), "g");
+  return new RegExp(term.split(" ").map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s\\p{P}\\p{S}]+"), "gu");
 }
 
 /** [start, end) of each place the term is in the lowercased text. */

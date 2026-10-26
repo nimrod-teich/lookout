@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import type { BackgroundReads } from "./background";
-import { firstPlaceOf, inRange, matchRanges, termsOf, type TimeRange } from "./terms";
+import { firstPlaceOf, holds, inRange, matchRanges, termsOf, type TimeRange } from "./terms";
 
 export { termsOf, type TimeRange };
 
@@ -92,6 +92,13 @@ export interface Scanned {
   restored?: number;
   /** What the file holds just before `end` (see `tailOf`); none when the file could not be read. */
   tail?: string;
+  /**
+   * A lean read the store could not take (it refused the write, or could
+   * not be opened): the file was read whole, its lines are here, and the
+   * index keeps them in memory from now on, so the conversation is still
+   * found.
+   */
+  inMemory?: boolean;
 }
 
 /** Where a conversation's messages and paths sit in its file, as a window saved them: positions, no text. */
@@ -325,7 +332,9 @@ export function snippetOf(text: string, terms: string[], size: SnippetSize = CAR
     if (at >= 0 && (first < 0 || at < first)) first = at;
   }
   const start = first < 0 ? 0 : Math.max(0, first - size.before);
-  const end = Math.min(text.length, (first < 0 ? 0 : first) + size.after);
+  // At least to the end of the first match: a long phrase is shown whole.
+  const matchEnd = first < 0 ? 0 : (matchRanges(text.slice(first), terms)[0]?.[1] ?? 0) + first;
+  const end = Math.min(text.length, Math.max((first < 0 ? 0 : first) + size.after, matchEnd));
   let snippet = text.slice(start, end).replace(/\s+/g, " ").trim();
   if (start > 0) snippet = `…${snippet}`;
   if (end < text.length) snippet = `${snippet}…`;
@@ -414,7 +423,11 @@ export class HistoryIndex {
   /** Each message's text lowercased, whitespace runs made one space, once, for matching. */
   private readonly lowered: string[] = [];
   /** The messages are the store's, read from it when asked for; none are kept here. */
-  readonly lean: boolean;
+  private leanNow: boolean;
+  /** The store's messages as last read, until the next read changes them. */
+  private fromStore: HistoryMessage[] | undefined;
+  /** The store could not take a read of this file: the index keeps it in memory, and is searched there. */
+  private fellBack = false;
   /** The file's modified time at the last read. */
   private seenMtimeMs: number | undefined;
   /** The paths the conversation's tool calls worked on, lowercased, with forward slashes. */
@@ -436,13 +449,24 @@ export class HistoryIndex {
     readonly file: string,
     private readonly reader: LineReader,
   ) {
-    this.lean = through?.messages !== undefined && reader.name !== undefined;
+    this.leanNow = through?.messages !== undefined && reader.name !== undefined;
   }
 
-  /** The conversation's messages, oldest first: the store's for a lean index, else the ones read into memory. */
+  /** The messages are the store's, read from it when asked for; none are kept here. False from the moment the store could not take a read of the file. */
+  get lean(): boolean {
+    return this.leanNow;
+  }
+
+  /** The store could not take a read of the file, and the index keeps it in memory instead: search it there, not in what the store holds of it. */
+  get keptInMemory(): boolean {
+    return this.fellBack;
+  }
+
+  /** The conversation's messages, oldest first: the store's for a lean index (read once until the next read changes them), else the ones read into memory. */
   get messages(): HistoryMessage[] {
     if (!this.lean) return this.held;
-    return through?.messages?.(this.file) ?? [];
+    this.fromStore ??= through?.messages?.(this.file);
+    return this.fromStore ?? [];
   }
 
   /** The file was read at least once; before that a refresh reads it whole. */
@@ -467,14 +491,15 @@ export class HistoryIndex {
   /**
    * Reads what the file gained: in the background when `background` is given
    * and the reader has a name, else here and now. A file that did not change
-   * since it was last read is not read.
+   * since it was last read is not read. `urgent` (a live session's, or one in
+   * view) goes ahead of the reads already waiting.
    */
-  update(background?: BackgroundReads): void {
+  update(background?: BackgroundReads, urgent = false): void {
     if (!background || !this.reader.name) {
       this.refresh();
       return;
     }
-    if (!background.has(this) && this.changed()) background.read(this);
+    if ((urgent || !background.has(this)) && this.changed()) background.read(this, urgent);
   }
 
   /**
@@ -488,6 +513,7 @@ export class HistoryIndex {
 
   /** Forgets how far the file was read: the next read takes it from its start. */
   forgetPlace(): void {
+    this.fromStore = undefined;
     this.replaceMessages([]);
     this.paths.clear();
     this.messageAt.length = 0;
@@ -521,6 +547,12 @@ export class HistoryIndex {
   /** Takes in what a scan found, unless the index moved since the scan was asked for; true when it did. */
   apply(scanned: Scanned, job: Scan): boolean {
     if (job.from !== this.offset || job.identity !== this.identity) return false;
+    this.fromStore = undefined;
+    // The store could not take the read: this conversation is kept in memory from now on.
+    if (scanned.inMemory && this.leanNow) {
+      this.leanNow = false;
+      this.fellBack = true;
+    }
     if (scanned.reset) {
       this.replaceMessages([]);
       this.paths.clear();
@@ -580,7 +612,7 @@ export class HistoryIndex {
       const message = this.held[i]!;
       if (!inRange(message.at, range)) continue;
       const lower = this.lowered[i]!;
-      if (!terms.every((term) => lower.includes(term))) continue;
+      if (!terms.every((term) => (term.includes(" ") ? holds(lower, term) : lower.includes(term)))) continue;
       count++;
       if (hits.length < limit) hits.push({ index: i, role: message.role, at: message.at, ...snippetOf(message.text, terms, size) });
     }

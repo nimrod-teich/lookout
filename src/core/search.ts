@@ -118,9 +118,9 @@ export function searchWithStore(conversations: Iterable<Searchable>, parsed: Que
     // A lean index read once, whose rows the store no longer has (forgotten meanwhile): read again from the start.
     if (index.lean && index.ready && file && !before.has(file)) index.forgetPlace();
     if (index.seenAt(pick.past)) continue;
-    // Kept up to date: in the background, which writes the store; or here, through the store, while the budget allows.
+    // Kept up to date: in the background, which writes the store, a live session's first; or here, through the store, while the budget allows.
     if (background) {
-      index.update(background);
+      index.update(background, pick.past === undefined);
       // A read still to come: the results are sent again once it is in.
       if (background.has(index)) pending++;
     } else if (!index.ready || index.changed()) {
@@ -132,7 +132,7 @@ export function searchWithStore(conversations: Iterable<Searchable>, parsed: Que
   const held = background ? before : store.held(filesOf());
   const stored: { id: string; file: string }[] = [];
   for (const { id, index, file } of picks) {
-    if (file && held.has(file)) {
+    if (file && held.has(file) && !index?.keptInMemory) {
       stored.push({ id, file });
       continue;
     }
@@ -176,6 +176,6 @@ function searchIndex(id: string, index: HistoryIndex, parsed: Query, limit: numb
 export function readConversationsAhead(conversations: Iterable<Searchable>, background: BackgroundReads): void {
   for (const conversation of conversations) {
     const index = conversation.index();
-    if (index && (conversation.pastModifiedAt === undefined || !index.ready)) index.update(background);
+    if (index && (conversation.pastModifiedAt === undefined || !index.ready)) index.update(background, conversation.pastModifiedAt === undefined);
   }
 }

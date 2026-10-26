@@ -102,15 +102,19 @@ function pathKey(p: string): string {
   return p.toLowerCase().replace(/\\/g, "/");
 }
 
+/** A word this short matches only itself, not every word it starts: as a prefix it would match most of the messages, and take the time to. */
+const SHORT_WORD = 3;
+
 /**
  * An FTS5 query for the terms: each a phrase matched at a word's start
  * (`retag` finds "retag" and "retagging", `"retag recipe"` the two words in
- * a row), all of them required.
+ * a row), all of them required; a word of one or two letters matches that
+ * word alone.
  */
 export function ftsQuery(terms: readonly string[]): string {
   return terms
     .filter((term) => term !== "")
-    .map((term) => `"${term.replace(/"/g, '""')}"*`)
+    .map((term) => `"${term.replace(/"/g, '""')}"${term.length < SHORT_WORD && !term.includes(" ") ? "" : "*"}`)
     .join(" ");
 }
 
@@ -227,26 +231,48 @@ export class ConversationStore {
   /**
    * The messages of these files holding every term, newest first per file;
    * `limit` of each file's cut into snippets, and all of them counted.
-   * A term matches at a word's start.
+   * A term matches at a word's start. The matches are found by id and place
+   * alone, and only the texts shown are read: a common word matches most of
+   * the messages, and reading them all is what would take the time.
    */
   search(files: readonly string[], terms: readonly string[], limit: number, range?: TimeRange, size?: SnippetSize): Map<string, { count: number; hits: SearchHit[] }> {
     const out = new Map<string, { count: number; hits: SearchHit[] }>();
     const query = ftsQuery(terms);
     if (query === "" || files.length === 0) return out;
-    const rows = this.db
-      .prepare("SELECT m.file AS file, m.idx AS idx, m.role AS role, m.at AS at, m.text AS text FROM messages_fts f JOIN messages m ON m.rowid = f.rowid WHERE messages_fts MATCH ? AND m.file IN (SELECT value FROM json_each(?)) ORDER BY m.file, m.idx DESC")
-      .all(query, JSON.stringify(files)) as { file: string; idx: number; role: "you" | "agent"; at: number | null; text: string }[];
     const lower = terms.map((term) => term.toLowerCase());
-    for (const row of rows) {
-      const at = row.at ?? undefined;
-      if (!inRange(at, range)) continue;
-      let result = out.get(row.file);
-      if (!result) {
-        result = { count: 0, hits: [] };
-        out.set(row.file, result);
+    const json = JSON.stringify(files);
+    /** Per file: how many match, and the newest `limit` of them by their place. */
+    const found = new Map<string, { count: number; top: { rid: number; place: number; at: number | undefined; tool: boolean }[] }>();
+    const take = (rid: number, file: string, place: number, at: number | null, tool: boolean) => {
+      const when = at ?? undefined;
+      if (!inRange(when, range)) return;
+      let entry = found.get(file);
+      if (!entry) {
+        entry = { count: 0, top: [] };
+        found.set(file, entry);
       }
-      result.count++;
-      if (result.hits.length < limit) result.hits.push({ index: row.idx, role: row.role, at, ...snippetOf(row.text, lower, size) });
+      entry.count++;
+      entry.top.push({ rid, place, at: when, tool });
+    };
+    const messages = this.db.prepare("SELECT m.rowid AS rid, m.file AS file, m.idx AS place, m.at AS at FROM messages_fts f JOIN messages m ON m.rowid = f.rowid WHERE messages_fts MATCH ? AND m.file IN (SELECT value FROM json_each(?))").all(query, json) as { rid: number; file: string; place: number; at: number | null }[];
+    for (const row of messages) take(row.rid, row.file, row.place, row.at, false);
+    const wanted: { message: number[]; tool: number[] } = { message: [], tool: [] };
+    for (const entry of found.values()) {
+      // The messages first, newest first; then the tool calls and results, newest first.
+      entry.top.sort((a, b) => Number(a.tool) - Number(b.tool) || b.place - a.place || b.rid - a.rid);
+      entry.top.length = Math.min(entry.top.length, Math.max(0, limit));
+      for (const hit of entry.top) (hit.tool ? wanted.tool : wanted.message).push(hit.rid);
+    }
+    const texts = new Map<string, { role: string; text: string }>();
+    if (wanted.message.length) for (const row of this.db.prepare("SELECT rowid AS rid, role, text FROM messages WHERE rowid IN (SELECT value FROM json_each(?))").all(JSON.stringify(wanted.message)) as { rid: number; role: string; text: string }[]) texts.set(`m${row.rid}`, row);
+    for (const [file, entry] of found) {
+      const hits: SearchHit[] = [];
+      for (const hit of entry.top) {
+        const row = texts.get(`${hit.tool ? "t" : "m"}${hit.rid}`);
+        if (!row) continue;
+        hits.push({ index: hit.place, role: row.role as SearchHit["role"], at: hit.at, ...snippetOf(row.text, lower, size) });
+      }
+      out.set(file, { count: entry.count, hits });
     }
     return out;
   }
@@ -257,6 +283,15 @@ export class ConversationStore {
     if (files.length === 0 || parts.length === 0) return out;
     const rows = this.db.prepare("SELECT DISTINCT file, path FROM paths WHERE file IN (SELECT value FROM json_each(?))").all(JSON.stringify(files)) as { file: string; path: string }[];
     for (const row of rows) if (parts.some((part) => row.path.includes(part))) out.add(row.file);
+    return out;
+  }
+
+  /** When each of these files' conversations started and was last active, by the times of their messages: one question for all of them. */
+  spans(files: readonly string[]): Map<string, { started: number; lastActive: number }> {
+    const out = new Map<string, { started: number; lastActive: number }>();
+    if (files.length === 0) return out;
+    const rows = this.db.prepare("SELECT file, MIN(at) AS first, MAX(at) AS last FROM messages WHERE file IN (SELECT value FROM json_each(?)) AND at IS NOT NULL GROUP BY file").all(JSON.stringify(files)) as { file: string; first: number; last: number }[];
+    for (const row of rows) out.set(row.file, { started: row.first, lastActive: row.last });
     return out;
   }
 
@@ -282,6 +317,19 @@ export class ConversationStore {
       )
       .run(session.id, session.agent, session.file, session.title, session.cwd, session.branch ?? null, session.modifiedAt ?? null);
     if (row && row.file !== session.file) this.dropFileIfUnreferenced(row.file);
+  }
+
+  /** Writes down many sessions at once (see `rememberSession`): one transaction, not one each. */
+  rememberSessions(sessions: readonly Omit<StoredSession, "purgedAt">[]): void {
+    if (sessions.length === 0) return;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const session of sessions) this.rememberSession(session);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   /** The session the store knows by this id. */

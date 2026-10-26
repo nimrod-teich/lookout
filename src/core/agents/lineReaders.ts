@@ -41,6 +41,8 @@ export function runScan(job: Scan): Scanned | undefined {
   const into = job.store;
   const store = into ? storeAt(into.file) : undefined;
   if (into && store) return scanIntoStore(job, reader, store, into.build);
+  // A lean index whose store cannot be opened here: the file in memory, whole, for the index to keep.
+  if (job.lean) return inMemory(job, reader);
   const saved = job.saved ? readSaved(job.saved.entry, job, job.saved.build) : undefined;
   return scanFile(job.file, reader, job.from, job.identity, saved);
 }
@@ -63,7 +65,7 @@ function scanIntoStore(job: Scan, reader: LineReader, store: ConversationStore, 
   const usable = held !== undefined && held.build === build && held.tail !== undefined && fitsStill(job.file, held) && (first || job.identity === held.identity);
   if (!held || !usable) {
     const whole = scanFile(job.file, reader, 0, "");
-    if (whole) recordQuietly(store, { ...job, from: 0 }, whole, build);
+    if (whole && !failed(whole)) recordQuietly(store, { ...job, from: 0 }, whole, build);
     return whole;
   }
   // From the earlier of the two places: the store's, and the index's.
@@ -71,7 +73,7 @@ function scanIntoStore(job: Scan, reader: LineReader, store: ConversationStore, 
   const scanned = scanFile(job.file, reader, base, held.identity);
   if (!scanned) return undefined;
   if (scanned.reset) {
-    recordQuietly(store, { ...job, from: 0 }, scanned, build);
+    if (!failed(scanned)) recordQuietly(store, { ...job, from: 0 }, scanned, build);
     return scanned;
   }
   const fresh = scanned.lines.filter((line) => line.start >= held.end);
@@ -79,7 +81,7 @@ function scanIntoStore(job: Scan, reader: LineReader, store: ConversationStore, 
   if (!first) return { ...scanned, lines: scanned.lines.filter((line) => line.start >= job.from) };
   const messages = store.messages(job.file) ?? [];
   const restored = messages.slice(0, held.messages).map((message) => ({ facts: { message }, start: 0, length: 0 }));
-  return { identity: scanned.identity, size: scanned.size, reset: true, end: scanned.end, lines: [...restored, ...fresh], restored: held.end, tail: scanned.tail };
+  return { identity: scanned.identity, size: scanned.size, mtimeMs: scanned.mtimeMs, reset: true, end: scanned.end, lines: [...restored, ...fresh], restored: held.end, tail: scanned.tail };
 }
 
 /**
@@ -89,18 +91,38 @@ function scanIntoStore(job: Scan, reader: LineReader, store: ConversationStore, 
  * store did not take the read, so the index asks again.
  */
 function scanLean(job: Scan, reader: LineReader, store: ConversationStore, build: string): Scanned | undefined {
-  const held = store.progress(job.file);
+  let held: ReturnType<ConversationStore["progress"]>;
+  try {
+    held = store.progress(job.file);
+  } catch {
+    return inMemory(job, reader);
+  }
   const usable = held !== undefined && held.build === build && held.tail !== undefined && fitsStill(job.file, held);
-  const scanned = usable ? scanFile(job.file, reader, held.end, held.identity) : scanFile(job.file, reader, 0, "");
+  const scanned = usable ? scanFile(job.file, reader, held!.end, held!.identity) : scanFile(job.file, reader, 0, "");
   if (!scanned) return undefined;
+  // A file that could not be read is tried again once it changes: what the store holds of it stays.
+  if (failed(scanned)) return { ...scanned, lines: [] };
+  // Nothing new: nothing to write.
+  if (usable && !scanned.reset && scanned.lines.length === 0 && scanned.end === held!.end) return scanned;
   const from = scanned.reset ? 0 : held!.end;
-  let taken: boolean;
+  let taken = false;
   try {
     taken = store.record({ ...job, from }, scanned, build);
   } catch {
-    return undefined;
+    // Refused: a full disk, a read-only file, a lock held too long, a schema another build changed.
   }
-  return taken ? { ...scanned, lines: [] } : undefined;
+  return taken ? { ...scanned, lines: [] } : inMemory(job, reader);
+}
+
+/** The file read whole into memory, for a lean index the store could not take it for: it keeps it there from now on. */
+function inMemory(job: Scan, reader: LineReader): Scanned | undefined {
+  const whole = scanFile(job.file, reader, 0, "");
+  return whole ? { ...whole, inMemory: true } : undefined;
+}
+
+/** A read that could not get at the file's bytes: a whole read of a file with something in it that found nothing and got nowhere. */
+function failed(scanned: Scanned): boolean {
+  return scanned.reset && scanned.end === 0 && scanned.size > 0;
 }
 
 /** Writes a scan into the store; the store is a copy, so a write that fails never stops the read from answering. */

@@ -167,6 +167,9 @@ export class Controller implements vscode.Disposable {
   /** Lists the earlier sessions again shortly, while they are still being read. */
   private fill: ReturnType<typeof setTimeout> | undefined;
   private current: readonly SessionView[] = [];
+  /** The sessions published last, by id: the running ones, and the listed ones by list, the first list holding one wins. */
+  private liveById = new Map<string, SessionView>();
+  private pastById = new Map<string, PastView>();
   private snapshot = "[]";
   private pastViews: PastView[] = [];
   /** Every earlier session listed in this window, as last listed: a conversation tab outlives a change of scope. */
@@ -438,7 +441,7 @@ export class Controller implements vscode.Disposable {
 
   /** Where a live or a past session works: its project, worktree and git branch. */
   whereOf(id: string): string | undefined {
-    const view = this.current.find((v) => v.id === id) ?? this.pastView(id);
+    const view = this.liveById.get(id) ?? this.pastView(id);
     if (!view) return undefined;
     const project = view.worktree ? `${view.project} · ${view.worktree}` : view.project;
     return view.branch ? `${project} · ⎇ ${view.branch}` : project;
@@ -446,20 +449,43 @@ export class Controller implements vscode.Disposable {
 
   /** The title of a live or a past session. */
   titleOf(id: string): string | undefined {
-    return this.current.find((view) => view.id === id)?.title ?? this.pastView(id)?.title;
+    return this.liveById.get(id)?.title ?? this.pastView(id)?.title;
+  }
+
+  /** The agent of a live or a past session. */
+  agentOf(id: string): string | undefined {
+    return (this.liveById.get(id) ?? this.pastView(id))?.agent;
+  }
+
+  /**
+   * When each session's conversation started and was last active, by its
+   * messages' times: from the store, one question for all of them, where it
+   * holds the conversation; else from the conversation read here.
+   */
+  spansOf(ids: readonly string[]): Map<string, { started?: number; lastActive?: number }> {
+    const out = new Map<string, { started?: number; lastActive?: number }>();
+    const files = new Map<string, string>();
+    if (this.store) for (const id of ids) {
+      const file = this.fileOf(id) ?? this.store.session(id)?.file;
+      if (file) files.set(id, file);
+    }
+    const spans = this.store ? this.store.spans([...files.values()]) : new Map<string, { started: number; lastActive: number }>();
+    for (const id of ids) {
+      const file = files.get(id);
+      const span = file ? spans.get(file) : undefined;
+      if (span) {
+        out.set(id, span);
+        continue;
+      }
+      const times = (this.history(id) ?? []).map((message) => message.at).filter((at): at is number => at !== undefined);
+      out.set(id, times.length ? { started: Math.min(...times), lastActive: Math.max(...times) } : {});
+    }
+    return out;
   }
 
   /** A session that is not running, as listed now or, when the scope has changed since, as last listed; failing those, as its record remembers it. */
   pastView(id: string): PastView | undefined {
-    return (
-      this.pastViews.find((view) => view.id === id) ??
-      this.favouritePast.find((view) => view.id === id) ??
-      this.archivePast.find((view) => view.id === id) ??
-      this.notedPast.find((view) => view.id === id) ??
-      this.purgedPast.find((view) => view.id === id) ??
-      this.pastSeen.get(id) ??
-      this.recordedView(id)
-    );
+    return this.pastById.get(id) ?? this.pastSeen.get(id) ?? this.recordedView(id);
   }
 
   /** The sessions whose transcript the agent deleted, their conversations kept by Lookout. */
@@ -623,21 +649,25 @@ export class Controller implements vscode.Disposable {
   /** Tells the store what each listed session is called and where its conversation is, when that changed. */
   private rememberSessions(live: readonly SessionView[], past: readonly PastView[]): void {
     if (!this.store) return;
+    // What changed since the store was last told, written in one transaction.
+    const changed: { session: Parameters<ConversationStore["rememberSession"]>[0]; key: string }[] = [];
     const remember = (id: string, agent: string, title: string, cwd: string, branch: string | undefined, modifiedAt: number | undefined) => {
       const file = this.fileOf(id);
       if (!file) return;
       const key = [agent, file, title, cwd, branch ?? "", modifiedAt ?? ""].join("\n");
       if (this.remembered.get(id) === key) return;
-      try {
-        this.store!.rememberSession({ id, agent, file, title, cwd, branch, modifiedAt });
-        this.remembered.set(id, key);
-      } catch (error) {
-        this.log.errorOnce(`The conversation store could not be written: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      changed.push({ session: { id, agent, file, title, cwd, branch, modifiedAt }, key });
     };
     // A running session's time changes with every line: the store keeps the one it has until the session rests.
     for (const view of live) if (!view.restored) remember(view.id, view.agent, view.title, view.cwd, view.branch, undefined);
     for (const view of past) if (!view.purged) remember(view.id, view.agent, view.title, view.cwd, view.branch, view.modifiedAt);
+    if (changed.length === 0) return;
+    try {
+      this.store.rememberSessions(changed.map((c) => c.session));
+      for (const { session, key } of changed) this.remembered.set(session.id, key);
+    } catch (error) {
+      this.log.errorOnce(`The conversation store could not be written: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /** The conversation file of a live or a past session, from its agent. */
@@ -1305,6 +1335,11 @@ export class Controller implements vscode.Disposable {
     this.archivePast = archivePast;
     this.notedPast = notedPast;
     this.purgedPast = purgedPast;
+    // Looked up by id per search result: a map, not a scan of thousands of sessions per result.
+    this.liveById = new Map(views.map((view) => [view.id, view]));
+    const byId = new Map<string, PastView>();
+    for (const list of [past, favouritePast, archivePast, notedPast, purgedPast]) for (const view of list) if (!byId.has(view.id)) byId.set(view.id, view);
+    this.pastById = byId;
     this.changed.fire(views);
   }
 

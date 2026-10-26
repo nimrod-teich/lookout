@@ -19,7 +19,8 @@ export interface SearchPageActions {
   /** Its project, worktree and git branch. */
   whereOf(id: string): string | undefined;
   /** When its conversation began and last moved: its first and last message. */
-  spanOf(id: string): { started?: number; lastActive?: number };
+  /** When each session's conversation started and was last active: all of them at once. */
+  spansOf(ids: readonly string[]): Map<string, { started?: number; lastActive?: number }>;
   /** It is running now. */
   isLive(id: string): boolean;
   /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
@@ -59,13 +60,14 @@ export class SearchPage implements vscode.Disposable {
   /** The sessions with matches, the newest match first; sessions that operators alone picked come last. */
   private results(query: string, zone: number | undefined): ToSearch {
     const outcome = this.actions.search(query, zone);
+    const spans = this.actions.spansOf(outcome.results.map((result) => result.id));
     const sessions: SearchPageSession[] = outcome.results.map((result) => ({
       id: result.id,
       title: this.actions.titleOf(result.id),
       agent: this.actions.agentOf?.(result.id),
       where: this.actions.whereOf(result.id),
       live: this.actions.isLive(result.id),
-      ...this.actions.spanOf(result.id),
+      ...spans.get(result.id),
       count: result.count,
       hits: result.hits,
     }));

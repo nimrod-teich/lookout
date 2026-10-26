@@ -23,7 +23,7 @@ function setup() {
     titleOf: (id: string) => ({ [OLD]: "Old deploy", [NEW]: "New deploy", [PICKED]: "Picked" })[id] ?? id,
     whereOf: (id: string) => (id === NEW ? "api · ⎇ fix-login" : undefined),
     isLive: (id: string) => id === NEW,
-    spanOf: (id: string) => (id === NEW ? { started: 1_000, lastActive: 5_000 } : {}),
+    spansOf: (ids: readonly string[]) => new Map(ids.map((id) => [id, id === NEW ? { started: 1_000, lastActive: 5_000 } : {}])),
     open: vi.fn(),
   };
   const page = new SearchPage({ fsPath: "/ext" } as never, actions);
