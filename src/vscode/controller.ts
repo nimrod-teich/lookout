@@ -204,6 +204,8 @@ export class Controller implements vscode.Disposable {
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   /** Keep a conversation after its transcript goes; off: it goes with it. */
   private historyKeep = true;
+  /** The search keeps what the tool calls ran and returned too. */
+  private toolOutput = false;
   /** When keeping went off, if it is: only what is purged since then goes. */
   private keepOffSince: number | undefined;
   /** What the store was last told of each session, to tell it only of changes. */
@@ -291,10 +293,7 @@ export class Controller implements vscode.Disposable {
     const into = this.store ? { file: this.store.file, build: this.build } : undefined;
     // Every index reads through the store from now on: a read on its own would leave the store behind.
     // The store is the index: the indexes keep no messages, and read them from it.
-    if (into && this.store) {
-      const store = this.store;
-      readThroughStore({ scan: runScan, store: into, messages: (file) => store.messages(file) });
-    }
+    this.installReadThrough();
     this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error), saved, into) : undefined;
     if (saved) this.pruneTimer = setTimeout(() => void saved.prune(), PRUNE_AFTER_MS);
     this.vault = host.vaultDir ? new TranscriptVault(host.vaultDir) : undefined;
@@ -843,6 +842,37 @@ export class Controller implements vscode.Disposable {
     return this.agentHostSessions;
   }
 
+  /**
+   * Has every index read through the store, which is the index: the indexes
+   * keep no messages and read them from it, and read the tool calls and
+   * results too while the search keeps them.
+   */
+  private installReadThrough(): void {
+    const store = this.store;
+    if (!store) return;
+    readThroughStore({ scan: runScan, store: { file: store.file, build: this.build }, messages: (file) => store.messages(file), tools: this.toolOutput });
+  }
+
+  /**
+   * Keeps the tool output in the search, or stops: off, every tool call and
+   * result kept goes at once; on, the conversations are read again for it,
+   * in the background, from now on.
+   */
+  private setToolOutput(on: boolean): void {
+    if (on === this.toolOutput) return;
+    this.toolOutput = on;
+    this.installReadThrough();
+    if (!on) {
+      try {
+        this.store?.dropTools();
+      } catch (error) {
+        this.log.info(`The tool output kept could not be let go of now: ${String(error)}; each conversation lets go of its own as it is read`);
+      }
+    }
+    // The conversations want reading again: at once, not at the next read-ahead; at the start the first read-ahead comes soon anyway.
+    if (this.readAheadAt !== Infinity) this.readAheadAt = Math.min(this.readAheadAt, Date.now());
+  }
+
   /** Starts, or restarts with other settings. */
   start(config: Config): void {
     this.typedQuestions = config.typedQuestions;
@@ -850,6 +880,7 @@ export class Controller implements vscode.Disposable {
     this.historyKeep = config.historyKeep;
     this.keepOffSince = config.historyKeep ? undefined : (this.keepOffSince ?? Date.now());
     this.keepFavourites = config.keepFavourites;
+    this.setToolOutput(config.searchToolOutput);
     this.claudeOn = config.claudeEnabled;
     this.remembered.clear();
     this.providers = config.claudeEnabled ? [new ClaudeProvider(config.claudeConfigDir, this.proc)] : [];
@@ -919,6 +950,7 @@ export class Controller implements vscode.Disposable {
     this.historyKeep = config.historyKeep;
     if (keep !== this.historyKeep) this.keepOffSince = this.historyKeep ? undefined : Date.now();
     this.keepFavourites = config.keepFavourites;
+    this.setToolOutput(config.searchToolOutput);
     this.poll();
     if (keep !== this.historyKeep) this.sweepStore();
   }

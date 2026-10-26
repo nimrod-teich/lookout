@@ -1,6 +1,6 @@
 // What a rollout line holds for the search and the conversation tab: what you
 // wrote, what Codex replied, and the files its commands read or changed.
-import { readerOf, type LineFacts } from "../../history";
+import { readerOf, toolReaderOf, toolText, type LineFacts, type ToolText } from "../../history";
 import { isContext } from "./rollout";
 
 interface Part {
@@ -65,5 +65,49 @@ export function factsOf(line: string): LineFacts | undefined {
   return paths.length ? { paths } : undefined;
 }
 
+const TOOL_CALL = '"type":"custom_tool_call"';
+const FUNCTION_CALL = '"type":"function_call"';
+const TOOL_OUTPUT = '"type":"custom_tool_call_output"';
+const FUNCTION_OUTPUT = '"type":"function_call_output"';
+
+/** An output's text: a string, or its text parts. */
+function outputText(output: unknown): string {
+  if (typeof output === "string") return output;
+  if (!Array.isArray(output)) return "";
+  return (output as Part[])
+    .filter((part) => typeof part?.text === "string")
+    .map((part) => part.text as string)
+    .join("\n");
+}
+
+/**
+ * The tool calls and results of a rollout line: a call's input or
+ * arguments with the tool's name, and an output's text, cut to their first
+ * and last 2 KB.
+ */
+export function toolFactsOf(line: string): ToolText[] | undefined {
+  let record: { timestamp?: unknown; type?: unknown; payload?: Record<string, unknown> };
+  try {
+    record = JSON.parse(line) as typeof record;
+  } catch {
+    return undefined;
+  }
+  if (!record || record.type !== "response_item" || !record.payload) return undefined;
+  const parsed = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : NaN;
+  const at = Number.isFinite(parsed) ? { at: parsed } : {};
+  const payload = record.payload;
+  if (payload.type === "custom_tool_call" || payload.type === "function_call") {
+    const input = payload.type === "custom_tool_call" ? payload.input : payload.arguments;
+    const text = toolText(typeof input === "string" ? input : JSON.stringify(input ?? {}));
+    const name = typeof payload.name === "string" ? payload.name : undefined;
+    return text ? [{ ...(name ? { name } : {}), text, ...at }] : undefined;
+  }
+  if (payload.type === "custom_tool_call_output" || payload.type === "function_call_output") {
+    const text = toolText(outputText(payload.output));
+    return text ? [{ text, ...at }] : undefined;
+  }
+  return undefined;
+}
+
 /** How the search reads a rollout: a line without one of `factsOf`'s needles is never decoded. */
-export const ROLLOUT_LINES = readerOf("codex-rollout", [MESSAGE, FILE_CHANGE, COMMAND], factsOf);
+export const ROLLOUT_LINES = { ...readerOf("codex-rollout", [MESSAGE, FILE_CHANGE, COMMAND], factsOf), tools: toolReaderOf([TOOL_CALL, FUNCTION_CALL, TOOL_OUTPUT, FUNCTION_OUTPUT], toolFactsOf) };

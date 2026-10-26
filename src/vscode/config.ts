@@ -28,6 +28,8 @@ export interface Config {
   parkAfterMs: number;
   /** Keep what was said in a conversation after the agent deletes its transcript, under Purged. */
   historyKeep: boolean;
+  /** The search keeps what the tool calls ran and returned too: off by default. */
+  searchToolOutput: boolean;
   /** Keep a copy of every starred session's transcript, as if Keep Transcript were chosen for it. */
   keepFavourites: boolean;
   /** Watch Claude Code: its sessions and its usage. */
@@ -96,6 +98,7 @@ export function readConfig(): Config {
     typedQuestions: lookout.get<boolean>("state.typedQuestions", true),
     parkAfterMs: Math.max(0, lookout.get<number>("parkAfterHours", 24)) * 3_600_000,
     historyKeep: lookout.get<boolean>("history.keep", true),
+    searchToolOutput: lookout.get<boolean>("search.toolOutput", false),
     keepFavourites: lookout.get<boolean>("keepTranscripts.favourites", false),
     claudeEnabled: lookout.get<boolean>("agents.claude", true),
     claudeConfigDir,

@@ -23,7 +23,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
 
 const OPERATORS = "since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts, has:note";
 /** What a match's label says of who wrote it. */
-const WHO = { you: "you", agent: "agent", note: "note" } as const;
+const WHO = { you: "you", agent: "agent", note: "note", tool: "tool" } as const;
 
 /** The query whose results are on show, or asked for. */
 let query = "";

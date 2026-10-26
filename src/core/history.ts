@@ -5,10 +5,30 @@ import { firstMatchOf, holds, inRange, matchRanges, termsOf, type TimeRange } fr
 
 export { termsOf, type TimeRange };
 
-/** What one line of a conversation file holds for the search: a message, the paths a tool call worked on, or both. */
+/** What one line of a conversation file holds for the search: a message, the paths a tool call worked on, or both; and, when asked for, what its tool calls ran and returned. */
 export interface LineFacts {
   message?: HistoryMessage;
   paths?: string[];
+  tools?: ToolText[];
+}
+
+/** A tool call's input, or its result, as the search keeps it: cut to its first and last 2 KB. */
+export interface ToolText {
+  /** The tool's name, for a call; none for a result. */
+  name?: string;
+  text: string;
+  /** Epoch ms, when known. */
+  at?: number;
+}
+
+/** The characters a tool text keeps at each end: an error is often at the end of long output, a command at the start. */
+const TOOL_TEXT_END = 2048;
+
+/** A tool's text as the search keeps it: whole when short, else its first and last 2 KB around an ellipsis; nothing for blank text. */
+export function toolText(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (trimmed === "") return undefined;
+  return trimmed.length <= 2 * TOOL_TEXT_END ? trimmed : `${trimmed.slice(0, TOOL_TEXT_END)} … ${trimmed.slice(-TOOL_TEXT_END)}`;
 }
 
 /**
@@ -24,6 +44,14 @@ export interface LineReader {
   mayHold(line: Buffer): boolean;
   /** What a line holds. */
   facts(line: string): LineFacts | undefined;
+  /** The tool calls and results of a line, read only when the search is asked to keep them: `mayHold` rules lines out on their bytes, as above. */
+  tools?: { mayHold(line: Buffer): boolean; facts(line: string): ToolText[] | undefined };
+}
+
+/** A tool reader (see `LineReader.tools`) for files whose lines with tool calls or results each contain one of the needles. */
+export function toolReaderOf(needles: readonly string[], facts: (line: string) => ToolText[] | undefined): NonNullable<LineReader["tools"]> {
+  const bytes = needles.map((needle) => Buffer.from(needle));
+  return { mayHold: (line) => bytes.some((needle) => line.includes(needle)), facts };
 }
 
 /** A reader for files whose lines with facts each contain one of the needles. */
@@ -60,6 +88,8 @@ export interface Scan {
    * store could not take is answered with nothing, and tried again.
    */
   lean?: boolean;
+  /** Read the tool calls and their results too, into the store (see `LineReader.tools`). */
+  tools?: boolean;
 }
 
 /** A line that holds facts, and where it sits in its file. */
@@ -131,7 +161,7 @@ export interface Places {
  * `saved` places still fit it is read at those places, and from where they
  * end; a file that does not fit them is read whole.
  */
-export function scanFile(file: string, reader: LineReader, from: number, identity: string, saved?: Places): Scanned | undefined {
+export function scanFile(file: string, reader: LineReader, from: number, identity: string, saved?: Places, tools = false): Scanned | undefined {
   let st: fs.Stats;
   try {
     st = fs.statSync(file);
@@ -151,7 +181,7 @@ export function scanFile(file: string, reader: LineReader, from: number, identit
   const lines: FactLine[] = [];
   if (st.size === start) return { identity: now, size: st.size, mtimeMs: st.mtimeMs, reset, end: start, lines, tail: tailOf(file, start) };
   try {
-    const end = readLines(file, start, reader, (line) => lines.push(line));
+    const end = readLines(file, start, reader, (line) => lines.push(line), tools);
     return { identity: now, size: st.size, mtimeMs: st.mtimeMs, reset, end, lines, tail: tailOf(file, end) };
   } catch {
     // A file that cannot be read (not ours to read, held by another process) is tried again once it changes,
@@ -268,6 +298,8 @@ export interface ReadThrough {
    * the index, searched and read from where it is.
    */
   messages?(file: string): HistoryMessage[] | undefined;
+  /** The lean indexes read the tool calls and their results too (see `LineReader.tools`). */
+  tools?: boolean;
 }
 
 let through: ReadThrough | undefined;
@@ -292,10 +324,10 @@ export interface HistoryMessage {
 }
 
 export interface SearchHit {
-  /** Position of the message in the conversation; none for the session's note, which is no message. */
+  /** Position of the message in the conversation (for a tool's text, the message it follows); none for the session's note, which is no message. */
   index?: number;
-  /** Who wrote it: the user, the agent, or the user's note on the session. */
-  role: "you" | "agent" | "note";
+  /** Who wrote it: the user, the agent, the user's note on the session, or a tool call or its result. */
+  role: "you" | "agent" | "note" | "tool";
   at?: number;
   /** The matching message, cut around its first match, whitespace collapsed. */
   snippet: string;
@@ -348,12 +380,18 @@ export function snippetOf(text: string, terms: string[], size: SnippetSize = CAR
  * offset after the last complete line; an unfinished last line is read again
  * next time.
  */
-function readLines(file: string, from: number, reader: LineReader, onLine: (line: FactLine) => void): number {
+function readLines(file: string, from: number, reader: LineReader, onLine: (line: FactLine) => void, tools = false): number {
+  const toolReader = tools ? reader.tools : undefined;
   const take = (line: Buffer, start: number) => {
-    if (!reader.mayHold(line)) return;
+    const holds = reader.mayHold(line);
+    const holdsTools = toolReader?.mayHold(line) ?? false;
+    if (!holds && !holdsTools) return;
     let facts: LineFacts | undefined;
     try {
-      facts = reader.facts(line.toString("utf8"));
+      const text = line.toString("utf8");
+      facts = holds ? reader.facts(text) : undefined;
+      const found = holdsTools ? toolReader!.facts(text) : undefined;
+      if (found?.length) facts = { ...(facts ?? {}), tools: found };
     } catch {
       // A line the reader cannot take is skipped, not the rest of the file.
       return;
@@ -430,6 +468,8 @@ export class HistoryIndex {
   private fellBack = false;
   /** The file's modified time at the last read. */
   private seenMtimeMs: number | undefined;
+  /** The last read took the tool calls and their results too. */
+  private readTools = false;
   /** The paths the conversation's tool calls worked on, lowercased, with forward slashes. */
   readonly paths = new Set<string>();
   private offset = 0;
@@ -469,9 +509,14 @@ export class HistoryIndex {
     return this.fromStore ?? [];
   }
 
-  /** The file was read at least once; before that a refresh reads it whole. */
+  /** The file was read at least once, as the store wants it read now; before that a refresh reads it (whole, or for its tool output). */
   get ready(): boolean {
-    return this.identity !== "";
+    return this.identity !== "" && !this.toolsBehind;
+  }
+
+  /** The tool output is wanted and the last read did not take it, or the other way round. */
+  private get toolsBehind(): boolean {
+    return this.lean && (through?.tools === true) !== this.readTools;
   }
 
   /** Reads what the file gained since the last call, here and now: through the store while one is open, so the store follows. */
@@ -524,10 +569,12 @@ export class HistoryIndex {
     this.seenSize = -1;
     this.seenMtimeMs = undefined;
     this.tail = undefined;
+    this.readTools = false;
   }
 
   /** The file is not as it was at the last read: replaced, grown or cut short, or never read. */
   changed(): boolean {
+    if (this.toolsBehind) return true;
     try {
       const st = fs.statSync(this.file);
       return `${st.ino}:${st.birthtimeMs}` !== this.identity || st.size !== this.seenSize;
@@ -541,6 +588,7 @@ export class HistoryIndex {
     if (!this.reader.name) return undefined;
     const job: Scan = { file: this.file, reader: this.reader.name, from: this.offset, identity: this.identity };
     if (this.lean) job.lean = true;
+    if (this.lean && through?.tools === true) job.tools = true;
     return job;
   }
 
@@ -567,6 +615,7 @@ export class HistoryIndex {
     this.seenSize = scanned.size;
     this.seenMtimeMs = scanned.mtimeMs;
     this.tail = scanned.tail;
+    this.readTools = job.tools === true;
     return true;
   }
 

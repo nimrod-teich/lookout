@@ -1,4 +1,4 @@
-import type { HistoryMessage, LineFacts, LineReader } from "../../history";
+import { toolText, type HistoryMessage, type LineFacts, type LineReader, type ToolText } from "../../history";
 import { INTERRUPT } from "./transcript";
 
 interface Block {
@@ -104,5 +104,58 @@ function startsWith(bytes: Buffer, prefix: Buffer): boolean {
   return bytes.length >= prefix.length && bytes.subarray(0, prefix.length).equals(prefix);
 }
 
+/** A tool call's input as the search keeps it: a command as it was run, anything else as its JSON. */
+function inputText(name: string, input: unknown): string {
+  if (typeof input === "object" && input !== null && typeof (input as { command?: unknown }).command === "string") return (input as { command: string }).command;
+  return typeof input === "string" ? input : JSON.stringify(input ?? {});
+}
+
+/** A tool result's text: a string, or its text blocks; images and the rest say nothing. */
+function resultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return (content as Block[])
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n");
+}
+
+/**
+ * The tool calls and results of a transcript line, main chain only: each
+ * call's input (a command as it was run, else its JSON) with the tool's
+ * name, and each result's text, cut to their first and last 2 KB.
+ */
+export function toolFactsOf(line: string): ToolText[] | undefined {
+  let entry: unknown;
+  try {
+    entry = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const e = entry as Record<string, unknown>;
+  if ((e.type !== "user" && e.type !== "assistant") || e.isSidechain === true) return undefined;
+  const content = (e.message as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(content)) return undefined;
+  const parsed = typeof e.timestamp === "string" ? Date.parse(e.timestamp) : NaN;
+  const at = Number.isFinite(parsed) ? parsed : undefined;
+  const out: ToolText[] = [];
+  for (const block of content as { type?: unknown; name?: unknown; input?: unknown; content?: unknown }[]) {
+    if (e.type === "assistant" && block?.type === "tool_use" && typeof block.name === "string") {
+      const text = toolText(inputText(block.name, block.input));
+      if (text) out.push({ name: block.name, text, ...(at !== undefined ? { at } : {}) });
+    } else if (e.type === "user" && block?.type === "tool_result") {
+      const text = toolText(resultText(block.content));
+      if (text) out.push({ text, ...(at !== undefined ? { at } : {}) });
+    }
+  }
+  return out.length ? out : undefined;
+}
+
+/** A line that can hold a tool call or a tool result, on its bytes. */
+function mayHoldTools(line: Buffer): boolean {
+  return line.includes(TOOL_USE) || line.includes(TOOL_RESULT);
+}
+
 /** How the search reads a transcript. */
-export const TRANSCRIPT_LINES: LineReader = { name: "claude-transcript", mayHold: mayHoldFacts, facts: factsOf };
+export const TRANSCRIPT_LINES: LineReader = { name: "claude-transcript", mayHold: mayHoldFacts, facts: factsOf, tools: { mayHold: mayHoldTools, facts: toolFactsOf } };

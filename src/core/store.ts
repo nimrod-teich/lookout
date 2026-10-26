@@ -36,6 +36,8 @@ export interface FileProgress {
   messages: number;
   /** The build of the reading code that read it. */
   build: string;
+  /** It was read with its tool calls and their results. */
+  tools: boolean;
 }
 
 /** What a sweep of the transcripts found. */
@@ -95,7 +97,28 @@ CREATE TABLE IF NOT EXISTS sessions (
   purged_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS sessions_file ON sessions(file);
+CREATE TABLE IF NOT EXISTS tools (
+  file TEXT NOT NULL,
+  near INTEGER NOT NULL,
+  at INTEGER,
+  name TEXT,
+  text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tools_file ON tools(file);
+CREATE VIRTUAL TABLE IF NOT EXISTS tools_fts USING fts5(text, file UNINDEXED, content='tools', content_rowid='rowid', tokenize='unicode61 remove_diacritics 2');
+CREATE TRIGGER IF NOT EXISTS tools_ai AFTER INSERT ON tools BEGIN
+  INSERT INTO tools_fts(rowid, text, file) VALUES (new.rowid, new.text, new.file);
+END;
+CREATE TRIGGER IF NOT EXISTS tools_ad AFTER DELETE ON tools BEGIN
+  INSERT INTO tools_fts(tools_fts, rowid, text, file) VALUES ('delete', old.rowid, old.text, old.file);
+END;
 `;
+
+/** Brings a database an earlier build made up to this one: the column that says a file was read with its tool output. */
+function migrate(db: Database): void {
+  const columns = db.prepare("PRAGMA table_info(files)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "tools")) db.exec("ALTER TABLE files ADD COLUMN tools INTEGER NOT NULL DEFAULT 0");
+}
 
 /** A path as the store keeps it: lowercased, with forward slashes. */
 function pathKey(p: string): string {
@@ -142,6 +165,7 @@ export class ConversationStore {
       db.exec("PRAGMA busy_timeout = 5000");
       retrying(() => db.exec("PRAGMA journal_mode = WAL"));
       retrying(() => db.exec(SCHEMA));
+      retrying(() => migrate(db));
       return new ConversationStore(db, file);
     } catch {
       return undefined;
@@ -155,8 +179,8 @@ export class ConversationStore {
 
   /** How far a conversation file was read, when it was. */
   progress(file: string): FileProgress | undefined {
-    const row = this.db.prepare("SELECT identity, end, tail, messages, build FROM files WHERE file = ?").get(file) as { identity: string; end: number; tail: string | null; messages: number; build: string } | undefined;
-    return row ? { identity: row.identity, end: row.end, tail: row.tail ?? undefined, messages: row.messages, build: row.build } : undefined;
+    const row = this.db.prepare("SELECT identity, end, tail, messages, build, tools FROM files WHERE file = ?").get(file) as { identity: string; end: number; tail: string | null; messages: number; build: string; tools: number } | undefined;
+    return row ? { identity: row.identity, end: row.end, tail: row.tail ?? undefined, messages: row.messages, build: row.build, tools: row.tools === 1 } : undefined;
   }
 
   /**
@@ -166,9 +190,10 @@ export class ConversationStore {
    * it; one the store is already past adds nothing, and one that would
    * leave a hole is refused. One transaction: a reader meanwhile sees the
    * file before or after. True when the store holds the file to the scan's
-   * end.
+   * end. With `tools`, the read took the file's tool calls and results,
+   * which go in beside the messages.
    */
-  record(job: Pick<Scan, "file" | "reader" | "from">, scanned: Scanned, build: string): boolean {
+  record(job: Pick<Scan, "file" | "reader" | "from">, scanned: Scanned, build: string, tools = false): boolean {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const before = this.progress(job.file);
@@ -176,6 +201,7 @@ export class ConversationStore {
       if (scanned.reset) {
         this.db.prepare("DELETE FROM messages WHERE file = ?").run(job.file);
         this.db.prepare("DELETE FROM paths WHERE file = ?").run(job.file);
+        this.db.prepare("DELETE FROM tools WHERE file = ?").run(job.file);
         count = 0;
       } else {
         if (!before || before.build !== build || before.identity !== scanned.identity) {
@@ -191,16 +217,19 @@ export class ConversationStore {
       }
       const message = this.db.prepare("INSERT OR IGNORE INTO messages(file, idx, role, at, text) VALUES (?, ?, ?, ?, ?)");
       const path = this.db.prepare("INSERT OR IGNORE INTO paths(file, path) VALUES (?, ?)");
+      const tool = this.db.prepare("INSERT INTO tools(file, near, at, name, text) VALUES (?, ?, ?, ?, ?)");
       for (const line of scanned.lines) {
         if (line.facts.message) {
           const m = line.facts.message;
           message.run(job.file, count++, m.role, m.at ?? null, m.text);
         }
         for (const p of line.facts.paths ?? []) path.run(job.file, pathKey(p));
+        // Beside the message it follows, for the conversation tab to open at.
+        if (tools) for (const t of line.facts.tools ?? []) tool.run(job.file, Math.max(0, count - 1), t.at ?? null, t.name ?? null, t.text);
       }
       this.db
-        .prepare("INSERT INTO files(file, reader, identity, end, tail, messages, build) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(file) DO UPDATE SET reader = excluded.reader, identity = excluded.identity, end = excluded.end, tail = excluded.tail, messages = excluded.messages, build = excluded.build")
-        .run(job.file, job.reader, scanned.identity, scanned.end, scanned.tail ?? null, count, build);
+        .prepare("INSERT INTO files(file, reader, identity, end, tail, messages, build, tools) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(file) DO UPDATE SET reader = excluded.reader, identity = excluded.identity, end = excluded.end, tail = excluded.tail, messages = excluded.messages, build = excluded.build, tools = excluded.tools")
+        .run(job.file, job.reader, scanned.identity, scanned.end, scanned.tail ?? null, count, build, tools ? 1 : 0);
       this.db.exec("COMMIT");
       return true;
     } catch (error) {
@@ -256,6 +285,9 @@ export class ConversationStore {
     };
     const messages = this.db.prepare("SELECT m.rowid AS rid, m.file AS file, m.idx AS place, m.at AS at FROM messages_fts f JOIN messages m ON m.rowid = f.rowid WHERE messages_fts MATCH ? AND m.file IN (SELECT value FROM json_each(?))").all(query, json) as { rid: number; file: string; place: number; at: number | null }[];
     for (const row of messages) take(row.rid, row.file, row.place, row.at, false);
+    // The tool calls and results kept, each at the message it follows.
+    const tools = this.db.prepare("SELECT t.rowid AS rid, t.file AS file, t.near AS place, t.at AS at FROM tools_fts f JOIN tools t ON t.rowid = f.rowid WHERE tools_fts MATCH ? AND t.file IN (SELECT value FROM json_each(?))").all(query, json) as { rid: number; file: string; place: number; at: number | null }[];
+    for (const row of tools) take(row.rid, row.file, row.place, row.at, true);
     const wanted: { message: number[]; tool: number[] } = { message: [], tool: [] };
     for (const entry of found.values()) {
       // The messages first, newest first; then the tool calls and results, newest first.
@@ -265,6 +297,7 @@ export class ConversationStore {
     }
     const texts = new Map<string, { role: string; text: string }>();
     if (wanted.message.length) for (const row of this.db.prepare("SELECT rowid AS rid, role, text FROM messages WHERE rowid IN (SELECT value FROM json_each(?))").all(JSON.stringify(wanted.message)) as { rid: number; role: string; text: string }[]) texts.set(`m${row.rid}`, row);
+    if (wanted.tool.length) for (const row of this.db.prepare("SELECT rowid AS rid, name, text FROM tools WHERE rowid IN (SELECT value FROM json_each(?))").all(JSON.stringify(wanted.tool)) as { rid: number; name: string | null; text: string }[]) texts.set(`t${row.rid}`, { role: "tool", text: row.name ? `${row.name}: ${row.text}` : row.text });
     for (const [file, entry] of found) {
       const hits: SearchHit[] = [];
       for (const hit of entry.top) {
@@ -275,6 +308,22 @@ export class ConversationStore {
       out.set(file, { count: entry.count, hits });
     }
     return out;
+  }
+
+  /** Lets go of the tool calls and results kept: of one file, or of every one; the files read with them are read without them from now on. */
+  dropTools(file?: string): void {
+    if (file === undefined) {
+      this.db.exec("DELETE FROM tools");
+      this.db.exec("UPDATE files SET tools = 0 WHERE tools <> 0");
+      return;
+    }
+    this.db.prepare("DELETE FROM tools WHERE file = ?").run(file);
+    this.db.prepare("UPDATE files SET tools = 0 WHERE file = ?").run(file);
+  }
+
+  /** How many tool calls and results the store keeps. */
+  toolCount(): number {
+    return (this.db.prepare("SELECT COUNT(*) AS n FROM tools").get() as { n: number }).n;
   }
 
   /** Of these files, those whose tool calls worked on a path containing any of the parts (lowercased, forward slashes). */
@@ -368,6 +417,8 @@ export class ConversationStore {
         out.forgotten.push(row.id);
       } else if (row.purged_at === null) {
         this.db.prepare("UPDATE sessions SET purged_at = ? WHERE id = ?").run(now, row.id);
+        // Tool output is never kept past the purge: it is where secrets end up, and the agent deleted it on purpose.
+        this.dropTools(row.file);
         out.purged.push(row.id);
       } else if (letting && row.purged_at >= letting.after && now - row.purged_at >= letting.graceMs) {
         this.forget([row.id]);
@@ -399,6 +450,7 @@ export class ConversationStore {
     if (this.db.prepare("SELECT 1 FROM sessions WHERE file = ? LIMIT 1").get(file)) return;
     this.db.prepare("DELETE FROM messages WHERE file = ?").run(file);
     this.db.prepare("DELETE FROM paths WHERE file = ?").run(file);
+    this.db.prepare("DELETE FROM tools WHERE file = ?").run(file);
     this.db.prepare("DELETE FROM files WHERE file = ?").run(file);
   }
 

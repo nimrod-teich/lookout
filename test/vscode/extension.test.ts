@@ -598,6 +598,45 @@ describe("the extension", () => {
       workspace.workspaceFolders = undefined;
     });
 
+    it("keeps the tool output in the search while the setting is on, and lets it go once it is off", async () => {
+      // HERE's transcript gains a command that failed, and its error.
+      const file = path.join(configDir, "projects", "-work-app", `${HERE}.jsonl`);
+      const at = new Date().toISOString();
+      fs.appendFileSync(
+        file,
+        [
+          { type: "assistant", timestamp: at, message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "npm run migrate -- --env staging" } }] } },
+          { type: "user", timestamp: at, message: { content: [{ type: "tool_result", tool_use_id: "t1", content: 'ERROR: relation "billing_events" does not exist' }] } },
+        ]
+          .map((entry) => JSON.stringify(entry) + "\n")
+          .join(""),
+      );
+      activate(context());
+      const { boardView, listed } = openBoard();
+      await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+      const found = () => boardView.posted.filter((m) => (m as { type: string }).type === "search").at(-1) as { results: { id: string; hits: { role: string }[] }[] };
+      const search = () => boardView.receive({ type: "search", query: "billing_events", zone: 0 });
+      // Off, the default: the error is not in the search.
+      search();
+      await settle();
+      search();
+      expect(found().results).toEqual([]);
+      // On: the conversations are read again for their tool output, and the error finds its session, as a tool match.
+      stub.config["lookout.search.toolOutput"] = true;
+      stub.configChange.fire({ affectsConfiguration: () => true });
+      await vi.waitFor(() => {
+        search();
+        expect(found().results.map((r) => [r.id, r.hits.map((h) => h.role)])).toEqual([[HERE, ["tool"]]]);
+      }, WAIT);
+      // Off again: it goes at once.
+      stub.config["lookout.search.toolOutput"] = false;
+      stub.configChange.fire({ affectsConfiguration: () => true });
+      await vi.waitFor(() => {
+        search();
+        expect(found().results).toEqual([]);
+      }, WAIT);
+    }, 60_000);
+
     it("lists this window's folders, then every project once asked, keeps the choice, and searches what it lists", async () => {
       activate(context());
       const { boardView, listed } = openBoard();
