@@ -122,20 +122,28 @@ describe.skipIf(!sqlite)("searchWithStore", () => {
   });
 });
 
+/** The stores a test opened: closed after it, before its folder goes, which Windows refuses while a file in it is open. */
+const opened: ConversationStore[] = [];
+
+/** A store the indexes keep no messages beside: they read them from it, as the controller has it. */
+function leanStore(file = path.join(tempConfigDir(), "history.sqlite")): ConversationStore {
+  const store = ConversationStore.open(file);
+  if (!store) throw new Error("no store");
+  opened.push(store);
+  readThroughStore({ scan: runScan, store: { file: store.file, build: BUILD }, messages: (f) => store.messages(f) });
+  return store;
+}
+
+/** Lets go of every store the test opened, its own and the reading thread's. */
+function closeAll(): void {
+  readThroughStore(undefined);
+  closeStores();
+  for (const store of opened.splice(0)) store.close();
+}
+
 describe.skipIf(!sqlite)("the store as the index", () => {
   beforeEach(() => readThroughStore(undefined));
-  afterEach(() => {
-    readThroughStore(undefined);
-    closeStores();
-  });
-
-  /** A store the indexes keep no messages beside: they read them from it, as the controller has it. */
-  function leanStore(): ConversationStore {
-    const store = ConversationStore.open(path.join(tempConfigDir(), "history.sqlite"));
-    if (!store) throw new Error("no store");
-    readThroughStore({ scan: runScan, store: { file: store.file, build: BUILD }, messages: (file) => store.messages(file) });
-    return store;
-  }
+  afterEach(closeAll);
 
   it("keeps no messages in an index: a read writes the store and answers with no lines, and the messages come from the store", () => {
     const store = leanStore();
@@ -208,17 +216,7 @@ describe.skipIf(!sqlite)("the store as the index", () => {
 
 describe.skipIf(!sqlite)("the store as the index, when the store fails", () => {
   beforeEach(() => readThroughStore(undefined));
-  afterEach(() => {
-    readThroughStore(undefined);
-    closeStores();
-  });
-
-  function leanStore(file = path.join(tempConfigDir(), "history.sqlite")): ConversationStore {
-    const store = ConversationStore.open(file);
-    if (!store) throw new Error("no store");
-    readThroughStore({ scan: runScan, store: { file: store.file, build: BUILD }, messages: (f) => store.messages(f) });
-    return store;
-  }
+  afterEach(closeAll);
 
   it("keeps a conversation in memory when the store refuses to write it, finds it there, and does not read it again and again", () => {
     const store = leanStore();
