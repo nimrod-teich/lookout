@@ -293,7 +293,7 @@ field.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" 
 const input = el("input", "");
 input.type = "search";
 input.placeholder = "Search the conversations";
-input.title = "Every word must appear in one message. Narrow it with since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts";
+input.title = "Every word must appear in one message, or in the session's note. Narrow it with since:3d, before:yesterday, since:2026-10-01, project:api, branch:fix-login, file:src/app.ts; has:note lists the sessions with a note";
 input.setAttribute("aria-label", "Search the conversations");
 input.spellcheck = false;
 field.append(input);
@@ -542,9 +542,12 @@ function agentOfId(id: string): string | undefined {
   return (allSessions.find((view) => view.id === id) ?? past.find((view) => view.id === id) ?? favourites.past.find((view) => view.id === id) ?? archivePast.find((view) => view.id === id))?.agent;
 }
 
-/** How much the search found, among the agents shown: those hidden in the legend are left out of the count as of the cards. */
+/** How much the search found, among the sessions the board holds and the agents shown: a session the board has no card for, and those hidden in the legend, are left out of the count as of the cards. */
 function summarise(): void {
-  const shown = results.filter((result) => agentShown(agentOfId(result.id)));
+  const shown = results.filter((result) => {
+    const agent = agentOfId(result.id);
+    return agent !== undefined && agentShown(agent);
+  });
   const matches = shown.reduce((sum, result) => sum + result.count, 0);
   const picked = `${shown.length} ${shown.length === 1 ? "session" : "sessions"}`;
   // Operators alone pick sessions without words to match.
@@ -899,7 +902,7 @@ function createCard(view: SessionView): HTMLElement {
     if (stayingFinished.delete(view.id)) render();
     vscode.postMessage({ type: card.classList.contains("typed") ? "dismiss" : "seen", id: view.id });
   });
-  actions.append(seen, parkButton(view.id), starButton(view.id));
+  actions.append(seen, parkButton(view.id), noteButton(view.id), starButton(view.id));
   // In the title row, after the time: the same place as the star on earlier cards.
   row.append(actions);
   markCard(card, row, view.agent);
@@ -927,6 +930,53 @@ function parkButton(id: string): HTMLElement {
   return button;
 }
 
+/** A page with lines: the note the user wrote on a session. */
+const NOTE_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5.5L13 6v7a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 2.5V6H13M6 8.6h4M6 11h2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+
+/** The button on a card's title row that writes a note on the session, or changes the one it has; lit while there is one. */
+function noteButton(id: string): HTMLElement {
+  const button = el("span", "note-btn");
+  button.setAttribute("role", "button");
+  button.innerHTML = NOTE_ICON;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "note", id });
+  });
+  return button;
+}
+
+function setNoteButton(card: HTMLElement, note: string | undefined): void {
+  const button = card.querySelector<HTMLElement>(".note-btn");
+  if (!button) return;
+  button.classList.toggle("on", note !== undefined);
+  const title = note === undefined ? "Add a note: a line to remember the session by" : `Note: ${note}\nClick to change it`;
+  if (button.title !== title) button.title = title;
+  button.setAttribute("aria-label", note === undefined ? "Add a note" : "Change the note");
+}
+
+/** Under the title row of a card that is not running: the note on the session, one line; a click changes it. */
+function noteLine(id: string): HTMLElement {
+  const line = el("span", "note-line hidden");
+  line.setAttribute("role", "button");
+  line.innerHTML = NOTE_ICON;
+  line.append(el("span", "note-text"));
+  line.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "note", id });
+  });
+  return line;
+}
+
+function setNoteLine(card: HTMLElement, note: string | undefined): void {
+  const line = card.querySelector<HTMLElement>(".note-line");
+  if (!line) return;
+  line.classList.toggle("hidden", note === undefined);
+  const text = line.querySelector(".note-text")!;
+  if (text.textContent !== (note ?? "")) text.textContent = note ?? "";
+  line.title = note === undefined ? "" : `${note}\nClick to change the note`;
+}
+
 /**
  * What VS Code's context menu offers on a card: the extension's card
  * commands, each shown when it applies, named in words.
@@ -942,6 +992,7 @@ function setMenu(card: HTMLElement, view: SessionView): void {
     lookoutStarred: favourites.ids.includes(view.id),
     lookoutResting: view.state === "idle" || view.state === "done",
     lookoutParked: view.parked === true,
+    lookoutNoted: view.note !== undefined,
   });
   if (card.dataset.vscodeContext !== context) card.dataset.vscodeContext = context;
 }
@@ -965,6 +1016,7 @@ function cardTitle(view: SessionView): string {
   if (quiet !== undefined) lines.push(`Nothing written to its transcript for ${formatElapsed(quiet)}.`);
   const evidence = describeEvidence(view.evidence, now());
   if (evidence) lines.push(evidence);
+  if (view.note !== undefined) lines.push(`Note: ${view.note}`);
   return lines.join("\n");
 }
 
@@ -1006,6 +1058,8 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = elapsedText(view);
   setStar(card, view.id);
+  // On a running card the note is in the hover only: the board stays quiet.
+  setNoteButton(card, view.note);
   const line = card.querySelector(".line")!;
   const second = cardLine(view, now());
   line.querySelector(".mark")!.textContent = MARKS[view.state];
@@ -1087,13 +1141,15 @@ function renderHits(hitsEl: Element, result: SearchResult | undefined): void {
   const id = (hitsEl.closest(".card") as HTMLElement).dataset.id!;
   for (const hit of result.hits) {
     const line = el("span", `hit ${hit.role}`);
-    line.title = "Open the conversation here, in a tab";
+    // The session's note is no message: a click changes it rather than opening the conversation.
+    line.title = hit.role === "note" ? "The note on this session; click to change it" : "Open the conversation here, in a tab";
     line.setAttribute("role", "button");
     line.addEventListener("click", (event) => {
       event.stopPropagation();
-      vscode.postMessage({ type: "openHit", query, id, index: hit.index });
+      if (hit.role === "note") vscode.postMessage({ type: "note", id });
+      else vscode.postMessage({ type: "openHit", query, id, index: hit.index });
     });
-    line.append(el("i", "who", hit.role === "you" ? "you" : "agent"));
+    line.append(el("i", "who", hit.role));
     const text = el("span", "snippet");
     let at = 0;
     for (const [start, end] of hit.ranges) {
@@ -1144,10 +1200,10 @@ function createPastCard(view: PastView, archived = false): HTMLElement {
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  row.append(el("span", "title"), el("span", "elapsed"));
+  row.append(el("span", "title"), el("span", "elapsed"), noteButton(view.id));
   if (!archived) row.append(starButton(view.id));
   row.append(archiveButton(view.id, archived));
-  main.append(row, el("span", "chips"), el("span", "hits hidden"));
+  main.append(row, noteLine(view.id), el("span", "chips"), el("span", "hits hidden"));
   card.append(main);
   markCard(card, row, view.agent);
   card.addEventListener("click", () => {
@@ -1183,12 +1239,16 @@ function updatePastCard(card: HTMLElement, view: PastView): void {
   card.querySelector(".title")!.textContent = view.title;
   card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   setStar(card, view.id);
+  setNoteButton(card, view.note);
+  // While a search shows the note among the matches, the line under the title would say it twice.
+  const result = query === "" ? undefined : hits.get(view.id);
+  setNoteLine(card, result?.hits.some((hit) => hit.role === "note") ? undefined : view.note);
   const chipsEl = card.querySelector(".chips")!;
   const values: Chip[] = [{ text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
   if (view.branch) values.push(branchChip(view.branch));
   while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
   values.forEach((value, i) => setChip((chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"))) as HTMLElement, value));
-  renderHits(card.querySelector(".hits")!, query === "" ? undefined : hits.get(view.id));
+  renderHits(card.querySelector(".hits")!, result);
 }
 
 /** A starred session as the board has it now: running, or not. */
@@ -1207,8 +1267,8 @@ function createFavouriteCard(id: string, agent: string): HTMLElement {
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  row.append(el("span", "title"), el("span", "elapsed"), starButton(id));
-  main.append(row, el("span", "chips"));
+  row.append(el("span", "title"), el("span", "elapsed"), noteButton(id), starButton(id));
+  main.append(row, noteLine(id), el("span", "chips"));
   card.append(main);
   markCard(card, row, agent);
   card.addEventListener("click", () => {
@@ -1235,6 +1295,9 @@ function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, v
   card.querySelector(".title")!.textContent = shown.title;
   card.querySelector(".elapsed")!.textContent = live ? `${stateTitle(live)}${elapsedText(live) ? ` · ${elapsedText(live)}` : ""}` : pastElapsed(view!);
   setStar(card, shown.id);
+  setNoteButton(card, shown.note);
+  // A running favourite keeps its note in the hover, like any running card.
+  setNoteLine(card, live ? undefined : shown.note);
   const values: Chip[] = [{ text: shown.worktree ? `${shown.project} · ${shown.worktree}` : shown.project }];
   if (shown.branch) values.push(branchChip(shown.branch));
   const chipsEl = card.querySelector(".chips")!;
@@ -1481,7 +1544,7 @@ function render(): void {
     groupsEl.clear();
     cards.clear();
     const empty = el("div", "nothing");
-    if (query !== "") empty.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message; since:, before:, project:, branch: and file: narrow the search. Esc clears it."));
+    if (query !== "") empty.append(el("p", "big", search.classList.contains("searching") ? "Searching…" : "No conversation mentions that"), el("p", "small", "Every word must appear in one message, or in a session's note; since:, before:, project:, branch:, file: and has:note narrow the search. Esc clears it."));
     else if (watching === 0) {
       const open = el("button", "link", "Turn one on in the settings");
       open.addEventListener("click", () => vscode.postMessage({ type: "openAgentSettings" }));

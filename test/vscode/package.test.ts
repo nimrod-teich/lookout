@@ -33,7 +33,19 @@ describe("the card menu", () => {
 
   it("offers every card command on the board's cards only, and none in the Command Palette", () => {
     expect(cardCommands.map((c) => c.command).sort()).toEqual(
-      ["lookout.card.conversation", "lookout.card.jump", "lookout.card.park", "lookout.card.rename", "lookout.card.seen", "lookout.card.star", "lookout.card.unpark", "lookout.card.unstar"].sort(),
+      [
+        "lookout.card.addNote",
+        "lookout.card.conversation",
+        "lookout.card.editNote",
+        "lookout.card.jump",
+        "lookout.card.park",
+        "lookout.card.removeNote",
+        "lookout.card.rename",
+        "lookout.card.seen",
+        "lookout.card.star",
+        "lookout.card.unpark",
+        "lookout.card.unstar",
+      ].sort(),
     );
     const menu = pkg.contributes.menus["webview/context"] ?? [];
     for (const { command } of cardCommands) {

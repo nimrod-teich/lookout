@@ -22,22 +22,31 @@
   // words, with them planted in a snippet; operators alone list what they pick, without matches.
   const fakeSearch = (query, sessions) => {
     const words = query.trim().split(/\s+/).filter(Boolean);
-    const ops = words.filter((w) => /^(since|before|project|branch|file):./i.test(w));
+    const ops = words.filter((w) => /^(since|before|project|branch|file|has):./i.test(w));
     const text = words.filter((w) => !ops.includes(w)).join(" ");
     const picked = sessions.filter((s) => ops.every((op) => {
       const key = op.slice(0, op.indexOf(":")).toLowerCase();
       const value = op.slice(op.indexOf(":") + 1).toLowerCase();
       if (key === "project") return `${s.project} ${s.worktree ?? ""}`.toLowerCase().includes(value);
       if (key === "branch") return (s.branch ?? "").toLowerCase().includes(value);
+      if (key === "has") return value !== "note" || s.note !== undefined;
       return true;
     }));
-    if (text === "") return picked.map((s) => ({ id: s.id, count: 0, hits: [] }));
-    return picked.filter((s, i) => i % 2 === 0).map((s, i) => {
-      const you = `…can we retry the ${text} when Stripe answers 500, and keep the invoice ids? The ${s.project} handler drops them today…`;
-      const agent = `…the ${text} handler now retries three times with backoff and logs the event id; the ${s.project} tests cover the 500 and the timeout…`;
-      const mark = (line) => { const at = line.toLowerCase().indexOf(text.toLowerCase()); return at < 0 ? [] : [[at, at + text.length]]; };
-      return { id: s.id, count: 2 + i * 3, hits: [{ role: "you", snippet: you, ranges: mark(you) }, { role: "agent", snippet: agent, ranges: mark(agent) }] };
-    });
+    const mark = (line) => { const at = line.toLowerCase().indexOf(text.toLowerCase()); return at < 0 ? [] : [[at, at + text.length]]; };
+    // A session's note is one more line of its conversation: shown with operators alone, matched by the words, first among the matches.
+    const inNote = (s) => (s.note ?? "").toLowerCase().includes(text.toLowerCase());
+    const noteHit = (s) => (s.note ? [{ role: "note", snippet: s.note, ranges: mark(s.note) }] : []);
+    if (text === "") return picked.map((s) => ({ id: s.id, count: 0, hits: noteHit(s) }));
+    return picked
+      .map((s, i) => ({ s, i }))
+      .filter(({ s, i }) => i % 2 === 0 || inNote(s))
+      .map(({ s, i }) => {
+        const you = `…can we retry the ${text} when Stripe answers 500, and keep the invoice ids? The ${s.project} handler drops them today…`;
+        const agent = `…the ${text} handler now retries three times with backoff and logs the event id; the ${s.project} tests cover the 500 and the timeout…`;
+        const messages = i % 2 === 0 ? [{ role: "you", snippet: you, ranges: mark(you) }, { role: "agent", snippet: agent, ranges: mark(agent) }] : [];
+        const note = inNote(s) ? noteHit(s) : [];
+        return { id: s.id, count: (i % 2 === 0 ? 2 + i * 3 : 0) + note.length, hits: [...note, ...messages] };
+      });
   };
   /** Posts the fixture; the scope "folders" lists only the past sessions the agent resumes here. */
   let post = () => {};

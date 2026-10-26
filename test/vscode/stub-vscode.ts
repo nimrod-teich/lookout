@@ -49,6 +49,8 @@ export const stub = {
   focused: true,
   /** Picks an item from the open quick pick; undefined dismisses it. */
   quickPick: undefined as ((items: readonly unknown[]) => unknown) | undefined,
+  /** Answers the input box with the text typed; undefined dismisses it. */
+  inputBox: undefined as ((options: unknown) => string | undefined) | undefined,
   /** The quick pick that is open, if any. */
   openPicker: undefined as StubQuickPick | undefined,
   webviewProviders: new Map<string, unknown>(),
@@ -80,6 +82,7 @@ export const stub = {
     this.activeTextEditor = undefined;
     this.focused = true;
     this.quickPick = undefined;
+    this.inputBox = undefined;
     this.openPicker = undefined;
     this.webviewProviders.clear();
     this.panels = [];
@@ -349,6 +352,11 @@ export const window = {
   showQuickPick: async (items: readonly unknown[] | Promise<readonly unknown[]>) => {
     stub.ops.push(["quickPick", "menu"]);
     return stub.quickPick?.(await items);
+  },
+  /** An input box: answered by `stub.inputBox`, or dismissed without one; what it was asked is an op. */
+  showInputBox: async (options: unknown) => {
+    stub.ops.push(["inputBox", "show", options]);
+    return stub.inputBox?.(options);
   },
   tabGroups: {
     get all() {

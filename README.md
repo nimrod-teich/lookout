@@ -36,6 +36,7 @@ Running several AI coding agents at once means clicking through tabs and termina
 - **Notify.** A notification with a Jump button when a session starts to wait for you, saying why, and optionally when one finishes. While VS Code is not in front, the same notification shows on your desktop, with a sound if you want one.
 - **Search.** A box above the cards looks through every conversation, live and earlier, for the words you remember, with `since:`, `before:`, `project:`, `branch:` and `file:` to narrow it. A search page gives the matches room to read, and a conversation tab shows any session whole, scrolled to the match.
 - **Earlier, favourites and archive.** Under the live sessions, the ones that are not running, of this window's folders or of every project on the machine, 20 to a page; a click resumes one. A star keeps a session at the top of the board; an archive button puts one away, and a running session you are done with can be parked, out of the way until it works again.
+- **Notes.** One line on any session, running or not, to remember it by: why it is starred, what it holds, what came of it. Kept for the machine, shown on the card, found by the search, and `has:note` lists them all.
 - **Usage.** Every limit of the account, named as the agent's own panel names it, on the board and in the status bar: the 5-hour window as a coloured bar with the time to its reset. Lookout says so once per window when the 5-hour window reaches 70% and 90%, and the week 90%.
 - **No setup.** Lookout reads the state the agents already record on disk. It installs no hooks, reads no credentials, and sends nothing off the machine.
 
@@ -92,6 +93,7 @@ On SSH and container remotes Lookout runs on the remote machine, where none of y
 | `Lookout: Show Sessions` | | Opens the board. Clicking the status bar item runs it too. |
 | `Lookout: Refresh Usage` | | Has Claude Code fetch the account's usage again. |
 | `Lookout: Search All Sessions` | | Opens the search page: every conversation's matches in an editor tab. |
+| `Lookout: Show Session Notes` | | Opens the search page on every session with a note. |
 
 Every setting, with its default, is in [Settings](docs/settings.md).
 

@@ -8,6 +8,7 @@ import { nextAttention } from "./core/model";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
 import { GROUPINGS, readGroupBy, type GroupBy } from "./core/grouping";
+import { NOTE_MAX } from "./core/sessionRecords";
 import { readSort, SORTS, type SessionSort } from "./core/sorting";
 import type { SessionView } from "./core/types";
 import { pickBar } from "./core/usageGroups";
@@ -37,6 +38,7 @@ const REFRESH_USAGE = "lookout.refreshUsage";
 const SEARCH = "lookout.search";
 const SORT = "lookout.sortSessions";
 const GROUP = "lookout.groupSessions";
+const SHOW_NOTES = "lookout.showNotes";
 /** How the board makes its sections; kept for every window. */
 const GROUP_KEY = "lookout.group";
 /** How the board orders the sessions in each group, and the user's own order; kept for every window. */
@@ -72,6 +74,7 @@ export function activate(context: vscode.ExtensionContext): void {
       restoredTabs: () => ({ labels: claudeTabLabels(), label: claudeTabLabel }),
       readerScript: fs.existsSync(readerScript) ? readerScript : undefined,
       savedPositionsDir: path.join(context.globalStorageUri.fsPath, "search-positions"),
+      recordsDir: path.join(context.globalStorageUri.fsPath, "sessions"),
     },
     terminals,
     log,
@@ -173,6 +176,21 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     if (!(await panelAdapter(view.agent)?.resume(id, log, view))) void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}".`);
   };
+  /** Asks for the note on a session in VS Code's input box and keeps it; an empty box takes the note away. */
+  const editNote = async (id: string) => {
+    const title = controller.titleOf(id) ?? id;
+    const current = controller.noteOf(id);
+    const text = await vscode.window.showInputBox({
+      title: `Note on "${title}"`,
+      value: current ?? "",
+      prompt: current === undefined ? "One line to remember the session by. Lookout keeps it for the machine, with the session's title and project." : "Change the note, or empty the box to take it away.",
+      placeHolder: "Why it matters, what it holds, what came of it",
+      ignoreFocusOut: true,
+      validateInput: (value) => (value.trim().length > NOTE_MAX ? `A note is at most ${NOTE_MAX} characters` : undefined),
+    });
+    if (text === undefined) return;
+    if (!controller.setNote(id, text)) void vscode.window.showWarningMessage(`Lookout could not keep a note on "${title}".`);
+  };
   const findings = new Findings(context.extensionUri, {
     titleOf: (id) => controller.titleOf(id) ?? id,
     agentOf,
@@ -205,6 +223,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return times.length ? { started: Math.min(...times), lastActive: Math.max(...times) } : {};
     },
     open: openHit,
+    editNote: (id) => void editNote(id),
     follows: () => controller.follows,
   });
   /**
@@ -245,6 +264,7 @@ export function activate(context: vscode.ExtensionContext): void {
     setGroup,
     orderFavourites: (ids) => controller.orderFavourites(ids),
     toggleArchive: (id) => controller.toggleArchive(id),
+    editNote: (id) => void editNote(id),
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
     usageBar: () => pickBar(controller.usageGroups, config.usageAgent)?.group.agent,
@@ -355,6 +375,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(MARK_ALL_SEEN, markAllSeen),
     vscode.commands.registerCommand(SHOW_BOARD, () => vscode.commands.executeCommand(`${BOARD_VIEW}.focus`)),
     vscode.commands.registerCommand(SEARCH, () => searchPage.show("")),
+    // Every session with a note, on the search page: the notes first among each one's matches.
+    vscode.commands.registerCommand(SHOW_NOTES, () => searchPage.show("has:note")),
     // The card's context menu: the same acts as its buttons, named in words.
     ...cardCommands({
       "lookout.card.jump": (view) => jump(view),
@@ -367,6 +389,9 @@ export function activate(context: vscode.ExtensionContext): void {
       "lookout.card.unstar": (view) => controller.toggleFavourite(view.id),
       "lookout.card.park": (view) => controller.togglePark(view.id),
       "lookout.card.unpark": (view) => controller.togglePark(view.id),
+      "lookout.card.addNote": (view) => editNote(view.id),
+      "lookout.card.editNote": (view) => editNote(view.id),
+      "lookout.card.removeNote": (view) => controller.setNote(view.id, undefined),
     }),
     vscode.commands.registerCommand(SORT, async () => {
       const current = sort();

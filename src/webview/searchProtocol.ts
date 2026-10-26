@@ -33,4 +33,6 @@ export type FromSearch =
   /** `zone`: the page's time zone, minutes behind UTC, for the days the query names. */
   | { type: "search"; query: string; zone?: number }
   /** Open a session's conversation in the conversation tab, at a message or at its newest match. */
-  | { type: "open"; query: string; id: string; index?: number };
+  | { type: "open"; query: string; id: string; index?: number }
+  /** Change the note on a session: a click on the note among its matches. */
+  | { type: "note"; id: string };

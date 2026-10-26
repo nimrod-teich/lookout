@@ -24,6 +24,8 @@ export interface SearchPageActions {
   isLive(id: string): boolean;
   /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
   open(query: string, id: string, index?: number): void;
+  /** Asks for the user's note on a session, and keeps it: a click on a note among the matches. */
+  editNote?(id: string): void;
   /** A search's results fill in as the conversations are read in the background: they are sent again as they do. */
   follows?(): boolean;
 }
@@ -121,6 +123,9 @@ export class SearchPage implements vscode.Disposable {
       case "open":
         if (typeof message.id !== "string" || typeof message.query !== "string") return;
         this.actions.open(message.query, message.id, typeof message.index === "number" ? message.index : undefined);
+        return;
+      case "note":
+        if (typeof message.id === "string") this.actions.editNote?.(message.id);
         return;
     }
   }

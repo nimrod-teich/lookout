@@ -27,6 +27,8 @@ export interface BoardActions {
   toggleArchive?(id: string): void;
   /** Parks a running session whose turn is over, or brings a parked one back. */
   togglePark?(id: string): void;
+  /** Asks for the user's note on a session, and keeps it. */
+  editNote?(id: string): void;
   /** How the sessions are ordered inside each group. */
   sort?(): SessionSort;
   /** The user dragged a card: their own order, which the board now follows. */
@@ -231,6 +233,14 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         // Only a running session the board was shown.
         const view = this.actions.sessions().find((s) => s.id === message.id);
         if (view) this.actions.togglePark?.(view.id);
+        return;
+      }
+      case "note": {
+        // Only a session the board was shown, running or not.
+        const id = message.id;
+        if (typeof id !== "string") return;
+        const known = this.actions.sessions().some((v) => v.id === id) || [...this.actions.past(), ...this.actions.favourites().past, ...(this.actions.archive?.().past ?? [])].some((p) => p.id === id);
+        if (known) this.actions.editNote?.(id);
         return;
       }
       case "earlierScope":

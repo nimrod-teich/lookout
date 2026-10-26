@@ -11,6 +11,8 @@
   --lamp: #ffb000;
   --ink: var(--vscode-foreground);
   --muted: var(--vscode-descriptionForeground);
+  /* The user's notes: a colour of their own, apart from the states'. */
+  --note: var(--vscode-charts-purple, #b180d7);
 }
 
 body.vscode-light,
@@ -700,6 +702,14 @@ body.vscode-reduce-motion .hover-card {
 
 .hit.agent .who {
   color: var(--working);
+}
+
+.hit.note .who {
+  color: var(--note);
+}
+
+.hit.note .snippet {
+  font-style: italic;
 }
 
 .hit .snippet {
@@ -1481,6 +1491,79 @@ body.vscode-reduce-motion .hover-card {
 .action.park svg {
   width: 12px;
   height: 12px;
+}
+
+/* The note button on a card's title row: shown on hover like the star, lit while the session has a note. */
+.note-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  margin-left: 2px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 120ms ease;
+  /* Lifted like the parking sign, so its ink centres with the check's and the star's. */
+  position: relative;
+  top: -0.12em;
+}
+
+.note-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.card:hover .note-btn,
+.card:focus-within .note-btn,
+.note-btn.on {
+  opacity: 1;
+}
+
+.note-btn.on {
+  color: var(--note);
+}
+
+.note-btn:hover {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--note);
+}
+
+/* The note on a session that is not running, under its title row: one line; a click changes it. */
+.note-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: calc(var(--vscode-font-size) - 1px);
+  font-style: italic;
+  cursor: pointer;
+}
+
+.note-line.hidden {
+  display: none;
+}
+
+.note-line svg {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  color: var(--note);
+}
+
+.note-line .note-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-line:hover .note-text {
+  color: var(--ink);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 
 /* Dragging a card into another place in its group: a line where it goes. */

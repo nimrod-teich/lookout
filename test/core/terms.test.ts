@@ -86,3 +86,14 @@ describe("termsOf", () => {
     expect(termsOf("webhook since:3d branch:main")).toEqual(["webhook"]);
   });
 });
+
+describe("has:note", () => {
+  it("asks for the sessions with a note, counts as a filter, and leaves any other has: a plain word", () => {
+    expect(parseQuery("has:note retag", NOW)).toEqual({ terms: ["retag"], projects: [], branches: [], files: [], hasNote: true });
+    expect(parseQuery("HAS:Note", NOW)).toMatchObject({ terms: [], hasNote: true });
+    expect(hasFilters(parseQuery("has:note", NOW))).toBe(true);
+    expect(parseQuery("has:star", NOW)).toEqual({ terms: ["has:star"], projects: [], branches: [], files: [] });
+    expect(hasFilters(parseQuery("has:star", NOW))).toBe(false);
+    expect(termsOf("has:note cache")).toEqual(["cache"]);
+  });
+});

@@ -83,6 +83,12 @@
         "icon": "$(search)"
       },
       {
+        "command": "lookout.showNotes",
+        "title": "Show Session Notes",
+        "category": "Lookout",
+        "icon": "$(note)"
+      },
+      {
         "command": "lookout.sortSessions",
         "title": "Sort Sessions",
         "category": "Lookout"
@@ -131,6 +137,21 @@
         "command": "lookout.card.unpark",
         "title": "Bring Back from Parked",
         "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.addNote",
+        "title": "Add Note…",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.editNote",
+        "title": "Change Note…",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.removeNote",
+        "title": "Remove Note",
+        "category": "Lookout"
       }
     ],
     "menus": {
@@ -138,7 +159,12 @@
         {
           "command": "lookout.search",
           "when": "view == lookout.board",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "lookout.showNotes",
+          "when": "view == lookout.board",
+          "group": "navigation@2"
         }
       ],
       "commandPalette": [
@@ -172,6 +198,18 @@
         },
         {
           "command": "lookout.card.unpark",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.addNote",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.editNote",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.removeNote",
           "when": "false"
         }
       ],
@@ -215,6 +253,21 @@
           "command": "lookout.card.unpark",
           "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutParked",
           "group": "3_mark@3"
+        },
+        {
+          "command": "lookout.card.addNote",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && !lookoutNoted",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "lookout.card.editNote",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutNoted",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "lookout.card.removeNote",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutNoted",
+          "group": "2_edit@3"
         }
       ]
     },
