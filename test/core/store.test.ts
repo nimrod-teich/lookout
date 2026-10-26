@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TRANSCRIPT_LINES } from "../../src/core/agents/claude/history";
 import { closeStores, runScan } from "../../src/core/agents/lineReaders";
-import { scanFile } from "../../src/core/history";
+import { HistoryIndex, readThroughStore, scanFile, type Scan } from "../../src/core/history";
 import { loadSqlite } from "../../src/core/sqlite";
 import { ConversationStore, ftsQuery } from "../../src/core/store";
 import { parseQuery } from "../../src/core/terms";
@@ -35,7 +35,7 @@ function openStore(): ConversationStore {
 /** Reads a file whole into the store, as the reading thread does. */
 function readInto(store: ConversationStore, file: string): void {
   const scanned = scanFile(file, TRANSCRIPT_LINES, 0, "")!;
-  store.record({ file, reader: TRANSCRIPT_LINES.name! }, scanned, BUILD);
+  store.record({ file, reader: TRANSCRIPT_LINES.name!, from: 0 }, scanned, BUILD);
 }
 
 describe("ftsQuery", () => {
@@ -91,20 +91,89 @@ describe.skipIf(!sqlite)("ConversationStore", () => {
     appendEntries(file, [{ type: "assistant", message: { content: [{ type: "text", text: "Here it is." }] } }]);
     const more = scanFile(file, TRANSCRIPT_LINES, held.end, held.identity)!;
     expect(more.reset).toBe(false);
-    store.record({ file, reader: TRANSCRIPT_LINES.name! }, more, BUILD);
+    expect(store.record({ file, reader: TRANSCRIPT_LINES.name!, from: held.end }, more, BUILD)).toBe(true);
     expect(store.messages(file)!.map((m) => m.text).at(-1)).toBe("Here it is.");
     expect(store.progress(file)!.messages).toBe(4);
-    // Another build read it: its rows replace the old ones.
-    store.record({ file, reader: TRANSCRIPT_LINES.name! }, scanFile(file, TRANSCRIPT_LINES, 0, "")!, "build-2");
-    expect(store.progress(file)).toMatchObject({ messages: 4, build: "build-2" });
+    // The same increment from another window: the store is past it already, and nothing is stored twice.
+    expect(store.record({ file, reader: TRANSCRIPT_LINES.name!, from: held.end }, more, BUILD)).toBe(true);
     expect(store.messages(file)).toHaveLength(4);
+    // An increment that starts before where the store stopped and reaches past it would leave a hole: refused, and so is one by another build.
+    appendEntries(file, [{ type: "user", message: { content: "One more" } }]);
+    const stopped = store.progress(file)!.end;
+    const behind = scanFile(file, TRANSCRIPT_LINES, held.end, held.identity)!;
+    expect(behind.reset).toBe(false);
+    expect(store.record({ file, reader: TRANSCRIPT_LINES.name!, from: held.end }, behind, BUILD)).toBe(false);
+    const proper = scanFile(file, TRANSCRIPT_LINES, stopped, held.identity)!;
+    expect(store.record({ file, reader: TRANSCRIPT_LINES.name!, from: stopped }, proper, "build-2")).toBe(false);
+    expect(store.progress(file)).toMatchObject({ messages: 4, build: BUILD, end: stopped });
+    expect(store.record({ file, reader: TRANSCRIPT_LINES.name!, from: stopped }, proper, BUILD)).toBe(true);
+    expect(store.messages(file)).toHaveLength(5);
+    // Another build read it whole: its rows replace the old ones.
+    const second = scanFile(file, TRANSCRIPT_LINES, 0, "")!;
+    expect(store.record({ file, reader: TRANSCRIPT_LINES.name!, from: 0 }, second, "build-2")).toBe(true);
+    expect(store.progress(file)).toMatchObject({ messages: 5, build: "build-2" });
+    expect(store.messages(file)).toHaveLength(5);
     // Replaced: read anew.
     fs.writeFileSync(file, JSON.stringify({ type: "user", message: { content: "Fresh start" } }) + "\n");
     const fresh = scanFile(file, TRANSCRIPT_LINES, held.end, held.identity)!;
     expect(fresh.reset).toBe(true);
-    store.record({ file, reader: TRANSCRIPT_LINES.name! }, fresh, "build-2");
+    store.record({ file, reader: TRANSCRIPT_LINES.name!, from: 0 }, fresh, "build-2");
     expect(store.messages(file)!.map((m) => m.text)).toEqual(["Fresh start"]);
     expect(store.touched([file], ["billing"])).toEqual(new Set());
+    store.close();
+  });
+
+  it("stores a line once, whatever windows read the file, each from its own place", () => {
+    const store = openStore();
+    const file = transcript();
+    const into = { file: store.file, build: BUILD };
+    // Two windows, each with an index of its own, read the file whole.
+    const a = new HistoryIndex(file, TRANSCRIPT_LINES);
+    const b = new HistoryIndex(file, TRANSCRIPT_LINES);
+    const read = (index: HistoryIndex) => {
+      const job = { ...index.scan()!, store: into };
+      const scanned = runScan(job)!;
+      index.apply(scanned, job);
+      return scanned;
+    };
+    read(a);
+    read(b);
+    expect(store.messages(file)).toHaveLength(3);
+    expect(a.messages).toHaveLength(3);
+    expect(b.messages).toHaveLength(3);
+    // The file gains two messages; both windows read them, in turn.
+    appendEntries(file, [
+      { type: "user", message: { content: "Fourth" } },
+      { type: "assistant", message: { content: [{ type: "text", text: "Fifth" }] } },
+    ]);
+    read(a);
+    read(b);
+    expect(store.messages(file)!.map((m) => m.text).slice(-2)).toEqual(["Fourth", "Fifth"]);
+    expect(store.messages(file)).toHaveLength(5);
+    expect(store.progress(file)!.messages).toBe(5);
+    expect(a.messages).toHaveLength(5);
+    expect(b.messages).toHaveLength(5);
+    // A window whose index got ahead of the store on its own: the store catches up without a hole, and the index gets what it asked for.
+    appendEntries(file, [{ type: "user", message: { content: "Sixth" } }]);
+    a.refresh();
+    expect(a.messages).toHaveLength(6);
+    appendEntries(file, [{ type: "user", message: { content: "Seventh" } }]);
+    read(a);
+    expect(a.messages).toHaveLength(7);
+    expect(store.messages(file)!.map((m) => m.text).slice(-2)).toEqual(["Sixth", "Seventh"]);
+    read(b);
+    expect(b.messages).toHaveLength(7);
+    expect(store.messages(file)).toHaveLength(7);
+    // An index on its own reads through the store while one is open, so the store never falls behind it.
+    readThroughStore({ scan: runScan, store: into });
+    try {
+      appendEntries(file, [{ type: "user", message: { content: "Eighth" } }]);
+      b.refresh();
+      expect(store.messages(file)).toHaveLength(8);
+      expect(b.messages).toHaveLength(8);
+    } finally {
+      readThroughStore(undefined);
+    }
     store.close();
   });
 
@@ -165,39 +234,67 @@ describe.skipIf(!sqlite)("ConversationStore", () => {
     store.rememberSession({ id: "s-b", agent: "claude-code", file: b, title: "Other", cwd: "/work/web" });
     store.rememberSession({ id: "s-c", agent: "codex", file: path.join(tempConfigDir(), "never-read.jsonl"), title: "Unread", cwd: "/w" });
     expect(store.session("s-a")).toEqual({ id: "s-a", agent: "claude-code", file: a, title: "Billing", cwd: "/work/api", branch: "main", modifiedAt: 1000 });
-    expect(store.sweep(5000, true)).toEqual({ purged: [], returned: [], forgotten: ["s-c"] });
+    // A session the store holds nothing of is forgotten, unless its transcript is kept elsewhere.
+    expect(store.sweep(4000, new Set(["s-c"]))).toEqual({ purged: ["s-c"], returned: [], forgotten: [] });
+    store.rememberSession({ id: "s-c", agent: "codex", file: path.join(tempConfigDir(), "never-read.jsonl"), title: "Unread", cwd: "/w" });
+    expect(store.sweep(5000)).toEqual({ purged: [], returned: [], forgotten: ["s-c"] });
     fs.unlinkSync(a);
-    expect(store.sweep(6000, true)).toEqual({ purged: ["s-a"], returned: [], forgotten: [] });
+    expect(store.sweep(6000)).toEqual({ purged: ["s-a"], returned: [], forgotten: [] });
     expect(store.purged().map((s) => [s.id, s.purgedAt])).toEqual([["s-a", 6000]]);
     // Its conversation is still there to read and search.
     expect(store.messages(a)).toHaveLength(3);
     expect(store.search([a], ["retag"], 3).get(a)!.count).toBe(2);
     // Seen again, as when a transcript is restored: no longer purged.
     fs.writeFileSync(a, "");
-    expect(store.sweep(7000, true)).toEqual({ purged: [], returned: ["s-a"], forgotten: [] });
+    expect(store.sweep(7000)).toEqual({ purged: [], returned: ["s-a"], forgotten: [] });
     expect(store.purged()).toEqual([]);
     fs.unlinkSync(a);
-    store.sweep(8000, true);
+    store.sweep(8000);
     // A title that changed is written down, and the purge mark cleared with it.
     store.rememberSession({ id: "s-a", agent: "claude-code", file: a, title: "Billing, again", cwd: "/work/api", branch: "main", modifiedAt: 1000 });
     expect(store.session("s-a")).toMatchObject({ title: "Billing, again" });
     expect(store.purged()).toEqual([]);
-    store.sweep(9000, true);
+    store.sweep(9000);
     expect(store.forgetPurged()).toBe(1);
     expect(store.session("s-a")).toBeUndefined();
     expect(store.messages(a)).toBeUndefined();
     expect(store.size()).toEqual({ files: 1, messages: 3 });
-    // With nothing kept, a transcript gone takes its conversation with it.
+    // With keeping off since 9500: a transcript gone is marked, then let go once the grace has passed; one purged before keeping went off stays.
+    const c = transcript("c.jsonl");
+    readInto(store, c);
+    store.rememberSession({ id: "s-c2", agent: "claude-code", file: c, title: "Older", cwd: "/w" });
+    fs.unlinkSync(c);
+    store.sweep(9200);
     fs.unlinkSync(b);
-    expect(store.sweep(10_000, false)).toEqual({ purged: [], returned: [], forgotten: ["s-b"] });
-    expect(store.size()).toEqual({ files: 0, messages: 0 });
+    const letting = { after: 9500, graceMs: 1000 };
+    expect(store.sweep(10_000, new Set(), letting)).toEqual({ purged: ["s-b"], returned: [], forgotten: [] });
+    expect(store.sweep(10_500, new Set(), letting)).toEqual({ purged: [], returned: [], forgotten: [] });
+    expect(store.sweep(11_000, new Set(), letting)).toEqual({ purged: [], returned: [], forgotten: ["s-b"] });
+    expect(store.purged().map((s) => s.id)).toEqual(["s-c2"]);
+    expect(store.size()).toEqual({ files: 1, messages: 3 });
+    store.close();
+  });
+
+  it("opens while another connection has the file open, and remembers a conversation under its new path only", () => {
+    const store = openStore();
+    const other = ConversationStore.open(store.file);
+    expect(other).toBeDefined();
+    other!.close();
+    const a = transcript("a.jsonl");
+    readInto(store, a);
+    store.rememberSession({ id: "s-a", agent: "claude-code", file: a, title: "T", cwd: "/w" });
+    const moved = transcript("moved.jsonl");
+    readInto(store, moved);
+    store.rememberSession({ id: "s-a", agent: "claude-code", file: moved, title: "T", cwd: "/w" });
+    expect(store.has(a)).toBe(false);
+    expect(store.has(moved)).toBe(true);
     store.close();
   });
 
   it("is read into by the reading code: a first read goes on from where the store stopped, when the file is still the one it read", () => {
     const store = openStore();
     const file = transcript();
-    const job = { file, reader: TRANSCRIPT_LINES.name!, from: 0, identity: "", store: { file: store.file, build: BUILD } };
+    const job: Scan = { file, reader: TRANSCRIPT_LINES.name!, from: 0, identity: "", store: { file: store.file, build: BUILD } };
     const first = runScan(job)!;
     expect(first.reset).toBe(true);
     expect(first.lines.filter((line) => line.facts.message)).toHaveLength(3);

@@ -1340,7 +1340,7 @@ function updatePastCard(card: HTMLElement, view: PastView): void {
 function favouriteOf(id: string): { live?: SessionView; past?: PastView } {
   const live = allSessions.find((view) => view.id === id);
   if (live) return { live };
-  const view = past.find((p) => p.id === id) ?? favourites.past.find((p) => p.id === id);
+  const view = past.find((p) => p.id === id) ?? favourites.past.find((p) => p.id === id) ?? purgedPast.find((p) => p.id === id);
   return view ? { past: view } : {};
 }
 

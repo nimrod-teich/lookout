@@ -829,7 +829,12 @@ describe("the extension", () => {
         stub.inputBox = () => "gone, but had the deploy steps";
         boardView.receive({ type: "note", id: HERE });
         await vi.waitFor(() => expect((purged() as { note?: string }[] | undefined)?.[0]?.note).toBe("gone, but had the deploy steps"), WAIT);
-        // Forgotten: gone from Purged and from the search; the note stays.
+        // Forgotten, after a confirmation, since the copy is the only one left: gone from Purged and from the search; the note stays.
+        stub.notificationAnswer = undefined;
+        boardView.receive({ type: "forget", id: HERE });
+        await settle();
+        expect(purged()?.map((p) => p.id)).toEqual([HERE]);
+        stub.notificationAnswer = "Forget";
         boardView.receive({ type: "forget", id: HERE });
         await vi.waitFor(() => expect(purged()).toEqual([]), WAIT);
         boardView.receive({ type: "search", query: "deploy", zone: 0 });
@@ -839,7 +844,7 @@ describe("the extension", () => {
         expect(infoMessages().at(-1)).toBe("Lookout keeps no purged conversation.");
       }, 60_000);
 
-      it("lets a conversation go with its transcript when nothing is kept, and forgets every purged one on the command", async () => {
+      it("shows nothing under Purged when keeping is off, and lets the conversation go a sweep later rather than at once", async () => {
         stub.config["lookout.history.keep"] = false;
         activate(context());
         const { boardView, listed } = openBoard();
@@ -851,6 +856,7 @@ describe("the extension", () => {
         await vi.waitFor(() => expect(listed()?.past).toEqual([]), WAIT);
         await settle();
         expect(purged()).toEqual([]);
+        // Out of sight, and out of the search, while it is kept a moment longer in case the transcript comes back.
         boardView.receive({ type: "search", query: "deploy", zone: 0 });
         const found = boardView.posted.filter((m) => (m as { type: string }).type === "search").at(-1) as { results: unknown[] };
         expect(found.results).toEqual([]);

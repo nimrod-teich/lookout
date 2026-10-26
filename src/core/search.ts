@@ -1,6 +1,5 @@
 // Searching an agent's conversations, live and past: the same for every agent.
 import type { SearchOutcome } from "./agents/agent";
-import { runScan } from "./agents/lineReaders";
 import type { BackgroundReads } from "./background";
 import type { HistoryIndex, SearchResult, SnippetSize } from "./history";
 import { projectOf } from "./model";
@@ -88,9 +87,10 @@ export function searchConversations(conversations: Iterable<Searchable>, parsed:
  * one query over their files, and the in-memory index for the rest (a
  * conversation the reading thread has not written yet, or one it never
  * reads). A file the store holds is still read on, in the background or
- * here, so the store follows the conversation.
+ * here, so the store follows the conversation; one whose read is still to
+ * come counts as pending, so the results are sent again once it is read.
  */
-export function searchWithStore(conversations: Iterable<Searchable>, parsed: Query, limit: number, budgetMs: number, snippet: SnippetSize | undefined, background: BackgroundReads | undefined, store: ConversationStore, build: string): SearchOutcome {
+export function searchWithStore(conversations: Iterable<Searchable>, parsed: Query, limit: number, budgetMs: number, snippet: SnippetSize | undefined, background: BackgroundReads | undefined, store: ConversationStore): SearchOutcome {
   if (parsed.terms.length === 0 && !hasFilters(parsed)) return { results: [], pending: 0 };
   const range = { since: parsed.since, before: parsed.before };
   const timed = parsed.since !== undefined || parsed.before !== undefined;
@@ -105,26 +105,24 @@ export function searchWithStore(conversations: Iterable<Searchable>, parsed: Que
     if ((parsed.projects.length > 0 || parsed.branches.length > 0) && !picked(parsed, conversation.cwd, conversation.branch)) continue;
     const index = conversation.index();
     const file = conversation.file ?? index?.file;
+    // A read still to come: the results are sent again once it is in.
+    let waiting = false;
     if (index) {
       // Kept up to date: in the background, which writes the store; or here, through the store, while the budget allows.
-      if (background) index.update(background);
-      else if (file && (!index.ready || index.changed()) && Date.now() - started < budgetMs) refreshThrough(index, { file: store.file, build });
+      if (background) {
+        index.update(background);
+        waiting = background.has(index);
+      } else if (!index.ready || index.changed()) {
+        if (Date.now() - started < budgetMs) index.refresh();
+        else waiting = true;
+      }
     }
+    if (waiting) pending++;
     if (file && store.has(file)) {
       stored.push({ id: conversation.id, file });
       continue;
     }
-    if (!index) continue;
-    if (!index.ready) {
-      // Not read yet: it comes in a later search.
-      if (background ? background.has(index) : Date.now() - started >= budgetMs) pending++;
-      else if (!background) {
-        index.refresh();
-        if (!index.ready) continue;
-        results.push(...searchIndex(conversation.id, index, parsed, limit, snippet, range, timed, words));
-      }
-      continue;
-    }
+    if (!index?.ready) continue;
     results.push(...searchIndex(conversation.id, index, parsed, limit, snippet, range, timed, words));
   }
   const files = stored.map((s) => s.file);
@@ -149,18 +147,6 @@ function searchIndex(id: string, index: HistoryIndex, parsed: Query, limit: numb
     return count > 0 ? [{ id, count, hits }] : [];
   }
   return !timed || index.hasMessageIn(range) ? [{ id, count: 0, hits: [] }] : [];
-}
-
-/** Reads what the index's file gained, here and now, through the store, so the store follows. */
-function refreshThrough(index: HistoryIndex, store: { file: string; build: string }): void {
-  const job = index.scan();
-  if (!job) {
-    index.refresh();
-    return;
-  }
-  job.store = store;
-  const scanned = runScan(job);
-  if (scanned) index.apply(scanned, job);
 }
 
 /**

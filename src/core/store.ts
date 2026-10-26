@@ -8,7 +8,7 @@
 // where the runtime has no `node:sqlite`.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { snippetOf, type FactLine, type HistoryMessage, type Scan, type Scanned, type SearchHit, type SnippetSize } from "./history";
+import { snippetOf, type HistoryMessage, type Scan, type Scanned, type SearchHit, type SnippetSize } from "./history";
 import { loadSqlite, type Database } from "./sqlite";
 import { inRange, type TimeRange } from "./terms";
 
@@ -44,8 +44,14 @@ export interface Sweep {
   purged: string[];
   /** Sessions whose transcript is back. */
   returned: string[];
-  /** Sessions forgotten because their transcript is gone and nothing is kept. */
+  /** Sessions forgotten: their transcript is gone, and nothing is kept of them, or keeping is off. */
   forgotten: string[];
+}
+
+/** What a sweep lets go of, when keeping is off: the sessions purged since `after`, once `graceMs` have passed, in case the transcript was only out of reach for a moment. */
+export interface Letting {
+  after: number;
+  graceMs: number;
 }
 
 const SCHEMA = `
@@ -108,6 +114,18 @@ export function ftsQuery(terms: readonly string[]): string {
     .join(" ");
 }
 
+/** Tries `work` a few times, a moment apart, for the opening of a database another window opens or closes at the same time. */
+function retrying<T>(work: () => T, tries = 5, waitMs = 100): T {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return work();
+    } catch (error) {
+      if (attempt >= tries) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+    }
+  }
+}
+
 export class ConversationStore {
   /** The store in `file`, made on first use; nothing where the runtime has no `node:sqlite`, or the file cannot be opened. */
   static open(file: string): ConversationStore | undefined {
@@ -116,9 +134,10 @@ export class ConversationStore {
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       const db = new sqlite.DatabaseSync(file);
-      db.exec("PRAGMA journal_mode = WAL");
+      // The busy handler first: the rest contends with another window opening or closing the same file.
       db.exec("PRAGMA busy_timeout = 5000");
-      db.exec(SCHEMA);
+      retrying(() => db.exec("PRAGMA journal_mode = WAL"));
+      retrying(() => db.exec(SCHEMA));
       return new ConversationStore(db, file);
     } catch {
       return undefined;
@@ -137,19 +156,34 @@ export class ConversationStore {
   }
 
   /**
-   * Takes in what a scan of a file found: its messages and paths, after
-   * those already held, or in their place when the file was read anew.
-   * One transaction: a reader meanwhile sees the file before or after.
+   * Takes in what a scan of a file found. A whole read (`reset`) goes in
+   * place of whatever was held. An increment goes in only from where the
+   * store stopped (`job.from`), of the file it read, by the build that read
+   * it; one the store is already past adds nothing, and one that would
+   * leave a hole is refused. One transaction: a reader meanwhile sees the
+   * file before or after. True when the store holds the file to the scan's
+   * end.
    */
-  record(job: Pick<Scan, "file" | "reader">, scanned: Scanned, build: string): void {
-    const before = scanned.reset ? undefined : this.progress(job.file);
-    let count = before && before.build === build ? before.messages : 0;
+  record(job: Pick<Scan, "file" | "reader" | "from">, scanned: Scanned, build: string): boolean {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      if (scanned.reset || !before || before.build !== build) {
+      const before = this.progress(job.file);
+      let count: number;
+      if (scanned.reset) {
         this.db.prepare("DELETE FROM messages WHERE file = ?").run(job.file);
         this.db.prepare("DELETE FROM paths WHERE file = ?").run(job.file);
         count = 0;
+      } else {
+        if (!before || before.build !== build || before.identity !== scanned.identity) {
+          this.db.exec("ROLLBACK");
+          return false;
+        }
+        if (before.end !== job.from) {
+          // Another window wrote these lines already, or more; or the store is behind them, and a hole would form.
+          this.db.exec("ROLLBACK");
+          return before.end >= scanned.end;
+        }
+        count = before.messages;
       }
       const message = this.db.prepare("INSERT OR IGNORE INTO messages(file, idx, role, at, text) VALUES (?, ?, ?, ?, ?)");
       const path = this.db.prepare("INSERT OR IGNORE INTO paths(file, path) VALUES (?, ?)");
@@ -164,6 +198,7 @@ export class ConversationStore {
         .prepare("INSERT INTO files(file, reader, identity, end, tail, messages, build) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(file) DO UPDATE SET reader = excluded.reader, identity = excluded.identity, end = excluded.end, tail = excluded.tail, messages = excluded.messages, build = excluded.build")
         .run(job.file, job.reader, scanned.identity, scanned.end, scanned.tail ?? null, count, build);
       this.db.exec("COMMIT");
+      return true;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -229,7 +264,7 @@ export class ConversationStore {
     return out;
   }
 
-  /** Writes down what a session is called and where its conversation is, when that changed; a time left out, as for a running session, keeps the one on record. */
+  /** Writes down what a session is called and where its conversation is, when that changed; a time left out, as for a running session, keeps the one on record. A conversation left behind under another path goes, unless another session has it. */
   rememberSession(session: Omit<StoredSession, "purgedAt">): void {
     const row = this.db.prepare("SELECT agent, file, title, cwd, branch, modified_at, purged_at FROM sessions WHERE id = ?").get(session.id) as { agent: string; file: string; title: string; cwd: string; branch: string | null; modified_at: number | null; purged_at: number | null } | undefined;
     const same = row && row.agent === session.agent && row.file === session.file && row.title === session.title && row.cwd === session.cwd && (row.branch ?? undefined) === session.branch && (session.modifiedAt === undefined || (row.modified_at ?? undefined) === session.modifiedAt);
@@ -239,6 +274,7 @@ export class ConversationStore {
         "INSERT INTO sessions(id, agent, file, title, cwd, branch, modified_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET agent = excluded.agent, file = excluded.file, title = excluded.title, cwd = excluded.cwd, branch = excluded.branch, modified_at = COALESCE(excluded.modified_at, sessions.modified_at), purged_at = NULL",
       )
       .run(session.id, session.agent, session.file, session.title, session.cwd, session.branch ?? null, session.modifiedAt ?? null);
+    if (row && row.file !== session.file) this.dropFileIfUnreferenced(row.file);
   }
 
   /** The session the store knows by this id. */
@@ -254,29 +290,33 @@ export class ConversationStore {
   }
 
   /**
-   * Looks for every session's transcript. One gone is marked purged, or,
-   * when nothing is kept, forgotten with its conversation; one back is
-   * unmarked. Only sessions whose conversation the store holds are marked:
-   * there is nothing to keep of the others.
+   * Looks for every session's transcript. One gone is marked purged, and
+   * one back unmarked. A session the store holds nothing of, and whose
+   * transcript is not kept elsewhere (`kept`), is forgotten at once: there
+   * is nothing to keep. With keeping off (`letting`), a session purged
+   * since keeping went off is forgotten once the grace has passed; what
+   * was kept before stays until the user forgets it.
    */
-  sweep(now: number, keep: boolean): Sweep {
+  sweep(now: number, kept: ReadonlySet<string> = new Set(), letting?: Letting): Sweep {
     const out: Sweep = { purged: [], returned: [], forgotten: [] };
     const rows = this.db.prepare("SELECT s.id AS id, s.file AS file, s.purged_at AS purged_at, f.file IS NOT NULL AS held FROM sessions s LEFT JOIN files f ON f.file = s.file").all() as { id: string; file: string; purged_at: number | null; held: number }[];
     for (const row of rows) {
-      const exists = fs.existsSync(row.file);
-      if (exists) {
+      if (fs.existsSync(row.file)) {
         if (row.purged_at !== null) {
           this.db.prepare("UPDATE sessions SET purged_at = NULL WHERE id = ?").run(row.id);
           out.returned.push(row.id);
         }
         continue;
       }
-      if (!keep || !row.held) {
+      if (!row.held && !kept.has(row.id)) {
         this.forget([row.id]);
         out.forgotten.push(row.id);
       } else if (row.purged_at === null) {
         this.db.prepare("UPDATE sessions SET purged_at = ? WHERE id = ?").run(now, row.id);
         out.purged.push(row.id);
+      } else if (letting && row.purged_at >= letting.after && now - row.purged_at >= letting.graceMs) {
+        this.forget([row.id]);
+        out.forgotten.push(row.id);
       }
     }
     return out;
@@ -290,18 +330,21 @@ export class ConversationStore {
       for (const id of ids) {
         const row = this.db.prepare("SELECT file FROM sessions WHERE id = ?").get(id) as { file: string } | undefined;
         this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-        if (!row) continue;
-        const shared = this.db.prepare("SELECT 1 FROM sessions WHERE file = ? LIMIT 1").get(row.file);
-        if (shared) continue;
-        this.db.prepare("DELETE FROM messages WHERE file = ?").run(row.file);
-        this.db.prepare("DELETE FROM paths WHERE file = ?").run(row.file);
-        this.db.prepare("DELETE FROM files WHERE file = ?").run(row.file);
+        if (row) this.dropFileIfUnreferenced(row.file);
       }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  /** The conversation of a file no session names any more goes. */
+  private dropFileIfUnreferenced(file: string): void {
+    if (this.db.prepare("SELECT 1 FROM sessions WHERE file = ? LIMIT 1").get(file)) return;
+    this.db.prepare("DELETE FROM messages WHERE file = ?").run(file);
+    this.db.prepare("DELETE FROM paths WHERE file = ?").run(file);
+    this.db.prepare("DELETE FROM files WHERE file = ?").run(file);
   }
 
   /** Forgets every purged session; how many. */
@@ -344,6 +387,3 @@ function sessionOf(row: SessionRow): StoredSession {
   if (row.purged_at !== null) session.purgedAt = row.purged_at;
   return session;
 }
-
-/** What one scan line gives the store; exported for the tests. */
-export type StoredLine = FactLine;

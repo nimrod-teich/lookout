@@ -1,5 +1,6 @@
-// Node's own sqlite (`node:sqlite`, Node 22.5 and later), for reading
-// databases VS Code keeps; nothing on older runtimes.
+// Node's own sqlite (`node:sqlite`, Node 22.5 and later): for reading the
+// databases VS Code keeps, and for Lookout's own store of the conversations;
+// nothing on older runtimes.
 import { createRequire } from "node:module";
 import * as path from "node:path";
 

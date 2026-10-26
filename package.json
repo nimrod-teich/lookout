@@ -415,7 +415,7 @@
           "lookout.history.keep": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Keep what you and the agent said in every conversation Lookout reads, in a database of its own, after the agent deletes the transcript: the session stays under **Purged**, its conversation readable and searched, until you forget it (the button on its card, or `Lookout: Forget Purged Conversations`). Off: a conversation goes when its transcript goes. Needs a VS Code whose Node has `node:sqlite`."
+            "markdownDescription": "Keep what you and the agent said in every conversation Lookout reads, in a database of its own, after the agent deletes the transcript: the session stays under **Purged**, its conversation readable and searched, until you forget it (the button on its card, or `Lookout: Forget Purged Conversations`). Off: nothing shows under **Purged**, a conversation purged from then on goes at the sweep after the next, in case its transcript was only out of reach for a moment, and what was kept before stays until forgotten. Needs a VS Code whose Node has `node:sqlite`."
           },
           "lookout.agentMarkers": {
             "type": "string",

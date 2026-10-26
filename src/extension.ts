@@ -182,6 +182,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     if (!(await panelAdapter(view.agent)?.resume(id, log, view))) void vscode.window.showWarningMessage(`Lookout could not resume "${view.title}".`);
   };
+  /** Forgets a purged session's conversation, after a confirmation: what Lookout kept is the only copy left. */
+  const forgetOne = async (id: string) => {
+    const title = controller.titleOf(id) ?? id;
+    const choice = await vscode.window.showWarningMessage(`Forget the conversation of "${title}"?`, { modal: true, detail: "The agent deleted its transcript; what Lookout kept is the only copy left, and goes for good. A note on it stays." }, "Forget");
+    if (choice === "Forget") controller.forget(id);
+  };
   const findings = new Findings(context.extensionUri, {
     titleOf: (id) => controller.titleOf(id) ?? id,
     agentOf,
@@ -280,7 +286,7 @@ export function activate(context: vscode.ExtensionContext): void {
     toggleArchive: (id) => controller.toggleArchive(id),
     editNote: (id) => editNote(id),
     purged: () => controller.purged,
-    forget: (id) => controller.forget(id),
+    forget: (id) => void forgetOne(id),
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
     usageBar: () => pickBar(controller.usageGroups, config.usageAgent)?.group.agent,

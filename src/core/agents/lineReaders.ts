@@ -38,44 +38,56 @@ export function closeStores(): void {
 export function runScan(job: Scan): Scanned | undefined {
   const reader = LINE_READERS[job.reader];
   if (!reader) return undefined;
-  const store = job.store ? storeAt(job.store.file) : undefined;
-  if (store) return scanIntoStore(job, reader, store, job.store!.build);
+  const into = job.store;
+  const store = into ? storeAt(into.file) : undefined;
+  if (into && store) return scanIntoStore(job, reader, store, into.build);
   const saved = job.saved ? readSaved(job.saved.entry, job, job.saved.build) : undefined;
   return scanFile(job.file, reader, job.from, job.identity, saved);
 }
 
 /**
- * A first read of a file the store holds goes on from where the store
- * stopped, when the file is still the one it read: the messages held come
- * back from the store with what the file gained, so the index has the whole
- * conversation without the file being read again.
+ * Reads a file for an index and for the store together. The store's own
+ * place in the file (`end`) is where its increment starts, whatever the
+ * index asked for: two windows reading the same file never store a line
+ * twice, and a window whose index is ahead or behind the store leaves no
+ * hole. A first read of a file the store holds goes on from where the store
+ * stopped, the held messages coming back from the store with what the file
+ * gained, so the index has the whole conversation without the file being
+ * read again. A file the store cannot continue (another build read it, the
+ * file changed under it, or the index saw another file) is read whole.
  */
 function scanIntoStore(job: Scan, reader: LineReader, store: ConversationStore, build: string): Scanned | undefined {
-  if (job.from === 0 && job.identity === "") {
-    const held = store.progress(job.file);
-    if (held && held.build === build && held.tail !== undefined && fitsStill(job.file, held)) {
-      const after = scanFile(job.file, reader, held.end, held.identity);
-      if (after && !after.reset) {
-        try {
-          store.record(job, after, build);
-          const messages = store.messages(job.file) ?? [];
-          const lines = messages.slice(0, held.messages).map((message) => ({ facts: { message }, start: 0, length: 0 }));
-          return { identity: after.identity, size: after.size, reset: true, end: after.end, lines: [...lines, ...after.lines], restored: held.end, tail: after.tail };
-        } catch {
-          // The store is a copy; the file is read whole instead.
-        }
-      }
-    }
+  const held = store.progress(job.file);
+  const first = job.from === 0 && job.identity === "";
+  const usable = held !== undefined && held.build === build && held.tail !== undefined && fitsStill(job.file, held) && (first || job.identity === held.identity);
+  if (!held || !usable) {
+    const whole = scanFile(job.file, reader, 0, "");
+    if (whole) recordQuietly(store, { ...job, from: 0 }, whole, build);
+    return whole;
   }
-  const scanned = scanFile(job.file, reader, job.from, job.identity);
-  if (scanned) {
-    try {
-      store.record(job, scanned, build);
-    } catch {
-      // The store is a copy; the read still answers.
-    }
+  // From the earlier of the two places: the store's, and the index's.
+  const base = first ? held.end : Math.min(job.from, held.end);
+  const scanned = scanFile(job.file, reader, base, held.identity);
+  if (!scanned) return undefined;
+  if (scanned.reset) {
+    recordQuietly(store, { ...job, from: 0 }, scanned, build);
+    return scanned;
   }
-  return scanned;
+  const fresh = scanned.lines.filter((line) => line.start >= held.end);
+  recordQuietly(store, { ...job, from: held.end }, { ...scanned, lines: fresh }, build);
+  if (!first) return { ...scanned, lines: scanned.lines.filter((line) => line.start >= job.from) };
+  const messages = store.messages(job.file) ?? [];
+  const restored = messages.slice(0, held.messages).map((message) => ({ facts: { message }, start: 0, length: 0 }));
+  return { identity: scanned.identity, size: scanned.size, reset: true, end: scanned.end, lines: [...restored, ...fresh], restored: held.end, tail: scanned.tail };
+}
+
+/** Writes a scan into the store; the store is a copy, so a write that fails never stops the read from answering. */
+function recordQuietly(store: ConversationStore, job: Pick<Scan, "file" | "reader" | "from">, scanned: Scanned, build: string): void {
+  try {
+    store.record(job, scanned, build);
+  } catch {
+    // Tried again at the next read.
+  }
 }
 
 /** The file is still the one the store read: the same identity, no shorter, with the same bytes before where the store stopped. */

@@ -8,12 +8,12 @@ import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents
 import { BackgroundReads } from "../core/background";
 import { SavedPositions } from "../core/savedPositions";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
-import { closeStores } from "../core/agents/lineReaders";
+import { closeStores, runScan } from "../core/agents/lineReaders";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
 import { chatStorageRoots, LocalChats } from "../core/agents/copilot/localChats";
 import { CopilotProvider } from "../core/agents/copilot/provider";
-import type { HistoryMessage, SnippetSize } from "../core/history";
+import { readThroughStore, type HistoryMessage, type SnippetSize } from "../core/history";
 import { Attention } from "../core/attention";
 import { clockTime } from "../core/format";
 import { buildPastView, projectOf, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
@@ -196,6 +196,8 @@ export class Controller implements vscode.Disposable {
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   /** Keep a conversation after its transcript goes; off: it goes with it. */
   private historyKeep = true;
+  /** When keeping went off, if it is: only what is purged since then goes. */
+  private keepOffSince: number | undefined;
   /** What the store was last told of each session, to tell it only of changes. */
   private readonly remembered = new Map<string, string>();
   /** The sessions listed under Earlier at the last poll: one gone since has its transcript looked for at once. */
@@ -273,6 +275,8 @@ export class Controller implements vscode.Disposable {
     // With the store, the saved places are not needed: the store says how far each file was read.
     const saved = !this.store && script && host.savedPositionsDir ? new SavedPositions(host.savedPositionsDir, this.build) : undefined;
     const into = this.store ? { file: this.store.file, build: this.build } : undefined;
+    // Every index reads through the store from now on: a read on its own would leave the store behind.
+    if (into) readThroughStore({ scan: runScan, store: into });
     this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error), saved, into) : undefined;
     if (saved) this.pruneTimer = setTimeout(() => void saved.prune(), PRUNE_AFTER_MS);
     this.records = host.recordsDir ? new SessionRecords(host.recordsDir) : undefined;
@@ -450,6 +454,7 @@ export class Controller implements vscode.Disposable {
   forget(id: string): void {
     if (!this.store) return;
     this.store.forget([id]);
+    this.pastSeen.delete(id);
     this.sweepStore();
   }
 
@@ -468,8 +473,10 @@ export class Controller implements vscode.Disposable {
    */
   private sweepStore(): void {
     if (!this.store || this.disposed) return;
-    this.store.sweep(Date.now(), this.historyKeep);
-    const purged = this.store.purged();
+    const letting = this.keepOffSince === undefined ? undefined : { after: this.keepOffSince, graceMs: this.host.sweepMs ?? SWEEP_MS };
+    this.store.sweep(Date.now(), new Set(), letting);
+    // With keeping off, nothing shows under Purged; what was kept before stays in the store until forgotten.
+    const purged = this.historyKeep ? this.store.purged() : [];
     const key = JSON.stringify(purged);
     if (key === this.purgedKey) return;
     this.purgedKey = key;
@@ -502,9 +509,9 @@ export class Controller implements vscode.Disposable {
       if (!file) return;
       const key = [agent, file, title, cwd, branch ?? "", modifiedAt ?? ""].join("\n");
       if (this.remembered.get(id) === key) return;
-      this.remembered.set(id, key);
       try {
         this.store!.rememberSession({ id, agent, file, title, cwd, branch, modifiedAt });
+        this.remembered.set(id, key);
       } catch (error) {
         this.log.errorOnce(`The conversation store could not be written: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -692,6 +699,7 @@ export class Controller implements vscode.Disposable {
     this.typedQuestions = config.typedQuestions;
     this.parkAfterMs = config.parkAfterMs;
     this.historyKeep = config.historyKeep;
+    this.keepOffSince = config.historyKeep ? undefined : (this.keepOffSince ?? Date.now());
     this.claudeOn = config.claudeEnabled;
     this.remembered.clear();
     this.providers = config.claudeEnabled ? [new ClaudeProvider(config.claudeConfigDir, this.proc)] : [];
@@ -759,6 +767,7 @@ export class Controller implements vscode.Disposable {
     this.refreshDisabledByEnv = config.usageRefreshDisabled;
     const keep = this.historyKeep;
     this.historyKeep = config.historyKeep;
+    if (keep !== this.historyKeep) this.keepOffSince = this.historyKeep ? undefined : Date.now();
     this.poll();
     if (keep !== this.historyKeep) this.sweepStore();
   }
@@ -827,7 +836,8 @@ export class Controller implements vscode.Disposable {
     // The archived leave Earlier for the Archived group, newest archive first.
     const shownPast = past.filter((view) => !archived.has(view.id) && notRestored(view));
     const archivePast = [...past, ...also].filter((view) => archived.has(view.id) && notRestored(view)).sort((a, b) => archive.indexOf(a.id) - archive.indexOf(b.id));
-    const favouritePast = also.filter((view) => stars.has(view.id) && !archived.has(view.id));
+    // A starred session whose transcript is gone is listed from the store, as no agent lists it.
+    const favouritePast = [...also.filter((view) => stars.has(view.id) && !archived.has(view.id)), ...this.purgedPast.filter((view) => stars.has(view.id) && !archived.has(view.id))];
     // Noted sessions no other list holds: not on the board, but searched and known by name.
     const notedPast = also.filter((view) => !stars.has(view.id) && !archived.has(view.id) && notRestored(view));
     this.earlierCapped = capped || shownPast.length > EARLIER_LIMIT;
@@ -1056,7 +1066,7 @@ export class Controller implements vscode.Disposable {
     for (const provider of notesOnly ? [] : this.providers) {
       const left = Math.max(0, SEARCH_BUDGET_MS - (Date.now() - started));
       // From the store where there is one: one query over the conversations it holds.
-      const part = this.store && provider.conversations ? searchWithStore(provider.conversations(), parsed, limit, left, page?.snippet, this.background, this.store, this.build) : provider.search?.(parsed, limit, left, page?.snippet, this.background);
+      const part = this.store && provider.conversations ? searchWithStore(provider.conversations(), parsed, limit, left, page?.snippet, this.background, this.store) : provider.search?.(parsed, limit, left, page?.snippet, this.background);
       if (!part) continue;
       outcome.results.push(...part.results);
       outcome.pending += part.pending;
@@ -1065,7 +1075,7 @@ export class Controller implements vscode.Disposable {
     if (this.store && !notesOnly && this.purgedPast.length > 0) {
       const store = this.store;
       const conversations = this.purgedPast.map((view) => ({ id: view.id, cwd: view.cwd, branch: view.branch, pastModifiedAt: view.modifiedAt, file: store.session(view.id)?.file, index: () => undefined }));
-      const part = searchWithStore(conversations, parsed, limit, 0, page?.snippet, undefined, store, this.build);
+      const part = searchWithStore(conversations, parsed, limit, 0, page?.snippet, undefined, store);
       outcome.results.push(...part.results);
     }
     // The notes count as one more line of their sessions' conversations.
@@ -1204,6 +1214,7 @@ export class Controller implements vscode.Disposable {
     if (this.sweepSoon) clearTimeout(this.sweepSoon);
     this.recordsWatch?.dispose();
     this.background?.dispose();
+    readThroughStore(undefined);
     this.store?.close();
     // The in-thread reads opened the store too.
     closeStores();
