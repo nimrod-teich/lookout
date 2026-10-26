@@ -126,7 +126,7 @@ describe("SessionRecords", () => {
     expect(records.setNote("s1", undefined, SEEN, 2)).toBe(true);
   });
 
-  it("sees another window's writes without a watch, by the directory's time, once a second at most", () => {
+  it("sees another window's writes without a watch, by the files' names, sizes and times, once a second at most", () => {
     let clock = 10_000;
     const a = new SessionRecords(dir, () => clock);
     const b = new SessionRecords(dir, () => clock);
@@ -139,6 +139,13 @@ describe("SessionRecords", () => {
     b.setNote("s1", undefined, SEEN, 2);
     clock += 1500;
     expect(a.noteOf("s1")).toBeUndefined();
+    // A record rewritten under the same name, with the same size: its time tells.
+    b.setNote("s2", "first", SEEN, 3);
+    clock += 1500;
+    expect(a.noteOf("s2")).toBe("first");
+    b.setNote("s2", "later", SEEN, 4);
+    clock += 1500;
+    expect(a.noteOf("s2")).toBe("later");
   });
 
   it("lives without its directory until the first note, which creates it", () => {

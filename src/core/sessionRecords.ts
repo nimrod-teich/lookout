@@ -4,8 +4,8 @@
 // gone. One small file per session under a directory every window shares,
 // written whole and moved into place, so another window never reads half of
 // one. A window watches the directory and reads it again when it changes;
-// where no watch can be had, the directory's own time says when a file came
-// or went.
+// where no watch can be had, the files' names, sizes and times are looked
+// at once a second instead.
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -59,8 +59,8 @@ export class SessionRecords {
   private saves = 0;
   private watcher: fs.FSWatcher | undefined;
   private settling: ReturnType<typeof setTimeout> | undefined;
-  /** The directory's time as last seen, and when, for want of a watch. */
-  private dirMtime = -1;
+  /** The files as last seen (names, sizes, times), and when, for want of a watch. */
+  private listing = "";
   private checkedAt = -Infinity;
 
   constructor(
@@ -80,19 +80,32 @@ export class SessionRecords {
     return this.byId;
   }
 
-  /** Without a watch, the directory's own time tells of files that came or went: looked at once a second at most. */
+  /**
+   * Without a watch, the files themselves tell of one that came, went or
+   * changed: their names, sizes and times, looked at once a second at most.
+   * (A directory's own time would be cheaper, but Windows reports it late.)
+   */
   private checkDir(): void {
     const now = this.now();
     if (now - this.checkedAt < DIR_CHECK_MS) return;
     this.checkedAt = now;
-    let mtime: number;
+    const parts: string[] = [];
     try {
-      mtime = fs.statSync(this.dir).mtimeMs;
+      for (const name of fs.readdirSync(this.dir)) {
+        if (!name.endsWith(".json")) continue;
+        try {
+          const st = fs.statSync(path.join(this.dir, name));
+          parts.push(`${name}:${st.size}:${st.mtimeMs}`);
+        } catch {
+          // Gone meanwhile.
+        }
+      }
     } catch {
-      mtime = -1;
+      // No directory yet.
     }
-    if (mtime === this.dirMtime) return;
-    this.dirMtime = mtime;
+    const listing = parts.sort().join("\n");
+    if (listing === this.listing) return;
+    this.listing = listing;
     this.loaded = false;
   }
 
