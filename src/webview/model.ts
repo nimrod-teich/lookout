@@ -224,9 +224,10 @@ const MINUTE = 60_000;
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** A time to come, said from `now`: "in 25 min", "at 15:00", "09:13 tomorrow", "Thu 09:13", "Nov 2 09:13". */
+/** A time to come, said from `now`: "in 25 min", "at 15:00", "09:13 tomorrow", "Thu 09:13", "Nov 2 09:13"; one past is "due". */
 export function formatWhen(at: number, now: number): string {
   const left = at - now;
+  if (left < -MINUTE) return "due";
   if (left < MINUTE) return "now";
   if (left < 60 * MINUTE) return `in ${Math.round(left / MINUTE)} min`;
   const then = new Date(at);

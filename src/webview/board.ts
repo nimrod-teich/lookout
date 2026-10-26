@@ -1233,6 +1233,11 @@ function updateCard(card: HTMLElement, view: SessionView): void {
       .join(" ");
   }
   renderHits(card.querySelector(".hits")!, query === "" ? undefined : hits.get(view.id));
+  renderChips(card, view);
+}
+
+/** The card's chips, written only where they changed. */
+function renderChips(card: HTMLElement, view: SessionView): void {
   const chipsEl = card.querySelector(".chips")!;
   const values = chips(view);
   while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
@@ -1871,6 +1876,8 @@ function tick(): void {
       card.querySelector(".line .kind")!.textContent = cardLine(view, now()).label ?? "";
     }
     card.title = cardTitle(view);
+    // The time to a scheduled task counts down.
+    if (view.schedules?.length) renderChips(card, view);
   }
   for (const view of past) {
     const card = pastCards.get(view.id);

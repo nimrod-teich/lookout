@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CRON_EXPIRY_MS, cronListOf, cronResultOf, cronSchedule, describeCron, firedBy, nextCronRun, parseCron, parseWhen, pendingSchedules, promptLine, scheduleView, type Schedule } from "../../../../src/core/agents/claude/schedule";
-import { applyLine, emptyTranscript, schedulesOf } from "../../../../src/core/agents/claude/transcript";
+import { CRON_EXPIRY_MS, cronListOf, cronListSaysNone, cronResultOf, cronSchedule, describeCron, firedBy, nextCronRun, parseCron, parseWhen, pendingSchedules, promptLine, scheduleView, wakeupResultOf, type Schedule } from "../../../../src/core/agents/claude/schedule";
+import { applyLine, applyScheduleLine, emptyTranscript, schedulesOf } from "../../../../src/core/agents/claude/transcript";
 
 /** Local time, as cron is. */
 const at = (y: number, mo: number, d: number, h = 0, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime();
@@ -58,7 +58,7 @@ describe("the scheduler's answers", () => {
 
   it("reads the job from a CronCreate result in either of Claude Code's forms, and nothing from a refusal", () => {
     expect(cronResultOf("Scheduled recurring job d00604b0 (Every day at 9:13 AM). Next run: Oct 27 9:43am. Session-only (not written to disk, dies when Claude exits). Auto-expires after 7 days. Use CronDelete to cancel sooner.", from)).toEqual({ id: "d00604b0", recurring: true, desc: "Every day at 9:13 AM", nextAt: at(2026, 10, 27, 9, 43) });
-    expect(cronResultOf("Scheduled one-time job 0a1b2c3d (Oct 27 at 3:00 PM). Next run: Oct 27 3:00pm.", from)).toEqual({ id: "0a1b2c3d", recurring: false, desc: "Oct 27 at 3:00 PM", nextAt: at(2026, 10, 27, 15, 0) });
+    expect(cronResultOf("Scheduled one-shot task 0a1b2c3d (Oct 27 at 3:00 PM). Next run: Oct 27 3:00pm. It will fire once then auto-delete.", from)).toEqual({ id: "0a1b2c3d", recurring: false, desc: "Oct 27 at 3:00 PM", nextAt: at(2026, 10, 27, 15, 0) });
     expect(cronResultOf("Scheduled recurring job 04d1cc10 (13,43 * * * *). Session-only (not written to disk, dies when Claude exits). Auto-expires after 7 days.", from)).toEqual({ id: "04d1cc10", recurring: true, desc: "13,43 * * * *" });
     expect(cronResultOf("04d1cc10 — 13,43 * * * * (recurring) [session-only], next run Oct 15 11:43am: MAG-4330 follow-up: check the PR", at(2026, 10, 15, 11, 0))).toEqual({ id: "04d1cc10", recurring: true, desc: "13,43 * * * *", nextAt: at(2026, 10, 15, 11, 43), prompt: "MAG-4330 follow-up: check the PR" });
     expect(cronResultOf("52cb9a8f — Every hour at :23 (recurring) [session-only]: Stack-rebase watch (automated, hourly): run the script", from)).toEqual({ id: "52cb9a8f", recurring: true, desc: "Every hour at :23", prompt: "Stack-rebase watch (automated, hourly): run the script" });
@@ -67,12 +67,22 @@ describe("the scheduler's answers", () => {
   });
 
   it("reads a CronList result, one job per line", () => {
-    const text = "04d1cc10 — 13,43 * * * * (recurring) [session-only], next run Oct 15 11:43am: MAG-4330 follow-up\n52cb9a8f — Every hour at :23 (one-time) [session-only]: Once\nNo other jobs.";
+    const text = "04d1cc10 — 13,43 * * * * (recurring) [session-only], next run Oct 15 11:43am: MAG-4330 follow-up\n52cb9a8f — Oct 15 at 3:00 PM (one-shot) [session-only], next run Oct 15 3:00pm: Once\nNo other jobs.";
     expect(cronListOf(text, at(2026, 10, 15, 11, 0))).toEqual([
       { id: "04d1cc10", recurring: true, desc: "13,43 * * * *", nextAt: at(2026, 10, 15, 11, 43), prompt: "MAG-4330 follow-up" },
-      { id: "52cb9a8f", recurring: false, desc: "Every hour at :23", prompt: "Once" },
+      { id: "52cb9a8f", recurring: false, desc: "Oct 15 at 3:00 PM", nextAt: at(2026, 10, 15, 15, 0), prompt: "Once" },
     ]);
-    expect(cronListOf("No cron jobs scheduled.", from)).toEqual([]);
+    expect(cronListOf("No scheduled jobs.", from)).toEqual([]);
+    expect(cronListSaysNone("No scheduled jobs.")).toBe(true);
+    expect(cronListSaysNone("No cron jobs scheduled.")).toBe(true);
+    expect(cronListSaysNone("Something else entirely")).toBe(false);
+  });
+
+  it("reads a ScheduleWakeup result: the exact delay, a loop stopped, or a refusal", () => {
+    expect(wakeupResultOf("Next wakeup scheduled for 21:27:00 (in 1215s). Nothing more to do this turn — the harness re-invokes you when the wakeup fires.")).toEqual({ inMs: 1215_000, stopped: false, refused: false });
+    expect(wakeupResultOf("Loop stopped — cancelled 1 pending wakeup(s); no further dynamic-loop wakeups scheduled.")).toEqual({ stopped: true, refused: false });
+    expect(wakeupResultOf("Error: delaySeconds is required")).toEqual({ stopped: false, refused: true });
+    expect(wakeupResultOf("Scheduled.")).toEqual({ stopped: false, refused: false });
   });
 
   it("makes the schedule from the result: the scheduler's first run, and the shift it shows past the cron minute", () => {
@@ -99,6 +109,8 @@ describe("promptLine and firedBy", () => {
     expect(firedBy(task, "  Check the PRs.\nThen report. (and more)")).toBe(true);
     expect(firedBy(task, "Check the PRs")).toBe(false);
     expect(firedBy({ ...task, fullPrompt: undefined }, "Check")).toBe(false);
+    // A listing cuts the prompt short, with an ellipsis: the prompt that fires starts with what is left.
+    expect(firedBy({ ...task, fullPrompt: "Check the PRs.\nThen rep…" }, "Check the PRs.\nThen report.")).toBe(true);
   });
 });
 
@@ -183,7 +195,7 @@ describe("the transcript's schedules", () => {
     applyLine(state, call("c1", "CronCreate", { cron: "13,43 * * * *", prompt: "Follow up" }, t0));
     applyLine(state, result("c1", "Scheduled recurring job 04d1cc10 (13,43 * * * *). Next run: Oct 26 1:58pm.", t0));
     applyLine(state, call("c2", "CronCreate", { cron: "0 15 26 10 *", recurring: false, prompt: "Once" }, t0));
-    applyLine(state, result("c2", "Scheduled one-time job 0a1b2c3d (Oct 26 at 3:00 PM). Next run: Oct 26 3:00pm.", t0));
+    applyLine(state, result("c2", "Scheduled one-shot task 0a1b2c3d (Oct 26 at 3:00 PM). Next run: Oct 26 3:00pm. It will fire once then auto-delete.", t0));
     expect(schedulesOf(state, t0 + 60_000).map((s) => s.nextAt)).toEqual([at(2026, 10, 26, 13, 58), at(2026, 10, 26, 15, 0)]);
     // The listing leaves the one-time job out (it ran), moves the other's next run, and names one the transcript never showed created.
     const t1 = at(2026, 10, 26, 15, 30);
@@ -197,10 +209,64 @@ describe("the transcript's schedules", () => {
     applyLine(state, call("l2", "CronList", {}, t1));
     applyLine(state, result("l2", "Something else entirely", t1));
     expect(schedulesOf(state, t1 + 60_000)).toHaveLength(2);
-    // One that says there are none clears them.
+    // A listing with a one-shot job keeps it (its line says "(one-shot)").
     applyLine(state, call("l3", "CronList", {}, t1));
-    applyLine(state, result("l3", "No cron jobs scheduled.", t1));
+    applyLine(state, result("l3", "04d1cc10 — 13,43 * * * * (recurring) [session-only], next run Oct 26 3:58pm: Follow up\n0a1b2c3d — Oct 26 at 6:00 PM (one-shot) [session-only], next run Oct 26 6:00pm: Once", t1));
+    expect(schedulesOf(state, t1 + 60_000).map((s) => s.label)).toEqual(["at :13, :43 every hour", "once, Oct 26 at 6:00 PM"]);
+    // One that says there are none clears them.
+    applyLine(state, call("l4", "CronList", {}, t1));
+    applyLine(state, result("l4", "No scheduled jobs.", t1));
     expect(schedulesOf(state, t1 + 60_000)).toEqual([]);
+  });
+
+  it("takes the wakeup's exact time from the result, drops it on a refusal or a stop, and an interrupt lets a pending call go", () => {
+    const state = emptyTranscript();
+    applyLine(state, call("w1", "ScheduleWakeup", { delaySeconds: 1200, prompt: "look" }, t0));
+    expect(schedulesOf(state, t0 + 1000)[0]!.nextAt).toBe(t0 + 1200_000);
+    applyLine(state, result("w1", "Next wakeup scheduled for 14:03:00 (in 1252s). Nothing more to do this turn.", t0 + 500));
+    expect(schedulesOf(state, t0 + 1000)[0]!.nextAt).toBe(t0 + 500 + 1252_000);
+    applyLine(state, call("w2", "ScheduleWakeup", { delaySeconds: 600, prompt: "again" }, t0 + 2000));
+    applyLine(state, result("w2", "Error: the loop is not running", t0 + 2000));
+    expect(schedulesOf(state, t0 + 3000)).toEqual([]);
+    applyLine(state, call("w3", "ScheduleWakeup", { delaySeconds: 600, prompt: "again" }, t0 + 4000));
+    applyLine(state, line({ type: "user", timestamp: iso(t0 + 4000), message: { role: "user", content: [{ type: "tool_result", tool_use_id: "w3", is_error: true, content: "Permission denied" }] } }));
+    expect(schedulesOf(state, t0 + 5000)).toEqual([]);
+    applyLine(state, call("w4", "ScheduleWakeup", { delaySeconds: 600, prompt: "again" }, t0 + 6000));
+    applyLine(state, call("w5", "ScheduleWakeup", { stop: true }, t0 + 7000));
+    applyLine(state, result("w5", "Loop stopped — cancelled 1 pending wakeup(s); no further dynamic-loop wakeups scheduled.", t0 + 7000));
+    expect(schedulesOf(state, t0 + 8000)).toEqual([]);
+    // A CronCreate the user interrupted before its result: the call is let go, and a result that never comes schedules nothing.
+    applyLine(state, call("c1", "CronCreate", { cron: "13 9 * * *", prompt: "x" }, t0));
+    applyLine(state, line({ type: "user", timestamp: iso(t0), message: { role: "user", content: "[Request interrupted by user]" } }));
+    expect(state.cronCalls.size).toBe(0);
+  });
+
+  it("leaves a compaction summary alone, even in a scheduled turn", () => {
+    const state = emptyTranscript();
+    applyLine(state, call("w1", "ScheduleWakeup", { delaySeconds: 1200, prompt: "look" }, t0));
+    applyLine(state, line({ type: "user", timestamp: iso(t0 + 1000), isCompactSummary: true, turnOrigin: "scheduled", message: { role: "user", content: "This session is being continued from a previous conversation…" } }));
+    expect(schedulesOf(state, t0 + 2000)).toHaveLength(1);
+  });
+
+  it("counts only the tasks of the process that runs the session, and seeds them from the lines that bear on them", () => {
+    const state = emptyTranscript();
+    applyLine(state, call("c1", "CronCreate", { cron: "13 9 * * *", prompt: "Old" }, t0 - 3_600_000));
+    applyLine(state, result("c1", "Scheduled recurring job 11111111 (Every day at 9:13 AM). Next run: Oct 27 9:43am.", t0 - 3_600_000));
+    applyLine(state, call("c2", "CronCreate", { cron: "13 9 * * *", prompt: "New" }, t0 + 60_000));
+    applyLine(state, result("c2", "Scheduled recurring job 22222222 (Every day at 9:13 AM). Next run: Oct 27 9:43am.", t0 + 60_000));
+    // The process started at t0: the job from before it died with the process it was resumed from.
+    expect(schedulesOf(state, t0 + 120_000).map((s) => s.prompt)).toEqual(["Old", "New"]);
+    expect(schedulesOf(state, t0 + 120_000, t0).map((s) => s.prompt)).toEqual(["New"]);
+    // The seed folds the schedules alone: a tool call left open in those lines is no open tool of the session's.
+    const seeded = emptyTranscript();
+    applyScheduleLine(seeded, call("c1", "CronCreate", { cron: "13 9 * * *", prompt: "Seeded" }, t0));
+    applyScheduleLine(seeded, line({ type: "assistant", timestamp: iso(t0), isSidechain: true, message: { id: "m-s", role: "assistant", content: [{ type: "tool_use", id: "s1", name: "CronCreate", input: { cron: "0 0 * * *", prompt: "Subagent" } }] } }));
+    applyScheduleLine(seeded, result("c1", "Scheduled recurring job 33333333 (Every day at 9:13 AM). Next run: Oct 27 9:43am.", t0));
+    applyScheduleLine(seeded, result("s1", "Scheduled recurring job 44444444 (Every day at 12:00 AM). Next run: Oct 27 12:00am.", t0));
+    applyScheduleLine(seeded, call("d1", "CronDelete", { id: "nothing" }, t0));
+    expect(schedulesOf(seeded, t0 + 1000).map((s) => s.prompt)).toEqual(["Seeded"]);
+    expect(seeded.openTools.size).toBe(0);
+    expect(seeded.model).toBeUndefined();
   });
 
   it("drops a wakeup or a one-time job when the prompt it gave fires, and a wakeup long past its time", () => {

@@ -186,6 +186,8 @@ describe("the schedule chip", () => {
 
   it("says a time to come from now, closer times in more detail", () => {
     expect(formatWhen(now + 30_000, now)).toBe("now");
+    expect(formatWhen(now - 30_000, now)).toBe("now");
+    expect(formatWhen(now - 5 * 60_000, now)).toBe("due");
     expect(formatWhen(now + 25 * 60_000, now)).toBe("in 25 min");
     expect(formatWhen(at(2026, 10, 26, 15, 0), now)).toBe("at 15:00");
     expect(formatWhen(at(2026, 10, 27, 9, 13), now)).toBe("09:13 tomorrow");

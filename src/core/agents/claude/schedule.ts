@@ -145,7 +145,13 @@ export function nextCronRun(spec: CronSpec, from: number): number | undefined {
   return undefined;
 }
 
-/** The first run of a job after `from`, as the scheduler runs it: the first minute the expression names that, shifted, is still to come. */
+/**
+ * The first run of a job after `from`, as the scheduler runs it: the first
+ * minute the expression names that, shifted, is still to come. (A job of
+ * the `*‍/N * * * *` shape the scheduler runs a period after its last run,
+ * a few seconds early, so its runs drift off the minute grid; the chip
+ * stays with the grid, and can be a minute or two off for those.)
+ */
 function nextRunShifted(spec: CronSpec, from: number, shiftMs: number): number | undefined {
   const minute = nextCronRun(spec, from - shiftMs);
   return minute === undefined ? undefined : minute + shiftMs;
@@ -210,17 +216,19 @@ export function parseWhen(text: string, from: number): number | undefined {
 
 /**
  * What Claude Code answered a CronCreate with: "Scheduled recurring job
- * d00604b0 (Every day at 9:13 AM). Next run: Oct 27 9:43am. …", or in an
- * earlier release "d00604b0 — 13,43 * * * * (recurring) [session-only],
- * next run Oct 15 11:43am: <prompt>". Nothing for a refusal.
+ * d00604b0 (Every day at 9:13 AM). Next run: Oct 27 9:43am. …" or
+ * "Scheduled one-shot task 0a1b2c3d (Oct 27 at 3:00 PM). Next run: …", or
+ * in an earlier release "d00604b0 — 13,43 * * * * (recurring)
+ * [session-only], next run Oct 15 11:43am: <prompt>". Nothing for a
+ * refusal.
  */
 export function cronResultOf(text: string, from: number): CronLine | undefined {
   const first = text.trim().split("\n")[0] ?? "";
-  const created = /^Scheduled (recurring |one-time |)job ([0-9a-f]{6,})(?: \((.*?)\))?\.?(.*)$/i.exec(first);
+  const created = /^Scheduled (recurring|one-shot|one-time) (?:job|task) ([0-9a-f]{6,})(?: \((.*?)\))?\.?(.*)$/i.exec(first);
   if (created) {
     const rest = created[4] ?? "";
     const next = /next run:?\s*([^.]*)/i.exec(rest);
-    const line: CronLine = { id: created[2]!, recurring: !/one-time/i.test(created[1]!) };
+    const line: CronLine = { id: created[2]!, recurring: /^recurring/i.test(created[1]!) };
     if (created[3]) line.desc = created[3];
     const nextAt = next ? parseWhen(next[1]!, from) : undefined;
     if (nextAt !== undefined) line.nextAt = nextAt;
@@ -229,11 +237,16 @@ export function cronResultOf(text: string, from: number): CronLine | undefined {
   return cronListOf(text, from)[0];
 }
 
+/** A CronList result that says there are no jobs: "No scheduled jobs." */
+export function cronListSaysNone(text: string): boolean {
+  return /\bno (cron |scheduled )?jobs\b|^\s*none\b/i.test(text);
+}
+
 /** The jobs a CronList result lists, one per line: "<id> — <desc> (recurring) [session-only], next run Oct 15 11:43am: <prompt>". */
 export function cronListOf(text: string, from: number): CronLine[] {
   const out: CronLine[] = [];
   for (const raw of text.split("\n")) {
-    const match = /^\s*([0-9a-f]{6,}) [—-] (.*?) \((recurring|one-time|once)\)(.*)$/i.exec(raw);
+    const match = /^\s*([0-9a-f]{6,}) [—-] (.*?) \((recurring|one-shot|one-time|once)\)(.*)$/i.exec(raw);
     if (!match) continue;
     const line: CronLine = { id: match[1]!, recurring: match[3]!.toLowerCase() === "recurring", desc: match[2] };
     const rest = match[4] ?? "";
@@ -255,11 +268,19 @@ export function promptLine(prompt: unknown): string {
   return line.length > PROMPT_MAX ? `${line.slice(0, PROMPT_MAX - 1)}…` : line;
 }
 
-/** A fired prompt is the task's when it starts with the prompt the task was given. */
+/** A fired prompt is the task's when it starts with the prompt the task was given (a listing cuts the prompt short, with an ellipsis). */
 export function firedBy(schedule: Schedule, content: string): boolean {
-  const own = schedule.fullPrompt?.trim();
+  const own = schedule.fullPrompt?.trim().replace(/…$/, "").trimEnd();
   if (!own) return false;
   return content.trim().startsWith(own.slice(0, 200));
+}
+
+/** What a ScheduleWakeup result says: "Next wakeup scheduled for 21:27:00 (in 1215s). …", "Loop stopped — …", or a refusal. */
+export function wakeupResultOf(text: string): { inMs?: number; stopped: boolean; refused: boolean } {
+  const seconds = /\(in (\d+)s\)/.exec(text);
+  if (seconds) return { inMs: Number(seconds[1]) * 1000, stopped: false, refused: false };
+  if (/^\s*Loop stopped/i.test(text)) return { stopped: true, refused: false };
+  return { stopped: false, refused: /^\s*(error|invalid|cannot|refused)/i.test(text) };
 }
 
 /**

@@ -1,7 +1,7 @@
 import { PULSE_BINS, PULSE_WINDOW_MS, pulseBin, pulseBins, pulseLength } from "../../pulse";
 import { clip, quoteAsk } from "../../asks";
 import { costOf, type TokenCounts } from "./pricing";
-import { cronListOf, cronResultOf, cronSchedule, firedBy, pendingSchedules, promptLine, scheduleView, type Schedule } from "./schedule";
+import { cronListOf, cronListSaysNone, cronResultOf, cronSchedule, firedBy, pendingSchedules, promptLine, scheduleView, wakeupResultOf, type Schedule } from "./schedule";
 import type { ScheduleView } from "../../types";
 
 /** A tool call the assistant made that has no result yet. */
@@ -75,8 +75,8 @@ export interface TranscriptState {
   joinedLate: boolean;
   /** The tasks the session scheduled for itself, by id. */
   schedules: Map<string, Schedule>;
-  /** CronCreate and CronList calls whose result, naming the jobs, is still to come: by the call's id. */
-  cronCalls: Map<string, { kind: "create"; cron: string; prompt: string; at: number | undefined } | { kind: "list"; at: number | undefined }>;
+  /** Scheduling calls whose result is still to come, by the call's id: a CronCreate (its result names the job), a CronList, a ScheduleWakeup (its result gives the exact time, or a refusal). */
+  cronCalls: Map<string, { kind: "create"; cron: string; prompt: string; at: number | undefined } | { kind: "list" | "wakeup"; at: number | undefined }>;
 }
 
 export { PULSE_WINDOW_MS };
@@ -316,11 +316,14 @@ function tailOf(text: string, max: number): string {
 function applyUser(state: TranscriptState, e: Record<string, unknown>): void {
   const content = (e.message as { content?: unknown } | undefined)?.content;
   if (typeof content === "string") {
-    if (content.startsWith(INTERRUPT)) state.openTools.clear();
+    if (content.startsWith(INTERRUPT)) {
+      state.openTools.clear();
+      state.cronCalls.clear();
+    }
     // A prompt, an interrupt or a compaction summary: the reply before it is answered or moot.
     if (e.isMeta !== true) state.reply = undefined;
-    // The runtime marks the prompt a scheduled task enqueued: that task has fired.
-    if (e.turnOrigin === "scheduled") applyScheduledPrompt(state, content);
+    // The runtime marks the prompt a scheduled task enqueued: that task has fired. A compaction summary carries its turn's origin, and fires nothing.
+    if (e.turnOrigin === "scheduled" && e.isCompactSummary !== true) applyScheduledPrompt(state, content);
     return;
   }
   let results = 0;
@@ -329,10 +332,11 @@ function applyUser(state: TranscriptState, e: Record<string, unknown>): void {
       results++;
       if (typeof block.tool_use_id === "string") {
         state.openTools.delete(block.tool_use_id);
-        applySchedulingResult(state, block.tool_use_id, (block as { content?: unknown }).content);
+        applySchedulingResult(state, block.tool_use_id, (block as { content?: unknown }).content, (block as { is_error?: unknown }).is_error === true, timestampOf(e));
       }
     } else if (block.type === "text" && typeof block.text === "string" && block.text.startsWith(INTERRUPT)) {
       state.openTools.clear();
+      state.cronCalls.clear();
       state.reply = undefined;
       return;
     }
@@ -361,6 +365,7 @@ function applySchedulingCall(state: TranscriptState, id: string, name: string, i
     const wakeup: Schedule = { id: "wakeup", kind: "wakeup", prompt: promptLine(args.prompt), at, nextAt: at + delay * 1000 };
     if (typeof args.prompt === "string") wakeup.fullPrompt = args.prompt;
     state.schedules.set("wakeup", wakeup);
+    state.cronCalls.set(id, { kind: "wakeup", at });
   } else if (name === "CronCreate") {
     if (typeof args.cron !== "string") return;
     state.cronCalls.set(id, { kind: "create", cron: args.cron, prompt: typeof args.prompt === "string" ? args.prompt : "", at });
@@ -379,20 +384,30 @@ function applySchedulingCall(state: TranscriptState, id: string, name: string, i
  * expired, and one it names that the transcript never showed created is
  * taken in, its next run known only until it passes.
  */
-function applySchedulingResult(state: TranscriptState, callId: string, content: unknown): void {
+function applySchedulingResult(state: TranscriptState, callId: string, content: unknown, isError: boolean, resultAt: number | undefined): void {
   const call = state.cronCalls.get(callId);
   if (!call) return;
   state.cronCalls.delete(callId);
   const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((part) => (typeof (part as { text?: unknown })?.text === "string" ? (part as { text: string }).text : "")).join("\n") : "";
   const at = call.at ?? Date.now();
+  if (call.kind === "wakeup") {
+    // The runtime's own word: the exact delay, rounded up to the minute; a loop stopped; a call refused.
+    const wakeup = state.schedules.get("wakeup");
+    const answer = wakeupResultOf(text);
+    if (isError || answer.stopped || answer.refused) {
+      if (wakeup?.at === call.at) state.schedules.delete("wakeup");
+    } else if (answer.inMs !== undefined && wakeup && wakeup.at === call.at) wakeup.nextAt = (resultAt ?? at) + answer.inMs;
+    return;
+  }
+  if (isError) return;
   if (call.kind === "create") {
     const line = cronResultOf(text, at);
     if (line) state.schedules.set(line.id, cronSchedule(line, call.cron, call.prompt, at));
     return;
   }
   const listed = cronListOf(text, at);
-  // A listing that reads as none, or as nothing, says nothing about the jobs.
-  if (listed.length === 0 && !/no (cron )?jobs|none/i.test(text)) return;
+  // A listing that reads as nothing says nothing about the jobs; one that says there are none clears them.
+  if (listed.length === 0 && !cronListSaysNone(text)) return;
   const ids = new Set(listed.map((line) => line.id));
   for (const id of [...state.schedules.keys()]) if (id !== "wakeup" && !ids.has(id)) state.schedules.delete(id);
   for (const line of listed) {
@@ -415,9 +430,59 @@ function applyScheduledPrompt(state: TranscriptState, content: string): void {
   state.schedules.delete("wakeup");
 }
 
-/** The tasks the session scheduled for itself and still to come at `now`, the next first, as the board shows them. */
-export function schedulesOf(state: TranscriptState, now: number): ScheduleView[] {
-  return pendingSchedules(state.schedules.values(), now).map(scheduleView);
+/**
+ * The tasks the session scheduled for itself and still to come at `now`,
+ * the next first, as the board shows them. Claude Code keeps a task in
+ * memory, so one scheduled before `since`, the process's start, died with
+ * the process the session was resumed from and does not count.
+ */
+export function schedulesOf(state: TranscriptState, now: number, since?: number): ScheduleView[] {
+  const live = [...state.schedules.values()].filter((schedule) => since === undefined || schedule.at === undefined || schedule.at >= since);
+  return pendingSchedules(live, now).map(scheduleView);
+}
+
+/** The lines a seed of the schedules needs: the calls, their results, and the prompts tasks fire. */
+export const SCHEDULE_NEEDLES = ['"CronCreate"', '"CronDelete"', '"CronList"', '"ScheduleWakeup"', '"turnOrigin":"scheduled"', "Scheduled recurring job", "Scheduled one-shot task", "(recurring)", "(one-shot)", "No scheduled jobs", "Next wakeup scheduled", "Loop stopped", INTERRUPT];
+
+/**
+ * Folds one transcript line into the schedules alone: for the stretch
+ * before the first read starts, where the tool calls that scheduled a
+ * task still to come may sit (the rest of such a line, an old reply or
+ * tool result, must not touch the state).
+ */
+export function applyScheduleLine(state: TranscriptState, line: string): void {
+  let entry: unknown;
+  try {
+    entry = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (typeof entry !== "object" || entry === null) return;
+  const e = entry as Record<string, unknown>;
+  if (e.isSidechain === true) return;
+  const at = timestampOf(e);
+  if (e.type === "assistant") {
+    for (const block of blocksOf(e.message)) {
+      if (block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") applySchedulingCall(state, block.id, block.name, block.input, at);
+    }
+    return;
+  }
+  if (e.type !== "user") return;
+  const content = (e.message as { content?: unknown } | undefined)?.content;
+  if (typeof content === "string") {
+    if (content.startsWith(INTERRUPT)) state.cronCalls.clear();
+    else if (e.turnOrigin === "scheduled" && e.isCompactSummary !== true) applyScheduledPrompt(state, content);
+    return;
+  }
+  for (const block of blocksOf(e.message)) {
+    if (block.type === "tool_result" && typeof block.tool_use_id === "string") applySchedulingResult(state, block.tool_use_id, (block as { content?: unknown }).content, (block as { is_error?: unknown }).is_error === true, at);
+    else if (block.type === "text" && typeof block.text === "string" && block.text.startsWith(INTERRUPT)) state.cronCalls.clear();
+  }
+}
+
+function timestampOf(e: Record<string, unknown>): number | undefined {
+  const at = typeof e.timestamp === "string" ? Date.parse(e.timestamp) : NaN;
+  return Number.isFinite(at) ? at : undefined;
 }
 
 /** Folds one transcript line into the state. Lines that don't parse are ignored, and subagents' unless `sidechain` asks for them. */
