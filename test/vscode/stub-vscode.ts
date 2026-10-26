@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 // A stand-in for the `vscode` module that records what the extension does to
 // the UI. vitest.config.ts aliases `vscode` to this file.
 
@@ -247,6 +248,7 @@ function createWebviewPanel(viewType: string, title: string): StubWebviewPanel {
 export const Uri = {
   joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: [base.fsPath, ...parts].join("/"), path: [base.fsPath, ...parts].join("/") }),
   parse: (text: string) => ({ toString: () => text }),
+  file: (p: string) => ({ scheme: "file", fsPath: p, path: p, toString: () => `file://${p}` }),
   from: (parts: { scheme: string; authority?: string; path?: string }) => {
     const text = `${parts.scheme}://${parts.authority ?? ""}${parts.path ?? ""}`;
     return { ...parts, toString: () => text };
@@ -358,6 +360,10 @@ export const window = {
     stub.ops.push(["inputBox", "show", options]);
     return stub.inputBox?.(options);
   },
+  /** An editor on a document: an op naming its file. */
+  showTextDocument: async (document: { uri?: { fsPath?: string } }) => {
+    stub.ops.push(["window", "showTextDocument", document.uri?.fsPath]);
+  },
   tabGroups: {
     get all() {
       return stub.groups;
@@ -423,8 +429,21 @@ export const workspace = {
   name: "stub-workspace",
   workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
   onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
+  /** A document for a file: an op naming it; a file that does not exist is refused, as VS Code refuses it. */
+  openTextDocument: async (uri: { fsPath: string }) => {
+    stub.ops.push(["workspace", "openTextDocument", uri.fsPath]);
+    if (!fs.existsSync(uri.fsPath)) throw new Error(`cannot open ${uri.fsPath}`);
+    return { uri };
+  },
   getConfiguration: (section: string) => ({
     get: (key: string, fallback?: unknown) => stub.config[`${section}.${key}`] ?? fallback,
+    /** A write to the settings: kept in `stub.config`, and an op with its target. */
+    update: async (key: string, value: unknown, target?: unknown) => {
+      stub.config[`${section}.${key}`] = value;
+      stub.ops.push([`config:${section}`, "update", { key, value, target }]);
+    },
   }),
   onDidChangeConfiguration: stub.configChange.event,
 };
+
+export const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 } as const;

@@ -32,6 +32,8 @@ export interface Config {
   searchToolOutput: boolean;
   /** Keep a copy of every starred session's transcript, as if Keep Transcript were chosen for it. */
   keepFavourites: boolean;
+  /** Keep Claude Code's transcripts this many days, written into its user settings file; 0 leaves Claude Code's own. */
+  retentionDays: number;
   /** Watch Claude Code: its sessions and its usage. */
   claudeEnabled: boolean;
   /** The Claude Code config directory to read sessions and transcripts from. */
@@ -100,6 +102,7 @@ export function readConfig(): Config {
     historyKeep: lookout.get<boolean>("history.keep", true),
     searchToolOutput: lookout.get<boolean>("search.toolOutput", false),
     keepFavourites: lookout.get<boolean>("keepTranscripts.favourites", false),
+    retentionDays: retentionDaysOf(lookout.get<unknown>("retention.days", 0)),
     claudeEnabled: lookout.get<boolean>("agents.claude", true),
     claudeConfigDir,
     agentMarkers: markerSetting(lookout.get<string>("agentMarkers")),
@@ -109,4 +112,9 @@ export function readConfig(): Config {
     copilotEnabled: lookout.get<boolean>("agents.copilot", true),
     copilotHome: copilotHome(lookout.get<string>("copilotHome")),
   };
+}
+
+/** The retention setting as a whole number of days, 0 to a hundred years; anything else counts as 0, which leaves Claude Code's own. */
+function retentionDaysOf(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 36_500 ? value : 0;
 }
