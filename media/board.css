@@ -1881,6 +1881,44 @@ body.vscode-high-contrast-light .card {
   color: var(--vscode-errorForeground, #f14c4c);
 }
 
+/* The restore button on a purged card whose transcript Lookout keeps, shown on hover; green when pointed at. */
+.restore {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.restore.hidden {
+  display: none;
+}
+
+.restore svg {
+  width: 12px;
+  height: 12px;
+}
+
+.card:hover .restore,
+.card:focus-within .restore {
+  opacity: 1;
+}
+
+.restore:hover {
+  background: color-mix(in srgb, var(--done) 18%, transparent);
+  color: var(--done);
+}
+
+/* A kept transcript: the chip in the keeping's own colour. */
+.chip.kept {
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 12%, transparent);
+}
+
 /* Purged: the transcript is gone; a broken rail says so. */
 .card.purged .rail {
   background: repeating-linear-gradient(to bottom, var(--idle) 0 3px, transparent 3px 6px);

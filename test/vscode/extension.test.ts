@@ -847,6 +847,50 @@ describe("the extension", () => {
         expect(infoMessages().at(-1)).toBe("Lookout keeps no purged conversation.");
       }, 60_000);
 
+      it("keeps a transcript on request, as a copy that follows the file, and puts it back once the agent deleted it", async () => {
+        activate(context());
+        const { boardView, listed } = openBoard();
+        await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+        const card = { webviewSection: "card", sessionId: HERE };
+        const vaultDir = path.join(configDir, "global-storage", "vault");
+        const keptFiles = () => (fs.existsSync(vaultDir) ? fs.readdirSync(vaultDir).filter((name) => name.endsWith(".jsonl")) : []);
+        const kept = () => (listed()?.past[0] as { kept?: boolean } | undefined)?.kept;
+        // Kept from the card's menu: the card says so, and a copy sits under Lookout's storage.
+        await stub.commands.get("lookout.card.keep")!(card);
+        await vi.waitFor(() => expect(kept()).toBe(true), WAIT);
+        expect(keptFiles()).toHaveLength(1);
+        // The agent appends, then deletes the transcript: the session goes under Purged, kept.
+        const file = transcriptOf(HERE);
+        fs.appendFileSync(file, JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "all done" }] } }) + "\n");
+        fs.unlinkSync(file);
+        const purged = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { purged?: { id: string; kept?: boolean }[] } | undefined)?.purged;
+        await vi.waitFor(() => expect(purged()?.map((p) => [p.id, p.kept])).toEqual([[HERE, true]]), WAIT);
+        // Restored: the file is back where it was, with what the agent appended, and the session leaves Purged for Earlier.
+        boardView.receive({ type: "restore", id: HERE });
+        await vi.waitFor(() => expect(listed()?.past.map((p) => p.id)).toEqual([HERE]), WAIT);
+        expect(purged()).toEqual([]);
+        expect(fs.readFileSync(file, "utf8")).toContain("all done");
+        expect(infoMessages().at(-1)).toMatch(/put the transcript of "tune the deploy script" back/);
+        // Stopped keeping: the copy goes, and the card no longer says kept.
+        await stub.commands.get("lookout.card.unkeep")!(card);
+        await vi.waitFor(() => expect(kept()).toBeUndefined(), WAIT);
+        expect(keptFiles()).toHaveLength(0);
+        // A session the board does not know keeps nothing, and with nothing kept the folder command says so.
+        await stub.commands.get("lookout.card.keep")!({ ...card, sessionId: "nope" });
+        expect(keptFiles()).toHaveLength(0);
+        await stub.commands.get("lookout.openKeptTranscripts")!();
+        expect(infoMessages().at(-1)).toMatch(/keeps no transcript yet/);
+      }, 60_000);
+
+      it("keeps every starred session's transcript when the setting asks", async () => {
+        stub.config["lookout.keepTranscripts.favourites"] = true;
+        savedGlobal["lookout.favourites"] = [HERE];
+        activate(context());
+        const { listed } = openBoard();
+        await vi.waitFor(() => expect((listed()?.past[0] as { kept?: boolean } | undefined)?.kept).toBe(true), WAIT);
+        expect(fs.readdirSync(path.join(configDir, "global-storage", "vault")).filter((name) => name.endsWith(".jsonl"))).toHaveLength(1);
+      }, 60_000);
+
       it("shows nothing under Purged when keeping is off, and lets the conversation go a sweep later rather than at once", async () => {
         stub.config["lookout.history.keep"] = false;
         activate(context());

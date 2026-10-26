@@ -94,6 +94,11 @@
         "category": "Lookout"
       },
       {
+        "command": "lookout.openKeptTranscripts",
+        "title": "Open Kept Transcripts Folder",
+        "category": "Lookout"
+      },
+      {
         "command": "lookout.sortSessions",
         "title": "Sort Sessions",
         "category": "Lookout"
@@ -152,6 +157,41 @@
         "command": "lookout.card.showNotes",
         "title": "Show Notes",
         "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.resume",
+        "title": "Resume Session",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.archive",
+        "title": "Archive",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.unarchive",
+        "title": "Unarchive",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.keep",
+        "title": "Keep Transcript",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.unkeep",
+        "title": "Stop Keeping Transcript",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.restore",
+        "title": "Restore Transcript",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.card.forget",
+        "title": "Forget Conversation",
+        "category": "Lookout"
       }
     ],
     "menus": {
@@ -207,6 +247,34 @@
         {
           "command": "lookout.card.showNotes",
           "when": "false"
+        },
+        {
+          "command": "lookout.card.resume",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.archive",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.unarchive",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.keep",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.unkeep",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.restore",
+          "when": "false"
+        },
+        {
+          "command": "lookout.card.forget",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -259,6 +327,41 @@
           "command": "lookout.card.showNotes",
           "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutNoted",
           "group": "2_edit@3"
+        },
+        {
+          "command": "lookout.card.resume",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutCanResume",
+          "group": "1_open@1"
+        },
+        {
+          "command": "lookout.card.archive",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutCanArchive && !lookoutArchived",
+          "group": "3_mark@4"
+        },
+        {
+          "command": "lookout.card.unarchive",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutArchived",
+          "group": "3_mark@4"
+        },
+        {
+          "command": "lookout.card.keep",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutCanKeep && !lookoutKept",
+          "group": "4_keep@1"
+        },
+        {
+          "command": "lookout.card.unkeep",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutKept",
+          "group": "4_keep@1"
+        },
+        {
+          "command": "lookout.card.restore",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutPurged && lookoutKept",
+          "group": "4_keep@2"
+        },
+        {
+          "command": "lookout.card.forget",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && lookoutPurged",
+          "group": "4_keep@3"
         }
       ]
     },
@@ -411,6 +514,11 @@
             "default": 24,
             "minimum": 0,
             "markdownDescription": "A running session that has been idle or finished this many hours goes under **Parked**, a folded group at the bottom of the board, and comes back when it works again. Its finished mark goes with it. `0`: only the sessions you park yourself."
+          },
+          "lookout.keepTranscripts.favourites": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Keep a copy of every starred session's transcript under Lookout's own storage, as if **Keep Transcript** were chosen for each from its card's menu: a hard link where the file system allows one, a copy otherwise, so the agent's own deletion of the file takes nothing. A kept transcript of a purged session can be put back for the agent to resume (**Restore Transcript**)."
           },
           "lookout.history.keep": {
             "type": "boolean",

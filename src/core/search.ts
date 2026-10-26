@@ -139,6 +139,11 @@ export function searchWithStore(conversations: Iterable<Searchable>, parsed: Que
   return { results, pending };
 }
 
+/** Has a conversation read now, into the store on the way: in the background when there is one, else here. For a transcript about to be kept, so the store holds what it says before the agent deletes it. */
+export function readThrough(conversation: Searchable, background: BackgroundReads | undefined): void {
+  conversation.index()?.update(background);
+}
+
 /** What one in-memory index gives a search; empty when it holds no match. */
 function searchIndex(id: string, index: HistoryIndex, parsed: Query, limit: number, snippet: SnippetSize | undefined, range: { since?: number; before?: number }, timed: boolean, words: boolean): SearchResult[] {
   if (parsed.files.length > 0 && !index.touched(parsed.files)) return [];

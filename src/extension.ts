@@ -9,7 +9,7 @@ import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
 import { GROUPINGS, readGroupBy, type GroupBy } from "./core/grouping";
 import { readSort, SORTS, type SessionSort } from "./core/sorting";
-import type { SessionView } from "./core/types";
+import type { PastView, SessionView } from "./core/types";
 import { pickBar } from "./core/usageGroups";
 import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
@@ -40,6 +40,7 @@ const SORT = "lookout.sortSessions";
 const GROUP = "lookout.groupSessions";
 const SHOW_NOTES = "lookout.showNotes";
 const FORGET_PURGED = "lookout.forgetPurged";
+const OPEN_KEPT = "lookout.openKeptTranscripts";
 /** How the board makes its sections; kept for every window. */
 const GROUP_KEY = "lookout.group";
 /** How the board orders the sessions in each group, and the user's own order; kept for every window. */
@@ -77,6 +78,7 @@ export function activate(context: vscode.ExtensionContext): void {
       savedPositionsDir: path.join(context.globalStorageUri.fsPath, "search-positions"),
       recordsDir: path.join(context.globalStorageUri.fsPath, "sessions"),
       storeFile: path.join(context.globalStorageUri.fsPath, "history.sqlite"),
+      vaultDir: path.join(context.globalStorageUri.fsPath, "vault"),
     },
     terminals,
     log,
@@ -258,6 +260,28 @@ export function activate(context: vscode.ExtensionContext): void {
         if (view) return act(view);
       }),
     );
+  /** The same, for commands that apply to any card: the session is looked up among the running ones, then the earlier ones. */
+  const anyCardCommands = (handlers: Record<string, (view: SessionView | PastView) => unknown>) =>
+    Object.entries(handlers).map(([id, act]) =>
+      vscode.commands.registerCommand(id, (arg?: { sessionId?: unknown }) => {
+        if (typeof arg?.sessionId !== "string") return;
+        const view = controller.sessions.find((v) => v.id === arg.sessionId) ?? controller.pastView(arg.sessionId);
+        if (view) return act(view);
+      }),
+    );
+  /** Keeps a session's transcript on the user's say-so, or says why not. */
+  const keepTranscript = (id: string) => {
+    if (controller.keepTranscript(id)) return;
+    const title = controller.titleOf(id) ?? id;
+    void vscode.window.showWarningMessage(controller.canKeep(id) ? `Lookout could not keep the transcript of "${title}".` : `"${title}" has no transcript to keep yet.`);
+  };
+  /** Puts a purged session's kept transcript back, and says how it went. */
+  const restoreTranscript = (id: string) => {
+    const title = controller.titleOf(id) ?? id;
+    const outcome = controller.restoreTranscript(id);
+    if (outcome.ok) void vscode.window.showInformationMessage(`Lookout put the transcript of "${title}" back at ${outcome.file}. The agent lists it again; a later agent may not resume a transcript in an older format.`);
+    else void vscode.window.showWarningMessage(`Lookout could not put the transcript of "${title}" back: it ${outcome.why}.`);
+  };
   const sort = () => readSort(context.globalState.get<unknown>(SORT_KEY));
   const setSort = (next: SessionSort) => {
     void context.globalState.update(SORT_KEY, next);
@@ -287,6 +311,7 @@ export function activate(context: vscode.ExtensionContext): void {
     editNote: (id) => editNote(id),
     purged: () => controller.purged,
     forget: (id) => void forgetOne(id),
+    restore: restoreTranscript,
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
     usageBar: () => pickBar(controller.usageGroups, config.usageAgent)?.group.agent,
@@ -410,20 +435,42 @@ export function activate(context: vscode.ExtensionContext): void {
       const choice = await vscode.window.showWarningMessage(`Forget ${count === 1 ? "the purged conversation" : `all ${count} purged conversations`}?`, { modal: true, detail: "What was said in them goes from Lookout's store; the agents deleted their transcripts already. Notes on them stay." }, "Forget");
       if (choice === "Forget") controller.forgetPurged();
     }),
-    // The card's context menu: the same acts as its buttons, named in words.
+    // The card's context menu: the same acts as its buttons, named in words. Some need a running session; the rest take any card.
     ...cardCommands({
       "lookout.card.jump": (view) => jump(view),
-      "lookout.card.conversation": (view) => openHit("", view.id),
       "lookout.card.rename": async (view) => {
         if (canRename(view)) await renameSession(view, terminals, log);
       },
       "lookout.card.seen": (view) => markSeen(view.id),
-      "lookout.card.star": (view) => controller.toggleFavourite(view.id),
-      "lookout.card.unstar": (view) => controller.toggleFavourite(view.id),
       "lookout.card.park": (view) => controller.togglePark(view.id),
       "lookout.card.unpark": (view) => controller.togglePark(view.id),
+    }),
+    ...anyCardCommands({
+      "lookout.card.conversation": (view) => openHit("", view.id),
+      "lookout.card.resume": (view) => resume(view.id),
+      "lookout.card.star": (view) => controller.toggleFavourite(view.id),
+      "lookout.card.unstar": (view) => controller.toggleFavourite(view.id),
+      "lookout.card.archive": (view) => controller.toggleArchive(view.id),
+      "lookout.card.unarchive": (view) => controller.toggleArchive(view.id),
       "lookout.card.addNote": (view) => editNote(view.id),
       "lookout.card.showNotes": (view) => editNote(view.id),
+      "lookout.card.keep": (view) => keepTranscript(view.id),
+      "lookout.card.unkeep": (view) => controller.releaseTranscript(view.id),
+      "lookout.card.restore": (view) => restoreTranscript(view.id),
+      "lookout.card.forget": (view) => controller.forget(view.id),
+    }),
+    vscode.commands.registerCommand(OPEN_KEPT, async () => {
+      const dir = controller.keptTranscriptsDir;
+      if (!dir) return;
+      if (controller.kept.size === 0) {
+        void vscode.window.showInformationMessage("Lookout keeps no transcript yet: Keep Transcript in a card's menu keeps one.");
+        return;
+      }
+      try {
+        await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(dir));
+      } catch {
+        void vscode.window.showInformationMessage(`The kept transcripts are under ${dir}.`);
+      }
     }),
     vscode.commands.registerCommand(SORT, async () => {
       const current = sort();
