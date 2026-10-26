@@ -91,14 +91,18 @@ function scanIntoStore(job: Scan, reader: LineReader, store: ConversationStore, 
  * store did not take the read, so the index asks again.
  */
 function scanLean(job: Scan, reader: LineReader, store: ConversationStore, build: string): Scanned | undefined {
+  const tools = job.tools === true && reader.tools !== undefined;
   let held: ReturnType<ConversationStore["progress"]>;
   try {
     held = store.progress(job.file);
+    // Tool output no longer wanted goes, and the file is read on without it.
+    if (held?.tools && !tools) store.dropTools(job.file);
   } catch {
     return inMemory(job, reader);
   }
-  const usable = held !== undefined && held.build === build && held.tail !== undefined && fitsStill(job.file, held);
-  const scanned = usable ? scanFile(job.file, reader, held!.end, held!.identity) : scanFile(job.file, reader, 0, "");
+  // A file held without its tool output, now wanted, is read again whole for it.
+  const usable = held !== undefined && held.build === build && held.tail !== undefined && (held.tools || !tools) && fitsStill(job.file, held);
+  const scanned = usable ? scanFile(job.file, reader, held!.end, held!.identity, undefined, tools) : scanFile(job.file, reader, 0, "", undefined, tools);
   if (!scanned) return undefined;
   // A file that could not be read is tried again once it changes: what the store holds of it stays.
   if (failed(scanned)) return { ...scanned, lines: [] };
@@ -107,14 +111,14 @@ function scanLean(job: Scan, reader: LineReader, store: ConversationStore, build
   const from = scanned.reset ? 0 : held!.end;
   let taken = false;
   try {
-    taken = store.record({ ...job, from }, scanned, build);
+    taken = store.record({ ...job, from }, scanned, build, tools);
   } catch {
     // Refused: a full disk, a read-only file, a lock held too long, a schema another build changed.
   }
   return taken ? { ...scanned, lines: [] } : inMemory(job, reader);
 }
 
-/** The file read whole into memory, for a lean index the store could not take it for: it keeps it there from now on. */
+/** The file read whole into memory, for a lean index the store could not take it for: it keeps it there from now on, without tool output. */
 function inMemory(job: Scan, reader: LineReader): Scanned | undefined {
   const whole = scanFile(job.file, reader, 0, "");
   return whole ? { ...whole, inMemory: true } : undefined;

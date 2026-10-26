@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked; &sort=name|project|recent|custom orders the groups; &group=project|branch|model|agent|window makes the sections. -->
+<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked; &sort=name|project|recent|custom orders the groups; &group=project|branch|model|agent|window makes the sections; &tools=1 adds a tool match to the search's answers. -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -45,7 +45,10 @@
         const agent = `…the ${text} handler now retries three times with backoff and logs the event id; the ${s.project} tests cover the 500 and the timeout…`;
         const messages = i % 2 === 0 ? [{ role: "you", snippet: you, ranges: mark(you) }, { role: "agent", snippet: agent, ranges: mark(agent) }] : [];
         const note = inNote(s) ? noteHit(s) : [];
-        return { id: s.id, count: (i % 2 === 0 ? 2 + i * 3 : 0) + note.length, hits: [...note, ...messages] };
+        // &tools=1: the search keeps tool output too, and a command's error matches after the messages.
+        const tool = `Bash: npm test -- ${s.project} … FAIL checkout.test.js: ${text} timed out after 5000 ms`;
+        const tools = params.get("tools") === "1" && i % 2 === 0 ? [{ role: "tool", snippet: tool, ranges: mark(tool) }] : [];
+        return { id: s.id, count: (i % 2 === 0 ? 2 + i * 3 : 0) + note.length + tools.length, hits: [...note, ...messages, ...tools].slice(0, 3) };
       });
   };
   /** Posts the fixture; the scope "folders" lists only the past sessions the agent resumes here. */

@@ -17,7 +17,7 @@
 //   tokens, how many input tokens the model takes, and the effort. (The
 //   `model.*` events are Copilot's helper models, such as the one that names
 //   the session, and are left out.)
-import { readerOf, type HistoryMessage, type LineFacts } from "../../history";
+import { readerOf, toolReaderOf, toolText, type HistoryMessage, type LineFacts, type ToolText } from "../../history";
 import { quoteAsk } from "../../asks";
 import type { Reason } from "../../types";
 
@@ -209,5 +209,38 @@ export function factsOf(line: string): LineFacts | undefined {
   return { message };
 }
 
+const TOOL_DONE = '"type":"tool.execution_complete"';
+
+/**
+ * The tool calls and results of an events line: a call's arguments (a
+ * command as it was run, else their JSON) with the tool's name, and a
+ * completion's result or error, cut to their first and last 2 KB.
+ */
+export function toolFactsOf(line: string): ToolText[] | undefined {
+  let event: { type?: unknown; data?: Record<string, unknown>; timestamp?: unknown };
+  try {
+    event = JSON.parse(line) as typeof event;
+  } catch {
+    return undefined;
+  }
+  if (!event?.data) return undefined;
+  const parsed = Date.parse(str(event.timestamp) ?? "");
+  const at = Number.isFinite(parsed) ? { at: parsed } : {};
+  if (event.type === "tool.execution_start") {
+    const args = event.data.arguments;
+    const command = typeof args === "object" && args !== null ? str((args as { command?: unknown }).command) : undefined;
+    const text = toolText(command ?? (typeof args === "string" ? args : JSON.stringify(args ?? {})));
+    const name = str(event.data.toolName);
+    return text ? [{ ...(name ? { name } : {}), text, ...at }] : undefined;
+  }
+  if (event.type === "tool.execution_complete") {
+    const result = event.data.result as { content?: unknown } | undefined;
+    const error = event.data.error as { message?: unknown } | undefined;
+    const text = toolText([str(result?.content), str(error?.message)].filter(Boolean).join("\n"));
+    return text ? [{ text, ...at }] : undefined;
+  }
+  return undefined;
+}
+
 /** How the search reads an events file: a line without one of `factsOf`'s needles is never decoded. */
-export const EVENTS_LINES = readerOf("copilot-events", [USER_MESSAGE, REPLY, TOOL_START], factsOf);
+export const EVENTS_LINES = { ...readerOf("copilot-events", [USER_MESSAGE, REPLY, TOOL_START], factsOf), tools: toolReaderOf([TOOL_START, TOOL_DONE], toolFactsOf) };

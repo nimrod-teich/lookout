@@ -525,6 +525,11 @@
             "default": true,
             "markdownDescription": "Keep what you and the agent said in every conversation Lookout reads, in a database of its own, after the agent deletes the transcript: the session stays under **Purged**, its conversation readable and searched, until you forget it (the button on its card, or `Lookout: Forget Purged Conversations`). Off: nothing shows under **Purged**, a conversation purged from then on goes at the sweep after the next, in case its transcript was only out of reach for a moment, and what was kept before stays until forgotten. Needs a VS Code whose Node has `node:sqlite`."
           },
+          "lookout.search.toolOutput": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Also keep what the agents' tool calls ran and returned (commands, their output, errors) in the search, so an error string or a command finds its session. Each call and each result is kept to its first and last 2 KB. Off by default: tool output is where secrets end up (environment dumps, tokens, file contents), and it is several times the size of the conversation. It is never kept past the purge: when the agent deletes a transcript, its tool output goes, though its conversation stays. Turning this off lets go of every tool call and result kept at once. Needs a VS Code whose Node has `node:sqlite`."
+          },
           "lookout.agentMarkers": {
             "type": "string",
             "enum": [

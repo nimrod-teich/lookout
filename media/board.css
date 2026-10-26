@@ -720,6 +720,17 @@ body.vscode-reduce-motion .hover-card {
   color: var(--working);
 }
 
+/* A tool call's input or its result, kept when the search keeps tool output: told apart, quietly. */
+.hit.tool .who {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.hit.tool .snippet {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: calc(var(--vscode-font-size) - 1px);
+}
+
 .hit.note .who {
   color: var(--note);
 }

@@ -284,6 +284,16 @@ body {
   color: var(--beam);
 }
 
+.hit.tool .who {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.hit.tool .text {
+  font-family: var(--mono);
+  font-size: calc(var(--vscode-font-size) - 1px);
+}
+
 .hit.note .who {
   color: var(--note);
 }
