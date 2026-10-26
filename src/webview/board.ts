@@ -75,6 +75,10 @@ const favouriteCards = new Map<string, HTMLElement>();
 const STAR_ICON =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.9l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.7l-3.8 2 .7-4.3-3.1-3 4.3-.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
 
+/** A page with lines: the note the user wrote on a session. */
+const NOTE_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5.5L13 6v7a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 2.5V6H13M6 8.6h4M6 11h2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+
 /** The star that marks a favourite; a click stars the session or takes its star away. */
 function starButton(id: string): HTMLElement {
   const star = el("span", "star");
@@ -461,9 +465,29 @@ const groupPicker = picker<GroupBy>("Group by:", "Group the sessions by", "How t
   vscode.postMessage({ type: "group", by });
   render();
 });
-// The two chips move as a pair: beside the field, or under it on a narrow board.
+// A toggle beside the pickers: only the sessions with a note, through the search's has:note.
+const HAS_NOTE = /(^|\s)has:note(?=\s|$)/i;
+const notesChip = el("button", "chip-button toggle notes");
+notesChip.type = "button";
+notesChip.title = "Only the sessions with a note, wherever they ran: has:note in the search box";
+notesChip.setAttribute("aria-pressed", "false");
+notesChip.innerHTML = NOTE_ICON;
+notesChip.append(el("span", "label", "Notes"));
+notesChip.addEventListener("click", () => {
+  const current = input.value;
+  input.value = HAS_NOTE.test(current) ? current.replace(HAS_NOTE, " ").replace(/\s+/g, " ").trim() : `has:note ${current.trim()}`.trim();
+  if (searchTimer) clearTimeout(searchTimer);
+  runSearch();
+});
+/** The chip is lit while the query asks for the noted sessions, typed or clicked. */
+function setNotesChip(): void {
+  const on = HAS_NOTE.test(query);
+  notesChip.classList.toggle("on", on);
+  notesChip.setAttribute("aria-pressed", String(on));
+}
+// The chips move together: beside the field, or under it on a narrow board.
 const pickers = el("span", "pickers");
-pickers.append(groupPicker.element, sortPicker.element);
+pickers.append(groupPicker.element, sortPicker.element, notesChip);
 search.append(field, clear, summary, pickers);
 beam.append(search);
 
@@ -483,6 +507,7 @@ function runSearch(): void {
     return;
   }
   query = next;
+  setNotesChip();
   hits = new Map();
   earlierPage = 0;
   archivePage = 0;
@@ -933,9 +958,6 @@ function parkButton(id: string): HTMLElement {
   return button;
 }
 
-/** A page with lines: the note the user wrote on a session. */
-const NOTE_ICON =
-  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5.5L13 6v7a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 2.5V6H13M6 8.6h4M6 11h2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
 
 /** The first line of a note, for a card; the rest reads in the hover and on the note's page. */
 function noteHead(note: string): string {

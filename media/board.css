@@ -576,6 +576,22 @@ body.vscode-reduce-motion .hover-card {
   color: var(--ink);
 }
 
+/* A toggle chip: its icon before its word, lit in the note's colour while it is on. */
+.chip-button.toggle svg {
+  width: 11px;
+  height: 11px;
+}
+
+.chip-button.toggle.on {
+  border-color: color-mix(in srgb, var(--note) 55%, transparent);
+  background: color-mix(in srgb, var(--note) 12%, transparent);
+  color: var(--note);
+}
+
+.chip-button.toggle.on .label {
+  color: var(--note);
+}
+
 .chip-button .caret {
   font-size: 8px;
   opacity: 0.7;
