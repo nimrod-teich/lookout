@@ -72,9 +72,13 @@ let groupBy: GroupBy = "state";
 let favouritesEl: HTMLElement | undefined;
 const favouriteCards = new Map<string, HTMLElement>();
 
+const STAR_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.9l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.7l-3.8 2 .7-4.3-3.1-3 4.3-.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+
 /** The star that marks a favourite; a click stars the session or takes its star away. */
 function starButton(id: string): HTMLElement {
-  const star = el("span", "star", "☆");
+  const star = el("span", "star");
+  star.innerHTML = STAR_ICON;
   star.setAttribute("role", "button");
   star.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -88,7 +92,6 @@ function setStar(card: HTMLElement, id: string): void {
   if (!star) return;
   const on = favourites.ids.includes(id);
   star.classList.toggle("on", on);
-  star.textContent = on ? "★" : "☆";
   (star as HTMLElement).title = on ? "Take the star away" : "Star this session: it stays under Favourites";
 }
 /** The user opened the Earlier group; kept across reloads. */
@@ -934,6 +937,12 @@ function parkButton(id: string): HTMLElement {
 const NOTE_ICON =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5.5L13 6v7a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 2.5V6H13M6 8.6h4M6 11h2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
 
+/** The first line of a note, for a card; the rest reads in the hover and on the note's page. */
+function noteHead(note: string): string {
+  const lines = note.split("\n").filter((line) => line.trim() !== "");
+  return lines.length > 1 ? `${lines[0]} …` : (lines[0] ?? "");
+}
+
 /** The button on a card's title row that writes a note on the session, or changes the one it has; lit while there is one. */
 function noteButton(id: string): HTMLElement {
   const button = el("span", "note-btn");
@@ -973,7 +982,8 @@ function setNoteLine(card: HTMLElement, note: string | undefined): void {
   if (!line) return;
   line.classList.toggle("hidden", note === undefined);
   const text = line.querySelector(".note-text")!;
-  if (text.textContent !== (note ?? "")) text.textContent = note ?? "";
+  const head = note === undefined ? "" : noteHead(note);
+  if (text.textContent !== head) text.textContent = head;
   line.title = note === undefined ? "" : `${note}\nClick to change the note`;
 }
 
@@ -1016,7 +1026,7 @@ function cardTitle(view: SessionView): string {
   if (quiet !== undefined) lines.push(`Nothing written to its transcript for ${formatElapsed(quiet)}.`);
   const evidence = describeEvidence(view.evidence, now());
   if (evidence) lines.push(evidence);
-  if (view.note !== undefined) lines.push(`Note: ${view.note}`);
+  if (view.note !== undefined) lines.push(`Note: ${noteHead(view.note)}`);
   return lines.join("\n");
 }
 
@@ -1200,9 +1210,11 @@ function createPastCard(view: PastView, archived = false): HTMLElement {
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  row.append(el("span", "title"), el("span", "elapsed"), noteButton(view.id));
-  if (!archived) row.append(starButton(view.id));
-  row.append(archiveButton(view.id, archived));
+  const actions = el("span", "actions");
+  actions.append(noteButton(view.id));
+  if (!archived) actions.append(starButton(view.id));
+  actions.append(archiveButton(view.id, archived));
+  row.append(el("span", "title"), el("span", "elapsed"), actions);
   main.append(row, noteLine(view.id), el("span", "chips"), el("span", "hits hidden"));
   card.append(main);
   markCard(card, row, view.agent);
@@ -1267,7 +1279,9 @@ function createFavouriteCard(id: string, agent: string): HTMLElement {
   card.append(el("span", "rail"));
   const main = el("span", "main");
   const row = el("span", "row");
-  row.append(el("span", "title"), el("span", "elapsed"), noteButton(id), starButton(id));
+  const actions = el("span", "actions");
+  actions.append(noteButton(id), starButton(id));
+  row.append(el("span", "title"), el("span", "elapsed"), actions);
   main.append(row, noteLine(id), el("span", "chips"));
   card.append(main);
   markCard(card, row, agent);
