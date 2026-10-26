@@ -9,6 +9,7 @@ import { BackgroundReads } from "../core/background";
 import { SavedPositions } from "../core/savedPositions";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { closeStores, runScan } from "../core/agents/lineReaders";
+import { managedRetention, readRetention, retentionIn, userSettingsFile, writeRetention } from "../core/agents/claude/retention";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
 import { chatStorageRoots, LocalChats } from "../core/agents/copilot/localChats";
@@ -38,6 +39,12 @@ import type { Config } from "./config";
 import type { Log } from "./log";
 import type { Terminals } from "./terminals";
 import { isWatched } from "./watch";
+
+/** How applying `lookout.retention.days` went: a write, or why not. */
+export type RetentionOutcome =
+  | { kind: "written"; days: number; file: string; backup?: string; overriddenBy?: string }
+  | { kind: "managed"; days: number; file: string }
+  | { kind: "failed"; days: number; file: string; why: string };
 
 /** Polling interval while the agents' records are watched; the watch triggers polls in between. */
 const BACKSTOP_MS = 5000;
@@ -227,6 +234,10 @@ export class Controller implements vscode.Disposable {
   private parkAfterMs = 24 * 3_600_000;
   /** Claude Code is watched: its sessions, and its usage, fetched by running it. */
   private claudeOn = true;
+  /** The Claude Code config directory watched: its settings files say how long it keeps transcripts. */
+  private claudeConfigDir = "";
+  /** Keep Claude Code's transcripts this many days, written into its user settings file; 0 leaves Claude Code's own. */
+  private retentionDays = 0;
   private usageCache: UsageCache | undefined;
   private usageMode: RefreshMode = "manual";
   private usageRead: UsageRead = { snapshot: undefined, why: "missing" };
@@ -337,6 +348,29 @@ export class Controller implements vscode.Disposable {
   /** Which earlier sessions are listed, the most listed, and whether older ones were left out. */
   get earlier(): { scope: EarlierScope; limit: number; capped: boolean; notes?: string[] } {
     return { scope: this.earlierScope, limit: this.earlierLimit, capped: this.earlierCapped, notes: this.earlierNotes.length ? this.earlierNotes : undefined };
+  }
+
+  /**
+   * Keeps Claude Code's retention of transcripts at `lookout.retention.days`:
+   * the one setting Lookout writes, into Claude Code's user settings file,
+   * when that file says otherwise. Nothing while the setting is 0, Claude
+   * Code is off, or the file holds the value already; else what was done.
+   */
+  applyRetention(): RetentionOutcome | undefined {
+    const days = this.retentionDays;
+    if (!this.claudeOn || this.claudeConfigDir === "" || days <= 0) return undefined;
+    // Managed settings win over the user's file: a write there would change nothing.
+    const managed = managedRetention(this.claudeConfigDir);
+    if (managed.in.kind === "set" || managed.in.kind === "invalid") return { kind: "managed", days, file: managed.file ?? "the managed settings" };
+    const file = userSettingsFile(this.claudeConfigDir);
+    const held = retentionIn(file);
+    if (held.kind === "set" && held.days === days) return undefined;
+    const outcome = writeRetention(this.claudeConfigDir, days);
+    if (!outcome.ok) return { kind: "failed", days, file: outcome.file, why: outcome.why };
+    // A folder's own settings file still sets its own for this window.
+    const effective = readRetention(this.claudeConfigDir, this.host.workspaceFolders());
+    const overriddenBy = effective.level === "project" || effective.level === "local" ? effective.file : undefined;
+    return { kind: "written", days, file: outcome.file, ...(outcome.backup ? { backup: outcome.backup } : {}), ...(overriddenBy ? { overriddenBy } : {}) };
   }
 
   /** How to resume a session that is not running in a terminal, for an agent whose sessions resume there. */
@@ -883,6 +917,8 @@ export class Controller implements vscode.Disposable {
     this.setToolOutput(config.searchToolOutput);
     this.claudeOn = config.claudeEnabled;
     this.remembered.clear();
+    this.claudeConfigDir = config.claudeConfigDir;
+    this.retentionDays = config.retentionDays;
     this.providers = config.claudeEnabled ? [new ClaudeProvider(config.claudeConfigDir, this.proc)] : [];
     if (config.codexEnabled) {
       // Codex keeps no per-process file: its sessions are its running processes, found by name.
@@ -951,11 +987,12 @@ export class Controller implements vscode.Disposable {
     if (keep !== this.historyKeep) this.keepOffSince = this.historyKeep ? undefined : Date.now();
     this.keepFavourites = config.keepFavourites;
     this.setToolOutput(config.searchToolOutput);
+    this.retentionDays = config.retentionDays;
     this.poll();
     if (keep !== this.historyKeep) this.sweepStore();
   }
 
-  /** The window's folders changed: other windows place the sessions VS Code runs in them by its folders. */
+  /** The window's folders changed: other windows place the sessions VS Code runs in them by its folders, and their settings files can set the retention. */
   foldersChanged(): void {
     this.register();
     this.poll();

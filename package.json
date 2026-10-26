@@ -530,6 +530,13 @@
             "default": false,
             "markdownDescription": "Also keep what the agents' tool calls ran and returned (commands, their output, errors) in the search, so an error string or a command finds its session. Each call and each result is kept to its first and last 2 KB. Off by default: tool output is where secrets end up (environment dumps, tokens, file contents), and it is several times the size of the conversation. It is never kept past the purge: when the agent deletes a transcript, its tool output goes, though its conversation stays. Turning this off lets go of every tool call and result kept at once. Needs a VS Code whose Node has `node:sqlite`."
           },
+          "lookout.retention.days": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 36500,
+            "markdownDescription": "Keep Claude Code's transcripts this many days: Lookout writes `cleanupPeriodDays` into Claude Code's user settings file (`~/.claude/settings.json`) when it says otherwise, every other key kept and a copy of the file as it was beside it; Claude Code applies it at its next start. `0` leaves Claude Code's own setting (30 days by default); `3650` is ten years. Managed settings, and a folder's own `.claude/settings.json`, win over it."
+          },
           "lookout.agentMarkers": {
             "type": "string",
             "enum": [

@@ -190,6 +190,24 @@ export function activate(context: vscode.ExtensionContext): void {
     const choice = await vscode.window.showWarningMessage(`Forget the conversation of "${title}"?`, { modal: true, detail: "The agent deleted its transcript; what Lookout kept is the only copy left, and goes for good. A note on it stays." }, "Forget");
     if (choice === "Forget") controller.forget(id);
   };
+  /** Keeps Claude Code's retention of transcripts at `lookout.retention.days`, and says what was written, or why not. */
+  function applyRetention(): void {
+    const outcome = controller.applyRetention();
+    if (!outcome) return;
+    switch (outcome.kind) {
+      case "written":
+        void vscode.window.showInformationMessage(
+          `Lookout wrote cleanupPeriodDays ${outcome.days} into ${outcome.file}${outcome.backup ? `, with the file as it was at ${outcome.backup}` : ""}. Claude Code keeps transcripts ${outcome.days} days from its next start.${outcome.overriddenBy ? ` ${outcome.overriddenBy} sets its own for this window's folders.` : ""}`,
+        );
+        return;
+      case "managed":
+        void vscode.window.showWarningMessage(`Lookout did not write cleanupPeriodDays ${outcome.days}: managed settings at ${outcome.file} set it, and those win over the user's file.`);
+        return;
+      case "failed":
+        void vscode.window.showWarningMessage(`Lookout did not write cleanupPeriodDays ${outcome.days}: ${outcome.file} ${outcome.why}. Add it to the file yourself.`);
+        return;
+    }
+  }
   const findings = new Findings(context.extensionUri, {
     titleOf: (id) => controller.titleOf(id) ?? id,
     agentOf,
@@ -402,6 +420,8 @@ export function activate(context: vscode.ExtensionContext): void {
       gate.setCooldown(config.notifyCooldownMs);
       if (moved) controller.start(config);
       else controller.configure(config);
+      // The retention is kept after the controller knows the new value.
+      if (event.affectsConfiguration("lookout.retention.days")) applyRetention();
       render();
     }),
     vscode.commands.registerCommand(JUMP, async () => {
@@ -494,6 +514,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   controller.start(config);
+  applyRetention();
   render();
 }
 

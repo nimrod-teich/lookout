@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { remoteSettingsFile } from "../../src/core/agents/claude/retention";
 import { JumpMailbox } from "../../src/core/jumpMailbox";
 import { NOTE_MAX, SessionRecords } from "../../src/core/sessionRecords";
 import { loadSqlite } from "../../src/core/sqlite";
@@ -570,6 +571,79 @@ describe("the extension", () => {
     }
   }, 60_000);
 
+  describe("Claude Code's retention of transcripts", () => {
+    const settings = () => path.join(configDir, "settings.json");
+    const warnings = () => stub.ops.filter(([target, action]) => target === "window" && action === "warning").map(([, , text]) => String(text));
+    const changed = () => stub.configChange.fire({ affectsConfiguration: (section: string) => section === "lookout" || section === "lookout.retention.days" });
+
+    it("leaves Claude Code's settings alone while the setting is 0", async () => {
+      writeTranscript();
+      activate(context());
+      await settle();
+      expect(fs.existsSync(settings())).toBe(false);
+      expect(infoMessages()).toEqual([]);
+      expect(warnings()).toEqual([]);
+    }, 60_000);
+
+    it("writes the setting's days into Claude Code's user settings file, every other key kept and a copy beside it, and again only when the setting changes", async () => {
+      stub.config["lookout.retention.days"] = 3650;
+      fs.writeFileSync(settings(), JSON.stringify({ model: "opus" }));
+      activate(context());
+      await vi.waitFor(() => expect(JSON.parse(fs.readFileSync(settings(), "utf8"))).toEqual({ model: "opus", cleanupPeriodDays: 3650 }), WAIT);
+      expect(fs.readdirSync(configDir).filter((name) => name.startsWith("settings.json.") && name.endsWith(".before-lookout"))).toHaveLength(1);
+      expect(infoMessages().at(-1)).toMatch(/wrote cleanupPeriodDays 3650 into .*settings\.json, with the file as it was at .*\. Claude Code keeps transcripts 3650 days from its next start\./);
+      const told = infoMessages().length;
+      // The same value again, on any settings change: nothing more.
+      changed();
+      await settle();
+      expect(infoMessages()).toHaveLength(told);
+      // Another value: written.
+      stub.config["lookout.retention.days"] = 90;
+      changed();
+      await vi.waitFor(() => expect(JSON.parse(fs.readFileSync(settings(), "utf8"))).toEqual({ model: "opus", cleanupPeriodDays: 90 }), WAIT);
+      expect(infoMessages()).toHaveLength(told + 1);
+      // Back to 0: the file is left as it is.
+      stub.config["lookout.retention.days"] = 0;
+      changed();
+      await settle();
+      expect(JSON.parse(fs.readFileSync(settings(), "utf8"))).toEqual({ model: "opus", cleanupPeriodDays: 90 });
+      expect(infoMessages()).toHaveLength(told + 1);
+    }, 60_000);
+
+    it("creates the file when there is none, and says when a folder's file sets its own", async () => {
+      const folder = path.join(configDir, "proj");
+      fs.mkdirSync(path.join(folder, ".claude"), { recursive: true });
+      fs.writeFileSync(path.join(folder, ".claude", "settings.json"), JSON.stringify({ cleanupPeriodDays: 7 }));
+      workspace.workspaceFolders = [{ uri: { fsPath: folder } }];
+      try {
+        stub.config["lookout.retention.days"] = 365;
+        activate(context());
+        await vi.waitFor(() => expect(fs.existsSync(settings())).toBe(true), WAIT);
+        expect(JSON.parse(fs.readFileSync(settings(), "utf8"))).toEqual({ cleanupPeriodDays: 365 });
+        expect(infoMessages().at(-1)).toMatch(/wrote cleanupPeriodDays 365 into .*settings\.json\. Claude Code keeps transcripts 365 days from its next start\. .*proj.*settings\.json sets its own for this window's folders\./);
+      } finally {
+        workspace.workspaceFolders = undefined;
+      }
+    }, 60_000);
+
+    it("says when the file cannot be written, and when managed settings win", async () => {
+      stub.config["lookout.retention.days"] = 3650;
+      fs.writeFileSync(settings(), "{ not json");
+      activate(context());
+      await vi.waitFor(() => expect(warnings().at(-1)).toMatch(/did not write cleanupPeriodDays 3650: .*settings\.json does not parse as JSON\. Add it to the file yourself\./), WAIT);
+      expect(fs.readFileSync(settings(), "utf8")).toBe("{ not json");
+      // The cached server-managed settings set it: those win, so nothing is written.
+      fs.writeFileSync(settings(), JSON.stringify({ model: "opus" }));
+      fs.writeFileSync(remoteSettingsFile(configDir), JSON.stringify({ cleanupPeriodDays: 14 }));
+      changed();
+      await settle();
+      stub.config["lookout.retention.days"] = 3651;
+      changed();
+      await vi.waitFor(() => expect(warnings().at(-1)).toMatch(/did not write cleanupPeriodDays 3651: managed settings at .* set it/), WAIT);
+      expect(JSON.parse(fs.readFileSync(settings(), "utf8"))).toEqual({ model: "opus" });
+    }, 60_000);
+  });
+
   describe("earlier sessions", () => {
     const HERE = "00000000-0000-4000-8000-0000000000b1";
     const ELSEWHERE = "00000000-0000-4000-8000-0000000000b2";
@@ -590,6 +664,8 @@ describe("the extension", () => {
 
     beforeEach(() => {
       workspace.workspaceFolders = [{ uri: { fsPath: "/work/app" } }];
+      // The retention line under Earlier has tests of its own.
+      stub.config["lookout.retention.hint"] = false;
       writePast("/work/app", HERE, "main", "tune the deploy script");
       writePast("/work/other", ELSEWHERE, "fix-x", "deploy the other service");
     });
