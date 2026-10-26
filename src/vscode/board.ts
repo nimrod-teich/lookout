@@ -29,6 +29,10 @@ export interface BoardActions {
   togglePark?(id: string): void;
   /** Asks for the user's note on a session, and keeps it. */
   editNote?(id: string): void;
+  /** The sessions whose transcript the agent deleted, their conversations kept. */
+  purged?(): readonly PastView[];
+  /** Forgets a purged session: its kept conversation goes. */
+  forget?(id: string): void;
   /** How the sessions are ordered inside each group. */
   sort?(): SessionSort;
   /** The user dragged a card: their own order, which the board now follows. */
@@ -131,6 +135,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
           earlier: this.actions.earlier(),
           favourites: this.actions.favourites(),
           archive: this.actions.archive?.().past,
+          purged: this.actions.purged ? [...this.actions.purged()] : undefined,
           watching: this.actions.watching?.(),
           sort: this.actions.sort?.(),
           group: this.actions.group?.(),
@@ -204,8 +209,15 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         // Only a session the board was shown, or one already starred.
         const id = message.id;
         if (typeof id !== "string") return;
-        const known = this.actions.sessions().some((v) => v.id === id) || this.actions.past().some((p) => p.id === id) || this.actions.favourites().ids.includes(id);
+        const known = this.actions.sessions().some((v) => v.id === id) || this.actions.past().some((p) => p.id === id) || this.actions.favourites().ids.includes(id) || (this.actions.purged?.() ?? []).some((p) => p.id === id);
         if (known) this.actions.toggleFavourite(id);
+        return;
+      }
+      case "forget": {
+        // Only a purged session the board was shown.
+        const id = message.id;
+        if (typeof id !== "string") return;
+        if ((this.actions.purged?.() ?? []).some((p) => p.id === id)) this.actions.forget?.(id);
         return;
       }
       case "archive": {
@@ -239,7 +251,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         // Only a session the board was shown, running or not.
         const id = message.id;
         if (typeof id !== "string") return;
-        const known = this.actions.sessions().some((v) => v.id === id) || [...this.actions.past(), ...this.actions.favourites().past, ...(this.actions.archive?.().past ?? [])].some((p) => p.id === id);
+        const known = this.actions.sessions().some((v) => v.id === id) || [...this.actions.past(), ...this.actions.favourites().past, ...(this.actions.archive?.().past ?? []), ...(this.actions.purged?.() ?? [])].some((p) => p.id === id);
         if (known) this.actions.editNote?.(id);
         return;
       }

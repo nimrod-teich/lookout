@@ -138,6 +138,8 @@ export interface PastView {
   noteAt?: number;
   /** How many notes it has. */
   noteCount?: number;
+  /** The agent deleted its transcript; Lookout kept what was said. It cannot be resumed. */
+  purged?: boolean;
 }
 
 export interface SessionSpend {

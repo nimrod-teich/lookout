@@ -188,14 +188,19 @@ export class ClaudeProvider implements AgentProvider {
   }
 
   /** The conversations a search covers: the live sessions', then the past ones last listed. */
-  private *conversations(): Iterable<Searchable> {
-    for (const [id, tracked] of this.tracked) yield { id, cwd: tracked.state.cwd ?? "", branch: tracked.state.gitBranch, index: () => this.indexFor(id) };
-    for (const id of this.pastFiles.keys()) {
+  *conversations(): Iterable<Searchable> {
+    for (const [id, tracked] of this.tracked) yield { id, cwd: tracked.state.cwd ?? "", branch: tracked.state.gitBranch, index: () => this.indexFor(id), ...(tracked.file ? { file: tracked.file } : {}) };
+    for (const [id, file] of this.pastFiles) {
       if (this.tracked.has(id)) continue;
       // Without what the list said of it, no project or branch picks it.
       const meta = this.pastMeta.get(id);
-      yield { id, pastModifiedAt: meta?.modifiedAt, cwd: meta?.cwd ?? "", branch: meta?.branch, index: () => this.indexFor(id) };
+      yield { id, pastModifiedAt: meta?.modifiedAt, cwd: meta?.cwd ?? "", branch: meta?.branch, index: () => this.indexFor(id), file };
     }
+  }
+
+  /** The transcript of a live or a past session, once known. */
+  fileOf(id: string): string | undefined {
+    return this.tracked.get(id)?.file ?? this.pastFiles.get(id);
   }
 
   /**

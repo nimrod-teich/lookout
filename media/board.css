@@ -1853,6 +1853,40 @@ body.vscode-high-contrast-light .card {
   color: var(--ink);
 }
 
+/* The forget button on a purged card's title row, shown on hover like the archive button; red when pointed at. */
+.forget {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.forget svg {
+  width: 12px;
+  height: 12px;
+}
+
+.card:hover .forget,
+.card:focus-within .forget {
+  opacity: 1;
+}
+
+.forget:hover {
+  background: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 18%, transparent);
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+/* Purged: the transcript is gone; a broken rail says so. */
+.card.purged .rail {
+  background: repeating-linear-gradient(to bottom, var(--idle) 0 3px, transparent 3px 6px);
+  opacity: 0.55;
+}
+
 .group-favourites .star-mark {
   font-style: normal;
   color: var(--waiting);

@@ -8,11 +8,12 @@ import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents
 import { BackgroundReads } from "../core/background";
 import { SavedPositions } from "../core/savedPositions";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
+import { closeStores, runScan } from "../core/agents/lineReaders";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
 import { chatStorageRoots, LocalChats } from "../core/agents/copilot/localChats";
 import { CopilotProvider } from "../core/agents/copilot/provider";
-import type { HistoryMessage, SnippetSize } from "../core/history";
+import { readThroughStore, type HistoryMessage, type SnippetSize } from "../core/history";
 import { Attention } from "../core/attention";
 import { clockTime } from "../core/format";
 import { buildPastView, projectOf, restoredTabViews, sortViews, type AgentTabs } from "../core/model";
@@ -22,7 +23,9 @@ import { isParked, park, readParking, settle, unpark, type Parking } from "../co
 import { createProcessFinder, createProcessTable, type ProcessTable } from "../core/proc";
 import type { PastView, SessionView, State } from "../core/types";
 import { RefreshLedger } from "../core/refreshLedger";
+import { searchWithStore } from "../core/search";
 import { latestNote, SessionRecords, type NoteEntry, type SessionSeen } from "../core/sessionRecords";
+import { ConversationStore, type StoredSession } from "../core/store";
 import { hasFilters, parseQuery } from "../core/terms";
 import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
 import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../core/usageAlerts";
@@ -67,6 +70,8 @@ const READ_AHEAD_AFTER_MS = 3000;
 const READ_AHEAD_MS = 2000;
 /** The saved places of conversations that are gone are cleared this long after the window opens. */
 const PRUNE_AFTER_MS = 60_000;
+/** The transcripts are looked for this often: one gone leaves its session under Purged. */
+const SWEEP_MS = 600_000;
 /**
  * The agent can write to the transcript a moment after it records a state:
  * a prompt's tool call, a turn's last reply. An announcement looks again
@@ -102,6 +107,10 @@ export interface ControllerHost {
   savedPositionsDir?: string;
   /** Where Lookout keeps what is its own about each session, the user's note first of all, for every window; without it, no notes. */
   recordsDir?: string;
+  /** The database the conversations go into as they are read, to outlive the agents' transcripts and to be searched; without it, or without `node:sqlite`, the search reads the files as before. */
+  storeFile?: string;
+  /** How often the transcripts are looked for, for the tests. */
+  sweepMs?: number;
   /**
    * The agent's tabs open in this window whose session is not running: after
    * a reload the agent restores its tabs but starts a session only once its
@@ -177,6 +186,23 @@ export class Controller implements vscode.Disposable {
   /** What Lookout keeps about the sessions itself: the user's notes, with each session's title and place as last seen. */
   private readonly records: SessionRecords | undefined;
   private readonly recordsWatch: { dispose(): void } | undefined;
+  /** The conversations, kept: searched from here, and read from here once a transcript is gone. */
+  private readonly store: ConversationStore | undefined;
+  /** The build of the reading code, which the store's rows and the saved places must come from. */
+  private readonly build: string;
+  /** The sessions whose transcript is gone, their conversations kept, last written first. */
+  private purgedPast: PastView[] = [];
+  private purgedKey = "[]";
+  private sweepTimer: ReturnType<typeof setInterval> | undefined;
+  /** Keep a conversation after its transcript goes; off: it goes with it. */
+  private historyKeep = true;
+  /** When keeping went off, if it is: only what is purged since then goes. */
+  private keepOffSince: number | undefined;
+  /** What the store was last told of each session, to tell it only of changes. */
+  private readonly remembered = new Map<string, string>();
+  /** The sessions listed under Earlier at the last poll: one gone since has its transcript looked for at once. */
+  private listedBefore = new Set<string>();
+  private sweepSoon: ReturnType<typeof setTimeout> | undefined;
   private archived = new ArchivedSessions([]);
   private savedDone = "";
   private savedDismissed = "";
@@ -243,9 +269,15 @@ export class Controller implements vscode.Disposable {
     this.alerts.prune(Date.now());
     this.ledger.prune(Date.now());
     const script = host.readerScript;
-    const build = script && host.savedPositionsDir ? buildOf(script) : undefined;
-    const saved = build && host.savedPositionsDir ? new SavedPositions(host.savedPositionsDir, build) : undefined;
-    this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error), saved) : undefined;
+    this.build = (script ? buildOf(script) : undefined) ?? "in-thread";
+    this.store = host.storeFile ? ConversationStore.open(host.storeFile) : undefined;
+    if (host.storeFile && !this.store) this.log.info("The conversations are not kept: this runtime has no node:sqlite, or the database could not be opened");
+    // With the store, the saved places are not needed: the store says how far each file was read.
+    const saved = !this.store && script && host.savedPositionsDir ? new SavedPositions(host.savedPositionsDir, this.build) : undefined;
+    const into = this.store ? { file: this.store.file, build: this.build } : undefined;
+    // Every index reads through the store from now on: a read on its own would leave the store behind.
+    if (into) readThroughStore({ scan: runScan, store: into });
+    this.background = script ? new BackgroundReads(new WorkerScanner(script), () => this.read.fire(), (error) => this.backgroundBroke(error), saved, into) : undefined;
     if (saved) this.pruneTimer = setTimeout(() => void saved.prune(), PRUNE_AFTER_MS);
     this.records = host.recordsDir ? new SessionRecords(host.recordsDir) : undefined;
     // A note written in another window shows here too.
@@ -402,9 +434,100 @@ export class Controller implements vscode.Disposable {
       this.favouritePast.find((view) => view.id === id) ??
       this.archivePast.find((view) => view.id === id) ??
       this.notedPast.find((view) => view.id === id) ??
+      this.purgedPast.find((view) => view.id === id) ??
       this.pastSeen.get(id) ??
       this.recordedView(id)
     );
+  }
+
+  /** The sessions whose transcript the agent deleted, their conversations kept by Lookout. */
+  get purged(): readonly PastView[] {
+    return this.purgedPast;
+  }
+
+  /** The conversations are kept in a store of Lookout's own: searched from it, and read from it once a transcript is gone. */
+  get keepsConversations(): boolean {
+    return this.store !== undefined;
+  }
+
+  /** Forgets a purged session: its kept conversation goes. */
+  forget(id: string): void {
+    if (!this.store) return;
+    this.store.forget([id]);
+    this.pastSeen.delete(id);
+    this.sweepStore();
+  }
+
+  /** Forgets every purged session; how many. */
+  forgetPurged(): number {
+    if (!this.store) return 0;
+    const count = this.store.forgetPurged();
+    this.sweepStore();
+    return count;
+  }
+
+  /**
+   * Looks for every remembered session's transcript: one gone leaves its
+   * session under Purged, with its conversation kept, or, with nothing
+   * kept, is forgotten; one back comes back.
+   */
+  private sweepStore(): void {
+    if (!this.store || this.disposed) return;
+    const letting = this.keepOffSince === undefined ? undefined : { after: this.keepOffSince, graceMs: this.host.sweepMs ?? SWEEP_MS };
+    this.store.sweep(Date.now(), new Set(), letting);
+    // With keeping off, nothing shows under Purged; what was kept before stays in the store until forgotten.
+    const purged = this.historyKeep ? this.store.purged() : [];
+    const key = JSON.stringify(purged);
+    if (key === this.purgedKey) return;
+    this.purgedKey = key;
+    this.purgedPast = purged.map(purgedView);
+    this.poll();
+  }
+
+  /** A session listed last time and neither listed nor running now: its transcript may be gone, so the sweep runs at once rather than at its hour. */
+  private noticeVanished(live: readonly SessionView[], past: readonly PastView[]): void {
+    const listed = new Set(past.map((view) => view.id));
+    let vanished = false;
+    for (const id of this.listedBefore) {
+      if (listed.has(id) || live.some((view) => view.id === id)) continue;
+      vanished = true;
+      break;
+    }
+    this.listedBefore = listed;
+    if (!vanished || !this.store || this.sweepSoon) return;
+    this.sweepSoon = setTimeout(() => {
+      this.sweepSoon = undefined;
+      this.sweepStore();
+    }, DEBOUNCE_MS);
+  }
+
+  /** Tells the store what each listed session is called and where its conversation is, when that changed. */
+  private rememberSessions(live: readonly SessionView[], past: readonly PastView[]): void {
+    if (!this.store) return;
+    const remember = (id: string, agent: string, title: string, cwd: string, branch: string | undefined, modifiedAt: number | undefined) => {
+      const file = this.fileOf(id);
+      if (!file) return;
+      const key = [agent, file, title, cwd, branch ?? "", modifiedAt ?? ""].join("\n");
+      if (this.remembered.get(id) === key) return;
+      try {
+        this.store!.rememberSession({ id, agent, file, title, cwd, branch, modifiedAt });
+        this.remembered.set(id, key);
+      } catch (error) {
+        this.log.errorOnce(`The conversation store could not be written: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    // A running session's time changes with every line: the store keeps the one it has until the session rests.
+    for (const view of live) if (!view.restored) remember(view.id, view.agent, view.title, view.cwd, view.branch, undefined);
+    for (const view of past) if (!view.purged) remember(view.id, view.agent, view.title, view.cwd, view.branch, view.modifiedAt);
+  }
+
+  /** The conversation file of a live or a past session, from its agent. */
+  private fileOf(id: string): string | undefined {
+    for (const provider of this.providers) {
+      const file = provider.fileOf?.(id);
+      if (file) return file;
+    }
+    return undefined;
   }
 
   /** What a session's record says it was called and where it worked, for a session no agent lists any more. */
@@ -499,7 +622,7 @@ export class Controller implements vscode.Disposable {
       out.push({ id, notes, cwd, branch });
     };
     for (const view of this.current) take(view.id, view.cwd, view.branch);
-    for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast]) take(view.id, view.cwd, view.branch);
+    for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast, ...this.purgedPast]) take(view.id, view.cwd, view.branch);
     for (const record of this.records.noted()) take(record.id, record.cwd ?? "", record.branch);
     return out;
   }
@@ -575,7 +698,10 @@ export class Controller implements vscode.Disposable {
   start(config: Config): void {
     this.typedQuestions = config.typedQuestions;
     this.parkAfterMs = config.parkAfterMs;
+    this.historyKeep = config.historyKeep;
+    this.keepOffSince = config.historyKeep ? undefined : (this.keepOffSince ?? Date.now());
     this.claudeOn = config.claudeEnabled;
+    this.remembered.clear();
     this.providers = config.claudeEnabled ? [new ClaudeProvider(config.claudeConfigDir, this.proc)] : [];
     if (config.codexEnabled) {
       // Codex keeps no per-process file: its sessions are its running processes, found by name.
@@ -620,6 +746,11 @@ export class Controller implements vscode.Disposable {
       this.readAheadTimer = setTimeout(() => this.poll(), READ_AHEAD_AFTER_MS);
     }
     this.poll();
+    if (this.store) {
+      if (this.sweepTimer) clearInterval(this.sweepTimer);
+      this.sweepTimer = setInterval(() => this.sweepStore(), this.host.sweepMs ?? SWEEP_MS);
+      this.sweepStore();
+    }
   }
 
   /** How many agents are watched: none when every agent is turned off. */
@@ -634,7 +765,11 @@ export class Controller implements vscode.Disposable {
     this.usageMode = config.usageRefresh;
     this.usageAlerts = config.usageAlerts;
     this.refreshDisabledByEnv = config.usageRefreshDisabled;
+    const keep = this.historyKeep;
+    this.historyKeep = config.historyKeep;
+    if (keep !== this.historyKeep) this.keepOffSince = this.historyKeep ? undefined : Date.now();
     this.poll();
+    if (keep !== this.historyKeep) this.sweepStore();
   }
 
   /** The window's folders changed: other windows place the sessions VS Code runs in them by its folders. */
@@ -701,7 +836,8 @@ export class Controller implements vscode.Disposable {
     // The archived leave Earlier for the Archived group, newest archive first.
     const shownPast = past.filter((view) => !archived.has(view.id) && notRestored(view));
     const archivePast = [...past, ...also].filter((view) => archived.has(view.id) && notRestored(view)).sort((a, b) => archive.indexOf(a.id) - archive.indexOf(b.id));
-    const favouritePast = also.filter((view) => stars.has(view.id) && !archived.has(view.id));
+    // A starred session whose transcript is gone is listed from the store, as no agent lists it.
+    const favouritePast = [...also.filter((view) => stars.has(view.id) && !archived.has(view.id)), ...this.purgedPast.filter((view) => stars.has(view.id) && !archived.has(view.id))];
     // Noted sessions no other list holds: not on the board, but searched and known by name.
     const notedPast = also.filter((view) => !stars.has(view.id) && !archived.has(view.id) && notRestored(view));
     this.earlierCapped = capped || shownPast.length > EARLIER_LIMIT;
@@ -709,9 +845,11 @@ export class Controller implements vscode.Disposable {
     // An idle tab or terminal with nothing sent is not worth a card.
     const shown = update.views.filter((view) => !(view.empty && view.state === "idle"));
     const live = this.annotate(sortViews(this.parkViews([...shown, ...restored], Date.now())));
-    this.publish(live, this.annotate(shownPast.slice(0, EARLIER_LIMIT)), this.annotate(favouritePast), this.annotate(archivePast), this.annotate(notedPast));
-    for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast]) this.pastSeen.set(view.id, view);
-    this.observeRecords(live, [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast]);
+    this.rememberSessions(live, [...past, ...also]);
+    this.noticeVanished(update.views, past);
+    this.publish(live, this.annotate(shownPast.slice(0, EARLIER_LIMIT)), this.annotate(favouritePast), this.annotate(archivePast), this.annotate(notedPast), this.annotate(this.purgedPast));
+    for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast, ...this.purgedPast]) this.pastSeen.set(view.id, view);
+    this.observeRecords(live, [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast, ...this.purgedPast]);
     if (incomplete) this.scheduleFill();
     this.saveDone();
     for (const view of update.finished) this.announceFinished(view);
@@ -924,24 +1062,34 @@ export class Controller implements vscode.Disposable {
     if (parsed.terms.length === 0 && !hasFilters(parsed)) return outcome;
     // `has:note` without words asks for the notes alone: the conversations have nothing to add, nor to be read for.
     const notesOnly = parsed.hasNote === true && parsed.terms.length === 0;
+    const limit = page?.hits ?? SEARCH_HITS;
     for (const provider of notesOnly ? [] : this.providers) {
       const left = Math.max(0, SEARCH_BUDGET_MS - (Date.now() - started));
-      const part = provider.search?.(parsed, page?.hits ?? SEARCH_HITS, left, page?.snippet, this.background);
+      // From the store where there is one: one query over the conversations it holds.
+      const part = this.store && provider.conversations ? searchWithStore(provider.conversations(), parsed, limit, left, page?.snippet, this.background, this.store) : provider.search?.(parsed, limit, left, page?.snippet, this.background);
       if (!part) continue;
       outcome.results.push(...part.results);
       outcome.pending += part.pending;
+    }
+    // The purged sessions' conversations, from the store alone.
+    if (this.store && !notesOnly && this.purgedPast.length > 0) {
+      const store = this.store;
+      const conversations = this.purgedPast.map((view) => ({ id: view.id, cwd: view.cwd, branch: view.branch, pastModifiedAt: view.modifiedAt, file: store.session(view.id)?.file, index: () => undefined }));
+      const part = searchWithStore(conversations, parsed, limit, 0, page?.snippet, undefined, store);
+      outcome.results.push(...part.results);
     }
     // The notes count as one more line of their sessions' conversations.
     return this.records ? withNotes(outcome, this.noteCandidates(), parsed, page?.hits ?? SEARCH_HITS, page?.snippet) : outcome;
   }
 
-  /** The conversation of one live session, oldest first. */
+  /** The conversation of one session, oldest first: from its agent's transcript, or from the store once the transcript is gone. */
   history(id: string): HistoryMessage[] | undefined {
     for (const provider of this.providers) {
       const messages = provider.history?.(id, this.background);
       if (messages) return messages;
     }
-    return undefined;
+    const file = this.store?.session(id)?.file;
+    return file ? this.store?.messages(file) : undefined;
   }
 
   /** The user looked at this session. */
@@ -1023,8 +1171,8 @@ export class Controller implements vscode.Disposable {
     }, DEBOUNCE_MS);
   }
 
-  private publish(views: SessionView[], past: PastView[], favouritePast: PastView[], archivePast: PastView[], notedPast: PastView[]): void {
-    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.earlierNotes, this.favouriteIds(), favouritePast, archivePast, notedPast]);
+  private publish(views: SessionView[], past: PastView[], favouritePast: PastView[], archivePast: PastView[], notedPast: PastView[], purgedPast: PastView[]): void {
+    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.earlierNotes, this.favouriteIds(), favouritePast, archivePast, notedPast, purgedPast]);
     if (snapshot === this.snapshot) return;
     this.snapshot = snapshot;
     this.current = views;
@@ -1032,6 +1180,7 @@ export class Controller implements vscode.Disposable {
     this.favouritePast = favouritePast;
     this.archivePast = archivePast;
     this.notedPast = notedPast;
+    this.purgedPast = purgedPast;
     this.changed.fire(views);
   }
 
@@ -1061,8 +1210,14 @@ export class Controller implements vscode.Disposable {
     if (this.fill) clearTimeout(this.fill);
     if (this.readAheadTimer) clearTimeout(this.readAheadTimer);
     if (this.pruneTimer) clearTimeout(this.pruneTimer);
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+    if (this.sweepSoon) clearTimeout(this.sweepSoon);
     this.recordsWatch?.dispose();
     this.background?.dispose();
+    readThroughStore(undefined);
+    this.store?.close();
+    // The in-thread reads opened the store too.
+    closeStores();
     this.read.dispose();
     for (const timer of this.announcing) clearTimeout(timer);
     this.announcing.clear();
@@ -1078,6 +1233,11 @@ export class Controller implements vscode.Disposable {
     this.finished.dispose();
     this.waiting.dispose();
   }
+}
+
+/** A purged session as the board shows it: not running, not resumable, its conversation kept. */
+function purgedView(session: StoredSession): PastView {
+  return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), branch: session.branch, cwd: session.cwd, resumable: false, modifiedAt: session.modifiedAt ?? session.purgedAt ?? 0, purged: true };
 }
 
 /** What a session is called and where it works, as the board has it, for its record; `withTime`: when its transcript was last written, too. */

@@ -20,6 +20,8 @@ interface BoardState {
   parked?: boolean;
   /** The user opened the Archived group. */
   archive?: boolean;
+  /** The user opened the Purged group. */
+  purged?: boolean;
   /** Agents the user hid through the legend. */
   agents?: string[];
   /** The agent whose usage tab the user picked. */
@@ -115,9 +117,16 @@ let usageTab: string | undefined = vscode.getState()?.usageTab;
 let archivePage = 0;
 let archiveEl: HTMLElement | undefined;
 const archiveCards = new Map<string, HTMLElement>();
+/** The sessions whose transcript the agent deleted, their conversations kept by Lookout, last written first. */
+let purgedPast: PastView[] = [];
+/** The user opened the Purged group; kept across reloads. */
+let purgedOpen = vscode.getState()?.purged === true;
+let purgedPage = 0;
+let purgedEl: HTMLElement | undefined;
+const purgedCards = new Map<string, HTMLElement>();
 
 function saveState(): void {
-  vscode.setState({ hidden: [...hidden], folded: [...folded], earlier: earlierOpen, parked: parkedOpen, archive: archiveOpen, agents: [...hiddenAgents], usageTab });
+  vscode.setState({ hidden: [...hidden], folded: [...folded], earlier: earlierOpen, parked: parkedOpen, archive: archiveOpen, purged: purgedOpen, agents: [...hiddenAgents], usageTab });
 }
 
 /** On a section by attribute: a dot and a count per state it holds, in the legend's colours. */
@@ -567,7 +576,7 @@ let results: SearchResult[] = [];
 
 /** The agent of a session the board holds, running or not. */
 function agentOfId(id: string): string | undefined {
-  return (allSessions.find((view) => view.id === id) ?? past.find((view) => view.id === id) ?? favourites.past.find((view) => view.id === id) ?? archivePast.find((view) => view.id === id))?.agent;
+  return (allSessions.find((view) => view.id === id) ?? past.find((view) => view.id === id) ?? favourites.past.find((view) => view.id === id) ?? archivePast.find((view) => view.id === id) ?? purgedPast.find((view) => view.id === id))?.agent;
 }
 
 /** How much the search found, among the sessions the board holds and the agents shown: a session the board has no card for, and those hidden in the legend, are left out of the count as of the cards. */
@@ -1244,9 +1253,30 @@ function archiveButton(id: string, archived: boolean): HTMLElement {
   return button;
 }
 
-/** An earlier session's card; an archived one has no star, and its button brings it back. */
-function createPastCard(view: PastView, archived = false): HTMLElement {
-  const card = el("button", "card past");
+/** A broken page: the kept conversation goes. */
+const FORGET_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.3 2.5h3.4M4.2 4.5l.7 8.3a.6.6 0 0 0 .6.5h5a.6.6 0 0 0 .6-.5l.7-8.3M6.6 7v4M9.4 7v4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/** The button on a purged card's title row that forgets the session: its kept conversation goes. */
+function forgetButton(id: string): HTMLElement {
+  const button = el("span", "forget");
+  button.setAttribute("role", "button");
+  button.title = "Forget: the conversation Lookout kept goes";
+  button.setAttribute("aria-label", "Forget the conversation");
+  button.innerHTML = FORGET_ICON;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    vscode.postMessage({ type: "forget", id });
+  });
+  return button;
+}
+
+/** What a card that is not running is listed as: it changes which buttons it carries. */
+type PastKind = "earlier" | "archived" | "purged";
+
+/** An earlier session's card; an archived one has no star, and its button brings it back; a purged one's button forgets it. */
+function createPastCard(view: PastView, kind: PastKind = "earlier"): HTMLElement {
+  const card = el("button", kind === "purged" ? "card past purged" : "card past");
   card.type = "button";
   card.dataset.id = view.id;
   card.append(el("span", "rail"));
@@ -1254,8 +1284,8 @@ function createPastCard(view: PastView, archived = false): HTMLElement {
   const row = el("span", "row");
   const actions = el("span", "actions");
   actions.append(noteButton(view.id));
-  if (!archived) actions.append(starButton(view.id));
-  actions.append(archiveButton(view.id, archived));
+  if (kind !== "archived") actions.append(starButton(view.id));
+  actions.append(kind === "purged" ? forgetButton(view.id) : archiveButton(view.id, kind === "archived"));
   row.append(el("span", "title"), el("span", "elapsed"), actions);
   main.append(row, noteLine(view.id), el("span", "chips"), el("span", "hits hidden"));
   card.append(main);
@@ -1280,6 +1310,7 @@ function resumeWhere(view: PastView): string {
 /** What a click on an earlier session does, and why. */
 function pastTitle(view: PastView, resumable: boolean): string {
   const written = `Not running · last written ${pastElapsed(view)}`;
+  if (view.purged) return `${written} · the agent deleted its transcript, and Lookout kept what was said: click to read it. It cannot be resumed`;
   if (resumable) return `${written} · click to resume it ${resumeWhere(view)}`;
   if (view.resumable) return `${written} · click to read its conversation; Lookout cannot resume ${agentInfo(view.agent).label}'s sessions`;
   return `${written} · from ${view.cwd || "another project"}, not one of this window's folders: click to read its conversation; the agent resumes it from a window open on that folder`;
@@ -1309,7 +1340,7 @@ function updatePastCard(card: HTMLElement, view: PastView): void {
 function favouriteOf(id: string): { live?: SessionView; past?: PastView } {
   const live = allSessions.find((view) => view.id === id);
   if (live) return { live };
-  const view = past.find((p) => p.id === id) ?? favourites.past.find((p) => p.id === id);
+  const view = past.find((p) => p.id === id) ?? favourites.past.find((p) => p.id === id) ?? purgedPast.find((p) => p.id === id);
   return view ? { past: view } : {};
 }
 
@@ -1567,7 +1598,7 @@ function renderArchive(after: HTMLElement): void {
       seen.add(view.id);
       let card = archiveCards.get(view.id);
       if (!card) {
-        card = createPastCard(view, true);
+        card = createPastCard(view, "archived");
         archiveCards.set(view.id, card);
       }
       updatePastCard(card, view);
@@ -1583,14 +1614,79 @@ function renderArchive(after: HTMLElement): void {
   }
 }
 
+/**
+ * The sessions whose transcript the agent deleted, their conversations kept
+ * by Lookout: under Archived, collapsed; open while a search has matches
+ * among them. Gone while there is none.
+ */
+function renderPurged(after: HTMLElement): void {
+  const listed = purgedPast.filter((view) => agentShown(view.agent));
+  const shown = query === "" ? listed : listed.filter((view) => hits.has(view.id));
+  if (listed.length === 0) {
+    purgedEl?.remove();
+    purgedEl = undefined;
+    purgedCards.clear();
+    return;
+  }
+  const open = (purgedOpen || query !== "") && shown.length > 0;
+  if (!purgedEl) {
+    purgedEl = el("section", "group group-past group-purged");
+    const heading = el("h2", "heading");
+    heading.title = "Sessions whose transcript the agent deleted: Lookout kept what you and it said. Click to show or hide them; a click on one reads its conversation, and the button on a card forgets it.";
+    heading.append(el("i", "chev", "▸"), el("span", "label", "Purged"), el("span", "count"));
+    heading.addEventListener("click", () => {
+      purgedOpen = !purgedOpen;
+      saveState();
+      render();
+    });
+    purgedEl.append(heading, el("div", "cards"), pager("Pages of purged sessions", (step) => turnPage(purgedEl, () => (purgedPage += step))));
+  }
+  purgedEl.classList.toggle("open", open);
+  purgedEl.querySelector(".count")!.textContent = query === "" ? String(shown.length) : `${shown.length} of ${listed.length}`;
+  if (purgedEl.previousElementSibling !== after) root.insertBefore(purgedEl, after.nextSibling);
+  const list = purgedEl.querySelector(".cards")!;
+  list.classList.toggle("hidden", !open);
+  const { page: at, first, end } = showPage(purgedEl, shown.length, purgedPage, open);
+  purgedPage = at;
+  const seen = new Set<string>();
+  let previousCard: HTMLElement | undefined;
+  if (open) {
+    for (const view of shown.slice(first, end)) {
+      seen.add(view.id);
+      let card = purgedCards.get(view.id);
+      if (!card) {
+        card = createPastCard(view, "purged");
+        purgedCards.set(view.id, card);
+      }
+      updatePastCard(card, view);
+      const prev = previousCard ?? null;
+      if (card.parentElement !== list || card.previousElementSibling !== prev) list.insertBefore(card, prev ? prev.nextSibling : list.firstChild);
+      previousCard = card;
+    }
+  }
+  for (const [id, card] of purgedCards) {
+    if (seen.has(id)) continue;
+    card.remove();
+    purgedCards.delete(id);
+  }
+}
+
+/** The groups under the live ones: Earlier, then Archived and Purged under it. */
+function renderPastGroups(after: HTMLElement): void {
+  renderEarlier(after);
+  if (!earlierEl) return;
+  renderArchive(earlierEl);
+  renderPurged(archiveEl ?? earlierEl);
+}
+
 function render(): void {
   if (!beam.isConnected) root.prepend(beam);
   if (!meters.isConnected) beam.append(meters);
   renderBeam();
   renderMeters();
   const sections: Section[] = groupBy === "state" ? groupSessions(sessions).map((group) => ({ id: group.key, label: group.label, views: group.views })) : sectionsBy(sessions, groupBy);
-  // While a search runs, archived sessions with matches count too: their group shows them.
-  const archiveMatches = query === "" ? 0 : archivePast.filter((view) => agentShown(view.agent) && hits.has(view.id)).length;
+  // While a search runs, archived and purged sessions with matches count too: their groups show them.
+  const archiveMatches = query === "" ? 0 : [...archivePast, ...purgedPast].filter((view) => agentShown(view.agent) && hits.has(view.id)).length;
   const pastShown = shownPast().shown.length + archiveMatches;
   const nothing = sessions.length === 0 && pastShown === 0;
   root.classList.toggle("empty", nothing);
@@ -1617,10 +1713,10 @@ function render(): void {
       archiveEl?.remove();
       archiveEl = undefined;
       archiveCards.clear();
-    } else {
-      renderEarlier(empty);
-      if (earlierEl) renderArchive(earlierEl);
-    }
+      purgedEl?.remove();
+      purgedEl = undefined;
+      purgedCards.clear();
+    } else renderPastGroups(empty);
     return;
   }
   const seenIds = new Set<string>();
@@ -1688,8 +1784,7 @@ function render(): void {
     section.remove();
     groupsEl.delete(key);
   }
-  renderEarlier(previousGroup);
-  if (earlierEl) renderArchive(earlierEl);
+  renderPastGroups(previousGroup);
 }
 
 function tick(): void {
@@ -1713,6 +1808,10 @@ function tick(): void {
     const card = archiveCards.get(view.id);
     if (card) card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   }
+  for (const view of purgedPast) {
+    const card = purgedCards.get(view.id);
+    if (card) card.querySelector(".elapsed")!.textContent = pastElapsed(view);
+  }
   renderBeam();
   if (usageGroups.length) renderMeters();
 }
@@ -1733,6 +1832,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   if (message.group) groupBy = message.group;
   groupPicker.set(groupBy);
   archivePast = message.archive ?? [];
+  purgedPast = message.purged ?? [];
   // One group, from an extension that knew only Claude's usage, or one per agent.
   usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);
   usageBar = message.usageBar;

@@ -47,6 +47,13 @@ export interface Scan {
    * build of the reading code they must come from.
    */
   saved?: { entry: string; build: string };
+  /**
+   * The store the conversation goes into as it is read (see
+   * `ConversationStore`): a file the store already holds is read from where
+   * the store stopped, and the build of the reading code the rows must come
+   * from.
+   */
+  store?: { file: string; build: string };
 }
 
 /** A line that holds facts, and where it sits in its file. */
@@ -236,6 +243,19 @@ function pathsAt(line: Buffer, start: number, paths: readonly string[]): number[
 const NEWLINE = 0x0a;
 const CHUNK_BYTES = 1024 * 1024;
 
+/** The reading code every index reads through, with the store the conversations go into, while a store is open. */
+export interface ReadThrough {
+  scan(job: Scan): Scanned | undefined;
+  store: { file: string; build: string };
+}
+
+let through: ReadThrough | undefined;
+
+/** Has every index read through the store from now on, or, with nothing, on its own again: a read on its own would leave the store behind. */
+export function readThroughStore(next: ReadThrough | undefined): void {
+  through = next;
+}
+
 /** A path as the index keeps it: lowercased, with forward slashes. */
 function pathKey(p: string): string {
   return p.toLowerCase().replace(/\\/g, "/");
@@ -402,11 +422,18 @@ export class HistoryIndex {
     return this.identity !== "";
   }
 
-  /** Reads what the file gained since the last call, here and now. */
+  /** Reads what the file gained since the last call, here and now: through the store while one is open, so the store follows. */
   refresh(): void {
-    const job = { file: this.file, reader: this.reader.name ?? "", from: this.offset, identity: this.identity };
+    const job = this.scan();
+    if (through && job) {
+      job.store = through.store;
+      const scanned = through.scan(job);
+      if (scanned) this.apply(scanned, job);
+      return;
+    }
+    const direct = { file: this.file, reader: this.reader.name ?? "", from: this.offset, identity: this.identity };
     const scanned = scanFile(this.file, this.reader, this.offset, this.identity);
-    if (scanned) this.apply(scanned, job);
+    if (scanned) this.apply(scanned, direct);
   }
 
   /**
@@ -423,7 +450,7 @@ export class HistoryIndex {
   }
 
   /** The file is not as it was at the last read: replaced, grown or cut short, or never read. */
-  private changed(): boolean {
+  changed(): boolean {
     try {
       const st = fs.statSync(this.file);
       return `${st.ino}:${st.birthtimeMs}` !== this.identity || st.size !== this.seenSize;

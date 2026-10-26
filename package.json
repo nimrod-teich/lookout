@@ -89,6 +89,11 @@
         "icon": "$(note)"
       },
       {
+        "command": "lookout.forgetPurged",
+        "title": "Forget Purged Conversations",
+        "category": "Lookout"
+      },
+      {
         "command": "lookout.sortSessions",
         "title": "Sort Sessions",
         "category": "Lookout"
@@ -406,6 +411,11 @@
             "default": 24,
             "minimum": 0,
             "markdownDescription": "A running session that has been idle or finished this many hours goes under **Parked**, a folded group at the bottom of the board, and comes back when it works again. Its finished mark goes with it. `0`: only the sessions you park yourself."
+          },
+          "lookout.history.keep": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Keep what you and the agent said in every conversation Lookout reads, in a database of its own, after the agent deletes the transcript: the session stays under **Purged**, its conversation readable and searched, until you forget it (the button on its card, or `Lookout: Forget Purged Conversations`). Off: nothing shows under **Purged**, a conversation purged from then on goes at the sweep after the next, in case its transcript was only out of reach for a moment, and what was kept before stays until forgotten. Needs a VS Code whose Node has `node:sqlite`."
           },
           "lookout.agentMarkers": {
             "type": "string",

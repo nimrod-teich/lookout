@@ -33,6 +33,8 @@ export class BackgroundReads {
     private readonly onBroken?: (error: unknown) => void,
     /** Where the places of the messages are kept for the next window, and read from by this one. */
     private readonly saved?: SavedPositions,
+    /** The store the conversations go into as they are read; with one, the saved places are not needed. */
+    private readonly store?: { file: string; build: string },
   ) {}
 
   /** The scanner broke, and nothing more is read here. */
@@ -68,12 +70,13 @@ export class BackgroundReads {
         this.queue.delete(index);
         this.current = index;
         const job = index.scan();
+        if (job && this.store) job.store = this.store;
         // A file never read: from where a window saved its messages' places, when one did.
-        if (job && this.saved && job.from === 0 && job.identity === "") job.saved = { entry: this.saved.entryFile(job.file), build: this.saved.build };
+        else if (job && this.saved && job.from === 0 && job.identity === "") job.saved = { entry: this.saved.entryFile(job.file), build: this.saved.build };
         const scanned = job ? await this.scan(job) : undefined;
         this.current = undefined;
         if (this.disposed) return;
-        if (job && scanned && index.apply(scanned, job) && moved(scanned)) this.saved?.later(index);
+        if (job && scanned && index.apply(scanned, job) && !this.store && moved(scanned)) this.saved?.later(index);
         this.notify();
       }
     } finally {

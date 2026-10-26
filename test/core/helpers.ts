@@ -7,7 +7,8 @@ import type { ProcessInfo, ProcessTable } from "../../src/core/proc";
 const created: string[] = [];
 
 afterEach(() => {
-  for (const dir of created.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  // A reading thread may still be letting go of a store's file: Windows refuses the removal until it has, so the removal is tried again for a moment.
+  for (const dir of created.splice(0)) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 /** A throwaway Claude Code config directory with empty `sessions/` and `projects/`. */

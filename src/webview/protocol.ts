@@ -54,6 +54,8 @@ export type ToBoard =
       favourites?: Favourites;
       /** The sessions archived in Lookout that are not running, newest archive first. */
       archive?: PastView[];
+      /** The sessions whose transcript the agent deleted, their conversations kept by Lookout, last written first. */
+      purged?: PastView[];
       /** How many agents Lookout watches: none when every agent is turned off in the settings. */
       watching?: number;
       /** How the sessions are ordered inside each group, and the user's own order. */
@@ -96,6 +98,8 @@ export type FromBoard =
   | { type: "park"; id: string }
   /** Write a note on a session, running or not, or change the one it has. */
   | { type: "note"; id: string }
+  /** Forget a purged session: its kept conversation goes. */
+  | { type: "forget"; id: string }
   /** The user dragged a card: their own order of the sessions, which the board now follows. */
   | { type: "order"; ids: string[] }
   /** The user dragged a starred card: the favourites in their new order. */
