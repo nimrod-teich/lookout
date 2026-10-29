@@ -11,6 +11,7 @@ import { accountFile, describeDirs } from "../core/agents/claude/account";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { closeStores, runScan } from "../core/agents/lineReaders";
 import { managedRetention, readRetention, retentionIn, userSettingsFile, writeRetention } from "../core/agents/claude/retention";
+import { signInEnv } from "../core/agents/claude/paths";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
 import { chatStorageRoots, LocalChats } from "../core/agents/copilot/localChats";
@@ -377,7 +378,13 @@ export class Controller implements vscode.Disposable {
   /** How to resume a session that is not running in a terminal, for an agent whose sessions resume there. */
   resumeCommand(id: string): ResumeCommand | undefined {
     const agent = this.pastView(id)?.agent;
-    return this.providers.find((provider) => provider.id === agent)?.resumeCommand?.(id);
+    // An agent watched in several accounts has a provider for each: the one that listed the session answers.
+    for (const provider of this.providers) {
+      if (provider.id !== agent) continue;
+      const command = provider.resumeCommand?.(id);
+      if (command) return command;
+    }
+    return undefined;
   }
 
   /** Lists and searches the earlier sessions of this window's folders, or of every project; kept for the workspace. */
@@ -478,7 +485,8 @@ export class Controller implements vscode.Disposable {
     const view = this.liveById.get(id) ?? this.pastView(id);
     if (!view) return undefined;
     const project = view.worktree ? `${view.project} · ${view.worktree}` : view.project;
-    return view.branch ? `${project} · ⎇ ${view.branch}` : project;
+    const where = view.account ? `${view.account} · ${project}` : project;
+    return view.branch ? `${where} · ⎇ ${view.branch}` : where;
   }
 
   /** The title of a live or a past session. */
@@ -920,7 +928,12 @@ export class Controller implements vscode.Disposable {
     this.remembered.clear();
     this.claudeConfigDir = config.claudeConfigDir;
     this.retentionDays = config.retentionDays;
-    this.providers = config.claudeEnabled ? [new ClaudeProvider(config.claudeConfigDir, this.proc)] : [];
+    // One provider per Claude Code directory, each its own account. The first is the one the Claude Code panel runs;
+    // another's sessions resume in a terminal on that directory's sign-in. Their labels show once there are several.
+    const accounts = config.claudeDirs.length > 1;
+    this.providers = config.claudeEnabled
+      ? config.claudeDirs.map((dir, i) => new ClaudeProvider(dir.resolved, this.proc, { ...(accounts ? { account: dir.label } : {}), ...(i > 0 ? { terminalEnv: signInEnv(dir) } : {}) }))
+      : [];
     if (config.codexEnabled) {
       // Codex keeps no per-process file: its sessions are its running processes, found by name.
       // Which threads the VS Code extension's app-server holds, from the files it holds open.
@@ -957,7 +970,8 @@ export class Controller implements vscode.Disposable {
     this.archived = new ArchivedSessions(config.claudeEnabled ? stateDbCandidates(this.host.globalStorageDir) : []);
     if (config.claudeEnabled && !this.archived.available) this.log.info("The agent's archived-session list is out of reach; every past session is listed");
     const homes = [...(config.claudeEnabled ? [config.claudeConfigDir] : []), ...(config.codexEnabled ? [config.codexHome] : []), ...(config.copilotEnabled ? [config.copilotHome] : [])];
-    this.log.info(this.providers.length ? `Watching ${this.providers.map((p) => p.label).join(", ")} (${homes.join(", ")})` : "Watching no agent: every agent is turned off");
+    // An agent watched in several directories is named once; the next lines list its directories.
+    this.log.info(this.providers.length ? `Watching ${[...new Set(this.providers.map((p) => p.label))].join(", ")} (${homes.join(", ")})` : "Watching no agent: every agent is turned off");
     // Several Claude Code directories: which is which, and who each is signed in as, by label only.
     if (config.claudeEnabled) for (const line of describeDirs(config.claudeDirs, config.claudeDirs.map((dir) => accountFile(usageCacheFile(dir.resolved)).read()))) this.log.info(line);
     this.watch();

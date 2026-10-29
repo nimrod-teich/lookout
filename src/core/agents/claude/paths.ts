@@ -125,6 +125,16 @@ function unique(label: string, taken: Set<string>): string {
   return name;
 }
 
+/**
+ * The environment that runs Claude Code on a directory's own sign-in: the
+ * directory in `CLAUDE_CONFIG_DIR` as written, the variable removed for the
+ * default one, and no token or API key in the environment to override it.
+ * Null removes a variable.
+ */
+export function signInEnv(dir: ClaudeDir): Record<string, string | null> {
+  return { CLAUDE_CONFIG_DIR: dir.isDefault ? null : dir.dir, CLAUDE_CODE_OAUTH_TOKEN: null, ANTHROPIC_API_KEY: null };
+}
+
 /** The same directories, spelled the same, with the same labels: nothing to start over for. */
 export function sameDirs(a: readonly ClaudeDir[], b: readonly ClaudeDir[]): boolean {
   return a.length === b.length && a.every((dir, i) => dir.dir === b[i]?.dir && dir.label === b[i]?.label);

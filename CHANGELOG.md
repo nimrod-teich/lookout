@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- **Several Claude accounts.** For each Claude account you run from its own config directory, with its own `CLAUDE_CONFIG_DIR`, list the directory in `lookout.claudeConfigDirs`, as a path or as `label=path`: its sessions show on the board with the others, wherever they run. Write the path as you give it to `CLAUDE_CONFIG_DIR`, since Claude Code names a directory's stored sign-in after that exact spelling. With two or more directories, every Claude Code card carries its account's label, the directory's name less a leading `.claude-` (`default` for `~/.claude`) unless you name it; the jump list, the search, the conversation tab and the notes name it too, and **Group by: Account** makes a section per account. The Claude Code panel runs the first directory, so an earlier session of another resumes in a terminal: `claude --resume` in its folder, with that directory in `CLAUDE_CONFIG_DIR` and no `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, so the directory's own sign-in applies. Lookout's output names each directory and says which share an account or have no sign-in yet, never an e-mail.
+
 ## 0.1.3
 
 Conversations, notes and transcripts that outlive the agents' purge, a search over every session, and a session's scheduled tasks on its card.

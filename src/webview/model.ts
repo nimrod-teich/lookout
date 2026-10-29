@@ -1,5 +1,6 @@
 // Pure helpers for the board; no DOM here so they can be tested under Node.
 import { formatElapsed, quietFor, reasonLabel } from "../core/format";
+import { GROUPINGS } from "../core/grouping";
 import type { ScheduleView, SessionView, State } from "../core/types";
 
 export type GroupKey = "waiting" | "done" | "working" | "idle" | "parked";
@@ -18,7 +19,7 @@ export function isGroupKey(value: unknown): value is GroupKey {
 export type FoldKey = GroupKey | "favourites" | `${string}:${string}`;
 
 export function isFoldKey(value: unknown): value is FoldKey {
-  return value === "favourites" || isGroupKey(value) || (typeof value === "string" && /^(project|branch|model|agent|window):/.test(value));
+  return value === "favourites" || isGroupKey(value) || (typeof value === "string" && GROUPINGS.some((grouping) => grouping.key !== "state" && value.startsWith(`${grouping.key}:`)));
 }
 
 const GROUP_OF: Record<State, GroupKey> = { waiting: "waiting", done: "done", working: "working", unknown: "idle", idle: "idle" };

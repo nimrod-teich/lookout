@@ -14,6 +14,13 @@ describe("resuming a session in a terminal", () => {
     ]);
   });
 
+  it("gives the terminal the command's variables, null removing one", () => {
+    const env = { CLAUDE_CONFIG_DIR: "/home/u/.claude-personal", CLAUDE_CODE_OAUTH_TOKEN: null };
+    resumeInTerminal("claude-code", "Old work", { args: ["claude", "--resume", "00000000-0000-4000-8000-000000000002"], cwd: "/work/app", env });
+    expect(stub.ops[0]).toEqual(["terminal:Claude: Old work", "create", { name: "Claude: Old work", cwd: "/work/app", env }]);
+    expect(stub.ops[1]).toEqual(["terminal:Claude: Old work", "sendText", { text: "claude --resume 00000000-0000-4000-8000-000000000002", addNewLine: true }]);
+  });
+
   it("quotes an argument a shell would read otherwise", () => {
     expect(["codex", "resume", "01a1-ff", "it's done; rm -rf /", "a b"].map(shellArg)).toEqual(["codex", "resume", "01a1-ff", "'it'\\''s done; rm -rf /'", "'a b'"]);
   });

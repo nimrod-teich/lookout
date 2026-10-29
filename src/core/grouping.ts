@@ -4,7 +4,7 @@ import { agentInfo } from "./agents/catalog";
 import { shortModel } from "./format";
 import type { SessionView, State } from "./types";
 
-export type GroupBy = "state" | "project" | "branch" | "model" | "agent" | "window";
+export type GroupBy = "state" | "project" | "branch" | "model" | "agent" | "account" | "window";
 
 /** The groupings on offer, as the menu lists them; `short` is what the board's chip says. */
 export const GROUPINGS: readonly { key: GroupBy; label: string; short: string; detail: string }[] = [
@@ -13,6 +13,7 @@ export const GROUPINGS: readonly { key: GroupBy; label: string; short: string; d
   { key: "branch", label: "Branch", short: "Branch", detail: "The git branch each session works on" },
   { key: "model", label: "Model", short: "Model", detail: "The model of each session's last reply" },
   { key: "agent", label: "Agent", short: "Agent", detail: "Claude Code, Codex, Copilot" },
+  { key: "account", label: "Account", short: "Account", detail: "Each Claude Code config directory watched, by its label" },
   { key: "window", label: "Window", short: "Window", detail: "This window, other windows, outside VS Code" },
 ];
 
@@ -35,7 +36,7 @@ export interface Section {
 }
 
 /** What a section is missing when a session has no value for the grouping. */
-const NONE: Record<Exclude<GroupBy, "state">, string> = { project: "No project", branch: "No branch", model: "No model yet", agent: "No agent", window: "No window" };
+const NONE: Record<Exclude<GroupBy, "state">, string> = { project: "No project", branch: "No branch", model: "No model yet", agent: "No agent", account: "No account", window: "No window" };
 
 /** The session's value for a grouping, as its section's label; none when it has none. */
 export function groupValue(view: SessionView, by: Exclude<GroupBy, "state">): string | undefined {
@@ -48,6 +49,8 @@ export function groupValue(view: SessionView, by: Exclude<GroupBy, "state">): st
       return view.model ? shortModel(view.model) : undefined;
     case "agent":
       return agentInfo(view.agent).label;
+    case "account":
+      return view.account || undefined;
     case "window":
       switch (view.host) {
         case "panel":

@@ -24,6 +24,9 @@ describe("toItem", () => {
     expect(toItem(view({ host: "window" }), now).detail).toBe("Idle for 7m · another window");
     expect(toItem(view({ host: "elsewhere" }), now).detail).toBe("Idle for 7m · outside VS Code");
     expect(toItem(view({ host: "editor" }), now).detail).toBe("Idle for 7m · window without Lookout");
+    // The account, when the agent is watched in several, after the agent's name.
+    expect(toItem(view({ account: "personal" }), now).description).toBe("personal · app");
+    expect(toItem(view({ account: "personal" }), now, true).description).toBe("Claude · personal · app");
   });
 });
 

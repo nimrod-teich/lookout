@@ -350,6 +350,38 @@ describe("ClaudeProvider", () => {
     expect(provider.history(old)).toBeUndefined();
   });
 
+  it("stamps its account on every session, and resumes a past one in a terminal on its directory's sign-in when the panel does not run it", () => {
+    const configDir = tempConfigDir();
+    const proc = new FakeProc();
+    const env = { CLAUDE_CONFIG_DIR: "~/.claude-personal", CLAUDE_CODE_OAUTH_TOKEN: null, ANTHROPIC_API_KEY: null };
+    const provider = new ClaudeProvider(configDir, proc, { account: "personal", terminalEnv: env });
+    const live = sessionId(1);
+    const old = sessionId(2);
+    writeSession(configDir, proc, { pid: 11, sessionId: live, cwd: "/work/app", entrypoint: "cli" });
+    appendEntries(transcriptPath(configDir, "/work/app", old), [{ type: "ai-title", aiTitle: "Old work" }]);
+    expect(provider.poll(0)[0]).toMatchObject({ id: live, account: "personal", panel: false });
+    const past = provider.past({ folders: ["/work/app"], all: false, limit: 500, also: [old] }, new Set([live]));
+    expect(past.sessions).toEqual([expect.objectContaining({ id: old, account: "personal", resumesIn: "terminal", resumable: true })]);
+    expect(provider.resumeCommand(old)).toEqual({ args: ["claude", "--resume", old], cwd: "/work/app", env });
+    // Only the sessions it listed, and a copy each time.
+    expect(provider.resumeCommand(sessionId(9))).toBeUndefined();
+    provider.resumeCommand(old)!.env!.CLAUDE_CONFIG_DIR = "changed";
+    expect(provider.resumeCommand(old)?.env?.CLAUDE_CONFIG_DIR).toBe("~/.claude-personal");
+  });
+
+  it("stamps no account and leaves the resume to the panel by default", () => {
+    const { configDir, proc, provider } = setup();
+    const live = sessionId(1);
+    const old = sessionId(2);
+    writeSession(configDir, proc, { pid: 11, sessionId: live, cwd: "/work/app" });
+    appendEntries(transcriptPath(configDir, "/work/app", old), [{ type: "ai-title", aiTitle: "Old work" }]);
+    expect(provider.poll(0)[0]).not.toHaveProperty("account");
+    const [session] = provider.past({ folders: ["/work/app"], all: false, limit: 500 }, new Set([live])).sessions;
+    expect(session).not.toHaveProperty("account");
+    expect(session).not.toHaveProperty("resumesIn");
+    expect(provider.resumeCommand(old)).toBeUndefined();
+  });
+
   it("keeps what it read of a conversation when its session ends and when it is resumed", () => {
     const { configDir, proc, provider } = setup();
     const id = sessionId(1);
