@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { PolledJson } from "./polledJson";
 
 /** One usage limit: a window and how much of it is used. */
 export interface UsageMeter {
@@ -39,8 +40,6 @@ const WINDOWS: Record<string, { label: string; windowMs: number }> = {
 export const STALE_MS = 30 * 60_000;
 /** The families whose weekly limit the cache can carry on its own, as `seven_day_<family>`. */
 const MODEL_FAMILIES = ["opus", "sonnet", "haiku", "fable", "mythos"];
-/** A file modified this recently is parsed again on every read: a coarse clock can give two rewrites one mtime. */
-const SETTLE_MS = 2_000;
 
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
@@ -127,43 +126,23 @@ export function usageCacheFile(configDir: string, home: string = os.homedir()): 
 }
 
 /**
- * Reads the cached usage, parsing the file only when it changed. It is
- * replaced by rename, so it is polled, not watched. A torn write keeps the
- * last numbers for a moment; a file that still does not parse once it
- * settled shows none.
+ * Reads the cached usage, parsing the file only when it changed. A torn write
+ * keeps the last numbers for a moment; a file that still does not parse once
+ * it settled shows none.
  */
 export class UsageCache {
-  private signature = "";
-  private last: UsageRead = { snapshot: undefined, why: "missing" };
+  private readonly file: PolledJson<UsageRead>;
 
-  constructor(private readonly file: string) {}
+  constructor(file: string) {
+    this.file = new PolledJson<UsageRead>(file, readUsageCache, { snapshot: undefined, why: "missing" }, { snapshot: undefined, why: "unreadable" });
+  }
 
   read(): UsageSnapshot | undefined {
     return this.readWithReason().snapshot;
   }
 
   readWithReason(): UsageRead {
-    let st: fs.Stats;
-    try {
-      st = fs.statSync(this.file);
-    } catch {
-      this.signature = "";
-      return (this.last = { snapshot: undefined, why: "missing" });
-    }
-    const signature = `${st.mtimeMs}:${st.size}:${st.ino}`;
-    const settled = Date.now() - st.mtimeMs > SETTLE_MS;
-    if (signature === this.signature && settled) return this.last;
-    try {
-      this.last = readUsageCache(JSON.parse(fs.readFileSync(this.file, "utf8")));
-      this.signature = signature;
-    } catch {
-      // Mid-write: keep the last numbers until the file settles; after that it is broken.
-      if (settled) {
-        this.last = { snapshot: undefined, why: "unreadable" };
-        this.signature = signature;
-      }
-    }
-    return this.last;
+    return this.file.read();
   }
 }
 

@@ -405,19 +405,29 @@
             "markdownDescription": "Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`.",
             "order": 4
           },
+          "lookout.claudeConfigDirs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "machine",
+            "markdownDescription": "More Claude Code config directories, one per account, beside `#lookout.claudeConfigDir#`: for each account you run with its own `CLAUDE_CONFIG_DIR`. An entry is a path, or `label=path` to name it, as in `personal=~/.claude-personal`; unnamed, a directory goes by its name less a leading `.claude-`, and `~/.claude` by `default`. Write each path as you give it to `CLAUDE_CONFIG_DIR`: Claude Code names a directory's stored sign-in after that exact spelling, a trailing slash included.",
+            "order": 5
+          },
           "lookout.codexHome": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Codex's home folder, where its `sessions` are. Empty uses `CODEX_HOME` from the environment, then `~/.codex`.",
-            "order": 5
+            "order": 6
           },
           "lookout.copilotHome": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Copilot CLI's home folder, where its `session-state` is. Empty uses `COPILOT_HOME` from the environment, then `~/.copilot`.",
-            "order": 6
+            "order": 7
           }
         }
       },

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { agentByKey, markerSetting, type MarkerSetting } from "../core/agents/catalog";
-import { resolveConfigDir } from "../core/agents/claude/paths";
+import { resolveConfigDirs, type ClaudeDir } from "../core/agents/claude/paths";
 import { codexHome } from "../core/agents/codex/paths";
 import { copilotHome } from "../core/agents/copilot/paths";
 import { envFlag, NONESSENTIAL_TRAFFIC, type RefreshMode } from "../core/usage";
@@ -36,8 +36,10 @@ export interface Config {
   retentionDays: number;
   /** Watch Claude Code: its sessions and its usage. */
   claudeEnabled: boolean;
-  /** The Claude Code config directory to read sessions and transcripts from. */
+  /** The Claude Code config directory to read sessions and transcripts from: the first of `claudeDirs`, resolved. */
   claudeConfigDir: string;
+  /** Every Claude Code config directory watched, one per account: the primary first, then `lookout.claudeConfigDirs`. */
+  claudeDirs: ClaudeDir[];
   /** When to tell agents apart by hue and silhouette. */
   agentMarkers: MarkerSetting;
   /** Whose usage the status bar's bar shows: `auto` or an agent's key. */
@@ -81,9 +83,10 @@ function refreshMode(value: string | undefined): RefreshMode {
 
 export function readConfig(): Config {
   const lookout = vscode.workspace.getConfiguration("lookout");
-  const claudeConfigDir = resolveConfigDir({
+  const claudeDirs = resolveConfigDirs({
     setting: lookout.get<string>("claudeConfigDir"),
     claudeExtensionEnv: claudeExtensionEnv("CLAUDE_CONFIG_DIR"),
+    extra: lookout.get<unknown>("claudeConfigDirs"),
   });
   return {
     statusBarEnabled: lookout.get<boolean>("statusBar.enabled", true),
@@ -104,7 +107,8 @@ export function readConfig(): Config {
     keepFavourites: lookout.get<boolean>("keepTranscripts.favourites", false),
     retentionDays: retentionDaysOf(lookout.get<unknown>("retention.days", 0)),
     claudeEnabled: lookout.get<boolean>("agents.claude", true),
-    claudeConfigDir,
+    claudeConfigDir: claudeDirs[0]!.resolved,
+    claudeDirs,
     agentMarkers: markerSetting(lookout.get<string>("agentMarkers")),
     usageAgent: usageAgent(lookout.get<string>("statusBar.usageAgent")),
     codexEnabled: lookout.get<boolean>("agents.codex", true),

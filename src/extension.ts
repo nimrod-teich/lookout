@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { agentInfo, boardAgents, canJump, canRename, canResume, markersShown, unreachable } from "./core/agents/catalog";
+import { sameDirs } from "./core/agents/claude/paths";
 import { clockTime, describeAlert, noticeBody } from "./core/format";
 import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
@@ -408,10 +409,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration("lookout") && !event.affectsConfiguration("claudeCode.environmentVariables")) return;
       const next = readConfig();
-      // A different place to read, or an agent switched on or off: start over.
+      // A different place to read, a directory added, removed or renamed, or an agent switched on or off: start over.
       const moved =
         next.claudeEnabled !== config.claudeEnabled ||
-        next.claudeConfigDir !== config.claudeConfigDir ||
+        !sameDirs(next.claudeDirs, config.claudeDirs) ||
         next.codexEnabled !== config.codexEnabled ||
         next.codexHome !== config.codexHome ||
         next.copilotEnabled !== config.copilotEnabled ||

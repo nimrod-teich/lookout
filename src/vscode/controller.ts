@@ -7,6 +7,7 @@ import { AgentHostSessions } from "../core/agentHost";
 import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents/agent";
 import { BackgroundReads } from "../core/background";
 import { SavedPositions } from "../core/savedPositions";
+import { accountFile, describeDirs } from "../core/agents/claude/account";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { closeStores, runScan } from "../core/agents/lineReaders";
 import { managedRetention, readRetention, retentionIn, userSettingsFile, writeRetention } from "../core/agents/claude/retention";
@@ -957,6 +958,8 @@ export class Controller implements vscode.Disposable {
     if (config.claudeEnabled && !this.archived.available) this.log.info("The agent's archived-session list is out of reach; every past session is listed");
     const homes = [...(config.claudeEnabled ? [config.claudeConfigDir] : []), ...(config.codexEnabled ? [config.codexHome] : []), ...(config.copilotEnabled ? [config.copilotHome] : [])];
     this.log.info(this.providers.length ? `Watching ${this.providers.map((p) => p.label).join(", ")} (${homes.join(", ")})` : "Watching no agent: every agent is turned off");
+    // Several Claude Code directories: which is which, and who each is signed in as, by label only.
+    if (config.claudeEnabled) for (const line of describeDirs(config.claudeDirs, config.claudeDirs.map((dir) => accountFile(usageCacheFile(dir.resolved)).read()))) this.log.info(line);
     this.watch();
     if (this.background && this.readAheadAt === Infinity) {
       this.readAheadAt = Date.now() + READ_AHEAD_AFTER_MS;

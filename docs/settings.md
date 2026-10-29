@@ -26,5 +26,6 @@ Every `lookout.*` setting, with its default. The settings come in two sections, 
 | `lookout.agents.codex` | `true` | Watch Codex: the Codex extension's panel, VS Code's Chat, `codex` in terminals and `codex exec` runs. |
 | `lookout.agents.copilot` | `true` | Watch Copilot: VS Code's Chat (its Copilot, Copilot CLI and Local sessions) and `copilot` in terminals. |
 | `lookout.claudeConfigDir` | `""` | Claude Code config directory to read sessions from. Empty uses `CLAUDE_CONFIG_DIR` from the Claude Code extension's settings or the environment, then `~/.claude`. |
+| `lookout.claudeConfigDirs` | `[]` | More Claude Code config directories, one per account, for each account you run with its own `CLAUDE_CONFIG_DIR`. An entry is a path, or `label=path` to name it (`personal=~/.claude-personal`); unnamed, a directory goes by its name less a leading `.claude-`, and `~/.claude` by `default`. Write each path as you give it to `CLAUDE_CONFIG_DIR`: Claude Code names a directory's stored sign-in after that exact spelling, a trailing slash included. |
 | `lookout.codexHome` | `""` | Codex's home folder, where its `sessions` are. Empty uses `CODEX_HOME`, then `~/.codex`. |
 | `lookout.copilotHome` | `""` | Copilot CLI's home folder, where its `session-state` is. Empty uses `COPILOT_HOME`, then `~/.copilot`. |
