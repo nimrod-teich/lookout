@@ -207,7 +207,7 @@ function stateTitle(view: SessionView): string {
 }
 
 function chips(view: SessionView): Chip[] {
-  const out: Chip[] = [{ text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
+  const out: Chip[] = [...accountChip(view.account), { text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
   const where = hostChip(view);
   if (where) out.push({ text: where });
   if (view.branch) out.push(branchChip(view.branch));
@@ -219,6 +219,11 @@ function chips(view: SessionView): Chip[] {
   const schedule = scheduleChip(view.schedules, now());
   if (schedule) out.push(schedule);
   return out;
+}
+
+/** The account a session runs on, when its agent is watched in several: none otherwise. */
+function accountChip(account: string | undefined): Chip[] {
+  return account ? [{ text: account, title: `Account: ${account}, the Claude Code config directory it runs from`, kind: "account" }] : [];
 }
 
 /** Lookout keeps a copy of the session's transcript. */
@@ -1402,7 +1407,7 @@ function updatePastCard(card: HTMLElement, view: PastView): void {
   const result = query === "" ? undefined : hits.get(view.id);
   setNoteLine(card, result?.hits.some((hit) => hit.role === "note") ? undefined : view);
   const chipsEl = card.querySelector(".chips")!;
-  const values: Chip[] = [{ text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
+  const values: Chip[] = [...accountChip(view.account), { text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
   if (view.branch) values.push(branchChip(view.branch));
   if (view.kept) values.push(keptChip());
   while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
@@ -1461,7 +1466,7 @@ function updateFavouriteCard(card: HTMLElement, live: SessionView | undefined, v
   setNoteLine(card, live ? undefined : shown);
   if (live) setMenu(card, live);
   else setPastMenu(card, view!, "earlier");
-  const values: Chip[] = [{ text: shown.worktree ? `${shown.project} · ${shown.worktree}` : shown.project }];
+  const values: Chip[] = [...accountChip(shown.account), { text: shown.worktree ? `${shown.project} · ${shown.worktree}` : shown.project }];
   if (shown.branch) values.push(branchChip(shown.branch));
   if (shown.kept) values.push(keptChip());
   const chipsEl = card.querySelector(".chips")!;

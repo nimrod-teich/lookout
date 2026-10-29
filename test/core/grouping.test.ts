@@ -11,6 +11,8 @@ describe("groupValue", () => {
     expect(groupValue(v, "branch")).toBe("main");
     expect(groupValue(v, "model")).toBe("Opus 5.5");
     expect(groupValue(v, "agent")).toBe("Codex");
+    expect(groupValue(view({ account: "personal" }), "account")).toBe("personal");
+    expect(groupValue(v, "account")).toBeUndefined();
     expect(groupValue(v, "window")).toBe("Window: web");
     expect(groupValue(view({ project: "", branch: undefined, model: undefined }), "project")).toBeUndefined();
     expect(groupValue(view({ branch: undefined }), "branch")).toBeUndefined();
@@ -67,5 +69,23 @@ describe("readGroupBy", () => {
     expect(readGroupBy("size")).toBe("state");
     expect(readGroupBy(undefined)).toBe("state");
     expect(GROUPINGS.every((g) => g.short.length <= 8)).toBe(true);
+  });
+});
+
+describe("sectionsBy account", () => {
+  it("makes a section per account, the sessions of agents without one last", () => {
+    const sections = sectionsBy(
+      [view({ id: "c", agent: "codex" }), view({ id: "p", account: "personal" }), view({ id: "d", account: "default" }), view({ id: "w", state: "waiting", account: "personal" })],
+      "account",
+    );
+    expect(sections.map((s) => [s.id, s.label])).toEqual([
+      ["waiting", "Needs you"],
+      ["account:default", "default"],
+      ["account:personal", "personal"],
+      ["account:", "No account"],
+    ]);
+    expect(ids(sections)).toEqual([["w"], ["d"], ["p"], ["c"]]);
+    expect(GROUPINGS.map((g) => g.key)).toContain("account");
+    expect(readGroupBy("account")).toBe("account");
   });
 });

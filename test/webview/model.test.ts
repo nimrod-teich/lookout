@@ -29,7 +29,7 @@ describe("groupSessions", () => {
 
 describe("isFoldKey", () => {
   it("takes Favourites, the state groups and the sections by attribute, and nothing else kept in the board's state", () => {
-    for (const key of ["favourites", "waiting", "done", "working", "idle", "parked", "project:api", "branch:", "model:Opus 5.5", "agent:Codex", "window:This window"]) expect(isFoldKey(key)).toBe(true);
+    for (const key of ["favourites", "waiting", "done", "working", "idle", "parked", "project:api", "branch:", "model:Opus 5.5", "agent:Codex", "account:personal", "window:This window"]) expect(isFoldKey(key)).toBe(true);
     for (const key of ["earlier", "archive", "Favourites", "unknown", "", "size:x", "project", 1, null, undefined]) expect(isFoldKey(key)).toBe(false);
   });
 });

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { labelOf, resolveConfigDirs, sameDirs, type ClaudeDir, type ConfigDirSources } from "../../../../src/core/agents/claude/paths";
+import { labelOf, resolveConfigDirs, sameDirs, signInEnv, type ClaudeDir, type ConfigDirSources } from "../../../../src/core/agents/claude/paths";
 import { tempConfigDir } from "../../helpers";
 
 const home = path.resolve("/home/u");
@@ -116,5 +116,13 @@ describe("sameDirs", () => {
     expect(sameDirs(dirs, resolveConfigDirs({ home, env: {}, extra: ["private=~/.claude-personal"] }))).toBe(false);
     expect(sameDirs(dirs, resolveConfigDirs({ home, env: {}, extra: ["personal=~/.claude-personal/"] }))).toBe(false);
     expect(sameDirs(dirs, resolveConfigDirs({ home, env: {} }))).toBe(false);
+  });
+});
+
+describe("signInEnv", () => {
+  it("runs Claude Code on the directory as written, the default one without the variable, and no credential from the environment", () => {
+    const [primary, personal] = resolveConfigDirs({ home, env: {}, extra: ["personal=~/.claude-personal/"] });
+    expect(signInEnv(personal!)).toEqual({ CLAUDE_CONFIG_DIR: path.join(home, ".claude-personal") + path.sep, CLAUDE_CODE_OAUTH_TOKEN: null, ANTHROPIC_API_KEY: null });
+    expect(signInEnv(primary!)).toEqual({ CLAUDE_CONFIG_DIR: null, CLAUDE_CODE_OAUTH_TOKEN: null, ANTHROPIC_API_KEY: null });
   });
 });

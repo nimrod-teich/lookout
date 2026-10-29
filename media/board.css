@@ -1918,6 +1918,13 @@ body.vscode-high-contrast-light .card {
   background: color-mix(in srgb, var(--done) 12%, transparent);
 }
 
+/* The account a session runs on: outlined in Claude's colour, so it reads apart from where the session works. */
+.chip.account {
+  color: var(--agent-claude);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-claude) 50%, transparent);
+}
+
 /* Purged: the transcript is gone; a broken rail says so. */
 .card.purged .rail {
   background: repeating-linear-gradient(to bottom, var(--idle) 0 3px, transparent 3px 6px);

@@ -395,6 +395,48 @@ describe("the extension", () => {
     }
   }, 60_000);
 
+  it("shows every listed directory's sessions tagged with its account, and resumes another account's earlier session in a terminal on its sign-in", async () => {
+    const LIVE = "00000000-0000-4000-8000-0000000000c1";
+    const OLD = "00000000-0000-4000-8000-0000000000c2";
+    const personal = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-e2e-personal-"));
+    const other = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    const project = path.join(personal, "projects", "-work-app");
+    workspace.workspaceFolders = [{ uri: { fsPath: "/work/app" } }];
+    try {
+      writeTranscript();
+      writeSession({ status: "busy", statusUpdatedAt: Date.now() });
+      fs.mkdirSync(path.join(personal, "sessions"), { recursive: true });
+      fs.mkdirSync(project, { recursive: true });
+      fs.writeFileSync(path.join(personal, "sessions", `${other.pid}.json`), JSON.stringify({ pid: other.pid, sessionId: LIVE, cwd: "/work/app", startedAt: Date.now(), kind: "interactive", entrypoint: "cli", status: "idle" }));
+      fs.writeFileSync(path.join(project, `${LIVE}.jsonl`), JSON.stringify({ type: "user", cwd: "/work/app", message: { content: "personal work" } }) + "\n");
+      fs.writeFileSync(path.join(project, `${OLD}.jsonl`), JSON.stringify({ type: "user", cwd: "/work/app", timestamp: new Date().toISOString(), message: { content: "an older personal session" } }) + "\n");
+      stub.config["lookout.claudeConfigDirs"] = [`personal=${personal}`];
+      stub.config["lookout.retention.hint"] = false;
+      activate(context());
+      boardStates();
+      type Listed = { sessions: { id: string; account?: string }[]; past: { id: string; account?: string; resumesIn?: string }[] };
+      const listed = () => statesBoard!.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as Listed | undefined;
+      await vi.waitFor(() => {
+        expect(listed()?.sessions.map((v) => [v.id, v.account]).sort()).toEqual([
+          [SESSION, path.basename(configDir)],
+          [LIVE, "personal"],
+        ].sort());
+        expect(listed()?.past.map((v) => [v.id, v.account, v.resumesIn])).toEqual([[OLD, "personal", "terminal"]]);
+      }, WAIT);
+
+      // The panel runs the first directory: the other's session resumes in a terminal, on its own sign-in.
+      statesBoard!.receive({ type: "resume", id: OLD });
+      await vi.waitFor(() => expect(stub.ops.some(([, action]) => action === "sendText")).toBe(true), WAIT);
+      const created = stub.ops.find(([target, action]) => target.startsWith("terminal:") && action === "create");
+      expect(created?.[2]).toEqual({ name: "Claude: an older personal session", cwd: "/work/app", env: { CLAUDE_CONFIG_DIR: personal, CLAUDE_CODE_OAUTH_TOKEN: null, ANTHROPIC_API_KEY: null } });
+      expect(stub.ops.find(([, action]) => action === "sendText")?.[2]).toEqual({ text: `claude --resume ${OLD}`, addNewLine: true });
+    } finally {
+      other.kill();
+      workspace.workspaceFolders = undefined;
+      fs.rmSync(personal, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  }, 60_000);
+
   it("announces each usage threshold once per window, though every fetch reports the reset a fraction of a second apart", async () => {
     const resets = Date.now() + 2 * 3_600_000;
     const write = (percent: number, fraction: string) => {
@@ -1163,7 +1205,7 @@ describe("the extension", () => {
       return (items as { key: string }[]).find((item) => item.key === "model");
     };
     await stub.commands.get("lookout.groupSessions")!();
-    expect(offered).toEqual(["State", "$(check) Project", "Branch", "Model", "Agent", "Window"]);
+    expect(offered).toEqual(["State", "$(check) Project", "Branch", "Model", "Agent", "Account", "Window"]);
     expect(savedGlobal["lookout.group"]).toBe("model");
   }, 60_000);
 

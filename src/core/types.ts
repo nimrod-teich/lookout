@@ -67,6 +67,8 @@ export interface SessionView {
   id: string;
   /** Id of the agent provider the session belongs to. */
   agent: string;
+  /** The label of the agent's account it runs on, when the agent is watched in several accounts. */
+  account?: string;
   pid: number;
   title: string;
   state: State;
@@ -135,6 +137,8 @@ export interface SessionView {
 export interface PastView {
   id: string;
   agent: string;
+  /** The label of the agent's account it ran on, when the agent is watched in several accounts. */
+  account?: string;
   title: string;
   project: string;
   worktree?: string;

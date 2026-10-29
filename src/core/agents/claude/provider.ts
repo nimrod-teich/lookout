@@ -10,7 +10,7 @@ import { TRANSCRIPT_LINES } from "./history";
 import { PastTranscripts } from "./past";
 import type { ProcessTable } from "../../proc";
 import type { Evidence } from "../../types";
-import type { AgentProvider, AgentSession, Background, AgentStatus, PastList, PastScope, PastSession, SearchOutcome } from "../agent";
+import type { AgentProvider, AgentSession, Background, AgentStatus, PastList, PastScope, PastSession, ResumeCommand, SearchOutcome } from "../agent";
 import { findTranscript, sessionsDir } from "./paths";
 import { SessionRegistry } from "./registry";
 import type { SessionFile } from "./sessionFile";
@@ -98,6 +98,17 @@ function seedTitles(file: string, state: TranscriptState): void {
   }
 }
 
+export interface ClaudeProviderOptions {
+  /** The account's label, stamped on every session and past session: set when several directories are watched. */
+  account?: string;
+  /**
+   * For a directory the Claude Code panel does not run: its past sessions
+   * resume in a terminal, `claude --resume`, with this environment on top
+   * of VS Code's (see `signInEnv`).
+   */
+  terminalEnv?: Record<string, string | null>;
+}
+
 /**
  * Claude Code: state from the per-process session files, title and current
  * directory from each session's transcript.
@@ -126,6 +137,7 @@ export class ClaudeProvider implements AgentProvider {
   constructor(
     private readonly configDir: string,
     private readonly proc: ProcessTable,
+    private readonly options: ClaudeProviderOptions = {},
   ) {
     this.registry = new SessionRegistry(sessionsDir(configDir), proc);
     this.pastTranscripts = new PastTranscripts(configDir);
@@ -143,6 +155,7 @@ export class ClaudeProvider implements AgentProvider {
       const status = background ? "working" : reported;
       return {
         agent: this.id,
+        ...(this.options.account ? { account: this.options.account } : {}),
         id: file.sessionId,
         pid: file.pid,
         status,
@@ -181,8 +194,26 @@ export class ClaudeProvider implements AgentProvider {
     this.pastFiles = new Map(all.map((p) => [p.id, p.file]));
     this.pastMeta = new Map(all.map((p) => [p.id, { cwd: p.cwd, branch: p.branch, modifiedAt: p.modifiedAt }]));
     this.indexes.keepOnly([...this.pastFiles.values(), ...[...this.tracked.values()].flatMap((tracked) => (tracked.file ? [tracked.file] : []))]);
-    const session = (p: (typeof all)[number]): PastSession => ({ agent: this.id, id: p.id, cwd: p.cwd, title: p.title, branch: p.branch, resumable: p.resumable, modifiedAt: p.modifiedAt });
+    const { account, terminalEnv } = this.options;
+    const session = (p: (typeof all)[number]): PastSession => ({
+      agent: this.id,
+      ...(account ? { account } : {}),
+      id: p.id,
+      cwd: p.cwd,
+      title: p.title,
+      branch: p.branch,
+      resumable: p.resumable,
+      modifiedAt: p.modifiedAt,
+      ...(terminalEnv ? { resumesIn: "terminal" as const } : {}),
+    });
     return { sessions: transcripts.map(session), capped, incomplete, also: also.map(session) };
+  }
+
+  /** A past session of a directory the panel does not run resumes in a terminal, in its folder, on the directory's sign-in. */
+  resumeCommand(id: string): ResumeCommand | undefined {
+    const cwd = this.pastMeta.get(id)?.cwd;
+    if (!this.options.terminalEnv || !cwd) return undefined;
+    return { args: ["claude", "--resume", id], cwd, env: { ...this.options.terminalEnv } };
   }
 
   /**

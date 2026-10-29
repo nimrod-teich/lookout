@@ -12,6 +12,8 @@ export type AgentStatus = "working" | "waiting" | "idle" | "unknown";
 export interface AgentSession {
   /** Id of the provider that reported it. */
   agent: string;
+  /** The label of the agent's account it runs on, when the agent is watched in several accounts. */
+  account?: string;
   id: string;
   pid: number;
   status: AgentStatus;
@@ -82,6 +84,8 @@ export interface SessionSpend {
 export interface PastSession {
   /** Id of the provider that reported it. */
   agent: string;
+  /** The label of the agent's account it ran on, when the agent is watched in several accounts. */
+  account?: string;
   id: string;
   cwd: string;
   title: string;
@@ -185,4 +189,6 @@ export interface ResumeCommand {
   /** The program and its arguments, run as they are. */
   args: string[];
   cwd: string;
+  /** Variables the terminal gets on top of VS Code's; null removes one. */
+  env?: Record<string, string | null>;
 }

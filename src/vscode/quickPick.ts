@@ -26,12 +26,12 @@ function hostLabel(view: SessionView): string | undefined {
   }
 }
 
-/** With `markers`, the agent's boat leads the item and its name the description. */
+/** With `markers`, the agent's boat leads the item and its name the description; the account, when there are several, follows. */
 export function toItem(view: SessionView, now: number, markers = false): SessionItem {
   const where = hostLabel(view);
   const detail = where ? `${describeState(view, now)} · ${where}` : describeState(view, now);
   const mark = markers ? `${agentIcon(view.agent)} ` : "";
-  const agent = markers ? `${agentInfo(view.agent).label} · ` : "";
+  const agent = `${markers ? `${agentInfo(view.agent).label} · ` : ""}${view.account ? `${view.account} · ` : ""}`;
   // The asks quote commands verbatim; only Lookout's own icons are meant as such.
   return { label: `${mark}${iconFor(view, now)} ${escapeIcons(view.title)}`, description: `${escapeIcons(agent)}${escapeIcons(describeLocation(view))}`, detail: escapeIcons(detail), view };
 }

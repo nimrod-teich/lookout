@@ -55,4 +55,11 @@ describe("restoredTabViews", () => {
     const sessions = [past("running", "fix the build", 3_000), past("elsewhere", "deploy", 2_000, false)];
     expect(restoredTabViews(sessions, [live("running", "fix the build", "window")], { labels: ["fix the build", "deploy", "Claude Code"], label })).toEqual([]);
   });
+
+  it("takes only the sessions the panel resumes: never one that resumes in a terminal, and keeps the account", () => {
+    const other = { ...past("o", "Fix the login", 2_000), account: "personal", resumesIn: "terminal" as const };
+    const own = { ...past("d", "Fix the login", 1_000), account: "default" };
+    expect(restoredTabViews([other, own], [], { labels: ["Fix the login"], label }).map((v) => [v.id, v.account])).toEqual([["d", "default"]]);
+    expect(restoredTabViews([other], [], { labels: ["Fix the login"], label })).toEqual([]);
+  });
 });

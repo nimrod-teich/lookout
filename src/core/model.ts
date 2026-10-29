@@ -93,6 +93,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
   return {
     id: session.id,
     agent: session.agent,
+    ...(session.account ? { account: session.account } : {}),
     pid: session.pid,
     title: session.title ?? (session.panel ? EMPTY_TAB : EMPTY_TERMINAL),
     state: session.status,
@@ -123,7 +124,7 @@ export function buildView(session: AgentSession, ancestors: readonly number[], c
 
 /** The view of a session that is not running. */
 export function buildPastView(session: PastSession): PastView {
-  return { id: session.id, agent: session.agent, title: session.title, ...projectOf(session.cwd), branch: session.branch, cwd: session.cwd, resumable: session.resumable, modifiedAt: session.modifiedAt, ...(session.resumesIn ? { resumesIn: session.resumesIn } : {}), ...(session.vscodeSession ? { vscodeSession: session.vscodeSession } : {}) };
+  return { id: session.id, agent: session.agent, ...(session.account ? { account: session.account } : {}), title: session.title, ...projectOf(session.cwd), branch: session.branch, cwd: session.cwd, resumable: session.resumable, modifiedAt: session.modifiedAt, ...(session.resumesIn ? { resumesIn: session.resumesIn } : {}), ...(session.vscodeSession ? { vscodeSession: session.vscodeSession } : {}) };
 }
 
 /** The agent's tabs open in a window: their labels, and the label it gives a title. */
@@ -137,7 +138,7 @@ export interface AgentTabs {
  * sessions not started yet: after a reload the agent restores its tabs but
  * starts a session only once its tab is opened. Each tab not held by a
  * running session of this window's panel takes the newest resumable session
- * its label fits.
+ * its label fits, of those the panel resumes: never one that resumes in a terminal.
  */
 export function restoredTabViews(past: readonly PastView[], live: readonly SessionView[], tabs: AgentTabs): SessionView[] {
   const open = [...tabs.labels];
@@ -149,12 +150,13 @@ export function restoredTabViews(past: readonly PastView[], live: readonly Sessi
   const taken = new Set(live.map((view) => view.id));
   const out: SessionView[] = [];
   for (const label of open) {
-    const view = past.find((p) => p.resumable && !taken.has(p.id) && tabs.label(p.title) === label);
+    const view = past.find((p) => p.resumable && p.resumesIn !== "terminal" && !taken.has(p.id) && tabs.label(p.title) === label);
     if (!view) continue;
     taken.add(view.id);
     out.push({
       id: view.id,
       agent: view.agent,
+      ...(view.account ? { account: view.account } : {}),
       pid: 0,
       title: view.title,
       state: "idle",
