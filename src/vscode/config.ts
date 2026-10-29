@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { markerSetting, type MarkerSetting } from "../core/agents/catalog";
+import { accountNames } from "../core/agents/claude/account";
 import { resolveConfigDirs, type ClaudeDir } from "../core/agents/claude/paths";
 import { codexHome } from "../core/agents/codex/paths";
 import { copilotHome } from "../core/agents/copilot/paths";
@@ -41,6 +42,8 @@ export interface Config {
   claudeConfigDir: string;
   /** Every Claude Code config directory watched, one per account: the primary first, then `lookout.claudeConfigDirs`. */
   claudeDirs: ClaudeDir[];
+  /** `lookout.claudeAccountNames`: the names the user gave Claude accounts, by their e-mail address's `emailKey`. */
+  claudeAccountNames: Map<string, string>;
   /** When to tell agents apart by hue and silhouette. */
   agentMarkers: MarkerSetting;
   /** Whose usage the status bar's bar shows: `auto`, an agent's key, or one account's (`claude:personal`). */
@@ -111,6 +114,7 @@ export function readConfig(): Config {
     claudeEnabled: lookout.get<boolean>("agents.claude", true),
     claudeConfigDir: claudeDirs[0]!.resolved,
     claudeDirs,
+    claudeAccountNames: accountNames(lookout.get<unknown>("claudeAccountNames")),
     agentMarkers: markerSetting(lookout.get<string>("agentMarkers")),
     usageAgent: usageAgent(lookout.get<string>("statusBar.usageAgent")),
     codexEnabled: lookout.get<boolean>("agents.codex", true),

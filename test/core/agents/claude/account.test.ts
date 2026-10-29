@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { accountFile, describeDirs, parseAccount } from "../../../../src/core/agents/claude/account";
+import { accountFile, accountNames, describeDirs, emailKey, parseAccount } from "../../../../src/core/agents/claude/account";
 import type { ClaudeDir } from "../../../../src/core/agents/claude/paths";
 import { tempConfigDir } from "../../helpers";
 
@@ -90,5 +90,23 @@ describe("describeDirs", () => {
     ]);
     expect(lines.join("\n")).not.toContain("@");
     expect(describeDirs([work, personal], [{ uuid: "acc-1" }, { uuid: "acc-2" }])).toHaveLength(1);
+  });
+});
+
+describe("account names", () => {
+  it("keys an address by a hash, the same whatever its case, never the address", () => {
+    expect(emailKey("You@Work.example ")).toBe(emailKey("you@work.example"));
+    expect(emailKey("you@work.example")).not.toBe(emailKey("you@home.example"));
+    expect(emailKey("you@work.example")).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("reads the setting's names by address, trimmed, with dashes for spaces, and drops the rest", () => {
+    const names = accountNames({ "You@Work.example": " my work ", "you@home.example": "home", "x@y.example": "  ", " ": "blank", "z@y.example": 3 });
+    expect([...names.entries()]).toEqual([
+      [emailKey("you@work.example"), "my-work"],
+      [emailKey("you@home.example"), "home"],
+    ]);
+    expect(accountNames(undefined).size).toBe(0);
+    expect(accountNames(["you@work.example"]).size).toBe(0);
   });
 });

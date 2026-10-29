@@ -5,7 +5,7 @@ import { ClaudeProvider } from "../../../../src/core/agents/claude/provider";
 import { inThreadScanner } from "../../../../src/core/agents/lineReaders";
 import { BackgroundReads } from "../../../../src/core/background";
 import { parseQuery } from "../../../../src/core/terms";
-import { activityOf, agentsOf, applyLine, contextWindowOf, emptyTranscript, pulseOf, summarizeTool, titleOf, type TranscriptState } from "../../../../src/core/agents/claude/transcript";
+import { activityOf, agentsOf, applyLine, contextWindowOf, credentialOrgOf, emptyTranscript, pulseOf, summarizeTool, titleOf, type TranscriptState } from "../../../../src/core/agents/claude/transcript";
 import { appendEntries, FakeProc, sessionId, tempConfigDir, transcriptPath, writeSession } from "../../helpers";
 
 function setup() {
@@ -30,6 +30,18 @@ describe("transcript", () => {
     const state: TranscriptState = { ...emptyTranscript(), customTitle: "My tab", aiTitle: "Build fix" };
     applyLine(state, JSON.stringify({ type: "custom-title", customTitle: "" }));
     expect(titleOf(state)).toBe("Build fix");
+  });
+
+  it("keeps the organization of the latest credential stamp, and reads nothing else from attachments as one", () => {
+    const state = emptyTranscript();
+    const stamp = (org: unknown) => JSON.stringify({ type: "attachment", attachment: { type: "credential_org", organizationUuid: org } });
+    applyLine(state, stamp("org-work"));
+    expect(state.organizationUuid).toBe("org-work");
+    applyLine(state, stamp("org-home"));
+    applyLine(state, stamp(""));
+    applyLine(state, JSON.stringify({ type: "attachment", attachment: { type: "todo_reminder", organizationUuid: "nope" } }));
+    expect(state.organizationUuid).toBe("org-home");
+    expect(credentialOrgOf({ type: "user", attachment: { type: "credential_org", organizationUuid: "x" } })).toBeUndefined();
   });
 
   it("follows the main chain's cwd and ignores subagents and bad lines", () => {
@@ -367,6 +379,23 @@ describe("ClaudeProvider", () => {
     expect(provider.resumeCommand(sessionId(9))).toBeUndefined();
     provider.resumeCommand(old)!.env!.CLAUDE_CONFIG_DIR = "changed";
     expect(provider.resumeCommand(old)?.env?.CLAUDE_CONFIG_DIR).toBe("~/.claude-personal");
+  });
+
+  it("names a session's account by its organization when the user named that account, else by the directory", () => {
+    const configDir = tempConfigDir();
+    const proc = new FakeProc();
+    const names: Record<string, string> = { "org-home": "home" };
+    const provider = new ClaudeProvider(configDir, proc, { account: "default", nameOf: (org) => names[org] });
+    const stamp = (org: string) => ({ type: "attachment", attachment: { type: "credential_org", organizationUuid: org } });
+    const [live, home, work, old] = [sessionId(1), sessionId(2), sessionId(3), sessionId(4)];
+    writeSession(configDir, proc, { pid: 11, sessionId: live, cwd: "/work/app", entrypoint: "cli" });
+    appendEntries(transcriptPath(configDir, "/work/app", live), [{ type: "user", cwd: "/work/app" }, stamp("org-home")]);
+    appendEntries(transcriptPath(configDir, "/work/app", home), [{ type: "ai-title", aiTitle: "Home" }, stamp("org-home")]);
+    appendEntries(transcriptPath(configDir, "/work/app", work), [{ type: "ai-title", aiTitle: "Work" }, stamp("org-work")]);
+    appendEntries(transcriptPath(configDir, "/work/app", old), [{ type: "ai-title", aiTitle: "Old" }]);
+    expect(provider.poll(0)[0]?.account).toBe("home");
+    const listed = provider.past({ folders: ["/work/app"], all: false, limit: 500 }, new Set([live])).sessions;
+    expect(Object.fromEntries(listed.map((p) => [p.title, p.account]))).toEqual({ Home: "home", Work: "default", Old: "default" });
   });
 
   it("stamps no account and leaves the resume to the panel by default", () => {

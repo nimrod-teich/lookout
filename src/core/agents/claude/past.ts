@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { findLastLine, readLineAt } from "../../jsonlTail";
-import { INTERRUPT } from "./transcript";
+import { credentialOrgOf, INTERRUPT } from "./transcript";
 import type { PastScope } from "../agent";
 import { encodeProjectDir } from "./paths";
 
@@ -13,6 +13,8 @@ export interface PastTranscript {
   title: string;
   /** The git branch it last worked on. */
   branch?: string;
+  /** The organization of the account it last ran on, as Claude Code stamped it. */
+  organizationUuid?: string;
   /** It is one of the folders' sessions, which Claude Code resumes in their window. */
   resumable: boolean;
   /** Epoch ms the transcript was last written. */
@@ -78,6 +80,8 @@ export interface TranscriptInfo {
   cwd?: string;
   /** The git branch it last worked on. */
   branch?: string;
+  /** The organization of the account it last ran on: the latest `credential_org` stamp. */
+  organizationUuid?: string;
 }
 
 function cwdIn(entry: Record<string, unknown>): string | undefined {
@@ -94,7 +98,8 @@ export function transcriptTitle(file: string): string | undefined {
 }
 
 /**
- * A transcript's title, where it started, and its git branch. The title is
+ * A transcript's title, where it started, its git branch, and the
+ * organization of the account it last ran on. The title is
  * a rename, else the generated title, else the first prompt; none for a
  * transcript that holds no conversation. The head is read for the early
  * stamps and the directory, further in when request records come first, and
@@ -106,9 +111,11 @@ export function transcriptInfo(file: string): TranscriptInfo {
   let prompt: string | undefined;
   let cwd: string | undefined;
   let branch: string | undefined;
+  let organizationUuid: string | undefined;
   const take = (line: string) => {
     const entry = parse(line);
     if (!entry) return;
+    organizationUuid = credentialOrgOf(entry) ?? organizationUuid;
     cwd ??= cwdIn(entry);
     branch = branchIn(entry) ?? branch;
     if (entry.type === "custom-title") custom = titleIn(entry, "customTitle") ?? custom;
@@ -143,7 +150,12 @@ export function transcriptInfo(file: string): TranscriptInfo {
     if (key === "customTitle") custom = title;
     else if (title) ai = title;
   }
-  return { title: custom ?? ai ?? prompt, cwd, branch };
+  // Stamped again at each resume: the latest in the tail, else the head's.
+  const orgAt = findLastLine(file, '"type":"credential_org"', TAIL_SEARCH_BYTES);
+  const orgLine = orgAt === undefined ? undefined : readLineAt(file, orgAt);
+  const orgEntry = orgLine === undefined ? undefined : parse(orgLine);
+  if (orgEntry) organizationUuid = credentialOrgOf(orgEntry) ?? organizationUuid;
+  return { title: custom ?? ai ?? prompt, cwd, branch, ...(organizationUuid ? { organizationUuid } : {}) };
 }
 
 /** A transcript file found, before its contents are read. */
@@ -239,10 +251,10 @@ export class PastTranscripts {
       cached = { mtimeMs: candidate.mtimeMs, size: candidate.size, info };
       this.infos.set(candidate.file, cached);
     }
-    const { title, cwd, branch } = cached.info;
+    const { title, cwd, branch, organizationUuid } = cached.info;
     if (!title) return undefined;
     // Where it started, as it says: two folders can share a project directory ("my.app" and "my-app").
-    return { id: candidate.id, file: candidate.file, cwd: cwd ?? candidate.folder ?? "", title, branch, resumable: candidate.folder !== undefined, modifiedAt: Math.round(candidate.mtimeMs) };
+    return { id: candidate.id, file: candidate.file, cwd: cwd ?? candidate.folder ?? "", title, branch, ...(organizationUuid ? { organizationUuid } : {}), resumable: candidate.folder !== undefined, modifiedAt: Math.round(candidate.mtimeMs) };
   }
 
   private transcriptsIn(dir: string, folder: string | undefined, into: Candidate[]): void {

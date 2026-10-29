@@ -6,7 +6,7 @@ import { AgentHostSessions } from "../core/agentHost";
 import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents/agent";
 import { BackgroundReads } from "../core/background";
 import { SavedPositions } from "../core/savedPositions";
-import { accountFile, describeDirs, type AccountFile } from "../core/agents/claude/account";
+import { accountFile, describeDirs, emailKey, type AccountFile } from "../core/agents/claude/account";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { closeStores, runScan } from "../core/agents/lineReaders";
 import { managedRetention, readRetention, retentionIn, userSettingsFile, writeRetention } from "../core/agents/claude/retention";
@@ -59,6 +59,8 @@ const DISMISSED_KEY = "lookout.dismissed";
 const EARLIER_SCOPE_KEY = "lookout.earlierScope";
 /** The sessions the user starred, newest star first; kept for the machine, so every window shows them. */
 const FAVOURITES_KEY = "lookout.favourites";
+/** The Claude accounts seen signed in on the machine: organization uuid → `emailKey` of the account's address, never the address. */
+const CLAUDE_ORGS_KEY = "lookout.claudeOrgs";
 /** The sessions the user archived in Lookout, newest first; kept for the machine. They leave Earlier for the Archived group. */
 const ARCHIVE_KEY = "lookout.archive";
 /** The sessions parked, and those brought back from Parked; kept for every window. */
@@ -300,6 +302,8 @@ export class Controller implements vscode.Disposable {
   private refreshing: { key: string; promise: Promise<RefreshOutcome> } | undefined;
   /** The groups the UI last got, and the directories each shares its account with. */
   private shownSources = "";
+  /** The names the user gave Claude accounts, by `emailKey`. */
+  private accountNames = new Map<string, string>();
   private readonly alerts: AlertLedger;
   /** Usage alerts this window waits to claim while it is not in front. */
   private readonly pendingAlerts = new Map<string, ReturnType<typeof setTimeout>>();
@@ -885,6 +889,33 @@ export class Controller implements vscode.Disposable {
     return out;
   }
 
+  /**
+   * The name the user gave the account of an organization: Claude Code
+   * stamps the organization into each transcript, and Lookout learns whose
+   * it is when a watched directory is signed in to that account.
+   */
+  private nameOf(organizationUuid: string): string | undefined {
+    if (this.accountNames.size === 0) return undefined;
+    const key = this.host.globalState.get<Record<string, string>>(CLAUDE_ORGS_KEY, {})[organizationUuid];
+    return key === undefined ? undefined : this.accountNames.get(key);
+  }
+
+  /** Learns the organization of the account a directory is signed in to, kept for the machine by a hash of its address. */
+  private learnAccount(source: UsageSource): void {
+    const who = source.signedIn.read();
+    if (!who?.organizationUuid || !who.email) return;
+    const known = this.host.globalState.get<Record<string, string>>(CLAUDE_ORGS_KEY, {});
+    const key = emailKey(who.email);
+    if (known[who.organizationUuid] === key) return;
+    void this.host.globalState.update(CLAUDE_ORGS_KEY, { ...known, [who.organizationUuid]: key });
+  }
+
+  /** What a source's group is called: the name of the account it is signed in to, else its directory's label while several are watched. */
+  private labelOf(source: UsageSource): string | undefined {
+    const org = source.signedIn.read()?.organizationUuid;
+    return (org === undefined ? undefined : this.nameOf(org)) ?? source.account;
+  }
+
   /** The source a group's key names; without one, the first account's. */
   private sourceOf(key?: string): UsageSource | undefined {
     return key === undefined ? this.distinctSources()[0]?.source : this.sources.find((source) => source.key === key);
@@ -892,7 +923,10 @@ export class Controller implements vscode.Disposable {
 
   /** The accounts whose usage shows, each with its group's key: one, without a label, while one directory is watched. */
   get usageAccounts(): { key: string; account?: string }[] {
-    return this.distinctSources().map(({ source }) => ({ key: source.key, ...(source.account ? { account: source.account } : {}) }));
+    return this.distinctSources().map(({ source }) => {
+      const account = this.labelOf(source);
+      return { key: source.key, ...(account ? { account } : {}) };
+    });
   }
 
   /**
@@ -906,7 +940,7 @@ export class Controller implements vscode.Disposable {
     const claude = this.distinctSources().map(({ source, also }): UsageGroup => {
       const usage = usageOf(source, now);
       const note = this.noteOf(source);
-      const account = source.account;
+      const account = this.labelOf(source);
       return {
         agent: CLAUDE_CODE,
         ...(account ? { key: source.key, account } : {}),
@@ -1014,6 +1048,7 @@ export class Controller implements vscode.Disposable {
     this.keepFavourites = config.keepFavourites;
     this.setToolOutput(config.searchToolOutput);
     this.claudeOn = config.claudeEnabled;
+    this.accountNames = config.claudeAccountNames;
     this.remembered.clear();
     this.claudeConfigDir = config.claudeConfigDir;
     this.retentionDays = config.retentionDays;
@@ -1021,7 +1056,10 @@ export class Controller implements vscode.Disposable {
     // another's sessions resume in a terminal on that directory's sign-in. Their labels show once there are several.
     const accounts = config.claudeDirs.length > 1;
     this.providers = config.claudeEnabled
-      ? config.claudeDirs.map((dir, i) => new ClaudeProvider(dir.resolved, this.proc, { ...(accounts ? { account: dir.label } : {}), ...(i > 0 ? { terminalEnv: signInEnv(dir) } : {}) }))
+      ? config.claudeDirs.map(
+          (dir, i) =>
+            new ClaudeProvider(dir.resolved, this.proc, { ...(accounts ? { account: dir.label } : {}), ...(i > 0 ? { terminalEnv: signInEnv(dir) } : {}), nameOf: (org) => this.nameOf(org) }),
+        )
       : [];
     if (config.codexEnabled) {
       // Codex keeps no per-process file: its sessions are its running processes, found by name.
@@ -1078,6 +1116,7 @@ export class Controller implements vscode.Disposable {
 
   /** Takes settings that need no restart, and shows their effect at once. */
   configure(config: Config): void {
+    this.accountNames = config.claudeAccountNames;
     this.typedQuestions = config.typedQuestions;
     this.parkAfterMs = config.parkAfterMs;
     this.usageMode = config.usageRefresh;
@@ -1232,10 +1271,13 @@ export class Controller implements vscode.Disposable {
     if (this.disposed || !this.monitor) return;
     this.pollAgentUsage();
     if (this.sources.length === 0) return;
-    for (const source of this.sources) this.consider(source, source.cache.readWithReason());
+    for (const source of this.sources) {
+      this.learnAccount(source);
+      this.consider(source, source.cache.readWithReason());
+    }
     // A directory signed in, out, or to another account: the groups change.
     const distinct = this.distinctSources();
-    const shown = JSON.stringify(distinct.map(({ source, also }) => [source.key, also]));
+    const shown = JSON.stringify(distinct.map(({ source, also }) => [source.key, this.labelOf(source), also]));
     if (shown !== this.shownSources) {
       this.shownSources = shown;
       this.announceThresholds();
@@ -1300,7 +1342,7 @@ export class Controller implements vscode.Disposable {
     for (const { source } of this.distinctSources()) {
       const usage = usageOf(source, now);
       if (!usage || usage.stale) continue;
-      const account = source.account;
+      const account = this.labelOf(source);
       alerts.push(...reachedThresholds(usage.meters.filter(running).map((meter) => (account ? { ...meter, account } : meter)), source.scope));
     }
     // Each other agent's windows, named for that agent: each threshold of each window is announced once.
@@ -1362,7 +1404,8 @@ export class Controller implements vscode.Disposable {
     if (now < this.ledger.heldUntil(source.scope)) return Promise.resolve("rate-limited");
     const before = source.read.snapshot?.fetchedAt;
     if (!this.ledger.claim(this.ledgerKey(source), now, manual, source.scope)) return Promise.resolve("too soon");
-    const named = source.account ? ` for ${source.account}` : "";
+    const label = this.labelOf(source);
+    const named = label ? ` for ${label}` : "";
     const promise: Promise<RefreshOutcome> = refreshUsage({ binary, env: source.env })
       .then((result): RefreshOutcome => {
         this.refreshing = undefined;

@@ -46,6 +46,8 @@ export interface TranscriptState {
   lastPrompt?: string;
   /** The session's current directory; unlike the session file's, it follows `cd`. */
   cwd?: string;
+  /** The organization of the account the session runs on, as Claude Code stamps it at each start (`credential_org`). */
+  organizationUuid?: string;
   /** The git branch of the latest main-chain entry. */
   gitBranch?: string;
   /** Tool calls in flight, oldest first. */
@@ -486,6 +488,13 @@ function timestampOf(e: Record<string, unknown>): number | undefined {
 }
 
 /** Folds one transcript line into the state. Lines that don't parse are ignored, and subagents' unless `sidechain` asks for them. */
+/** The organization a `credential_org` attachment names: Claude Code writes one when a session starts or resumes. */
+export function credentialOrgOf(entry: Record<string, unknown>): string | undefined {
+  if (entry.type !== "attachment") return undefined;
+  const attachment = entry.attachment as { type?: unknown; organizationUuid?: unknown } | undefined;
+  return attachment?.type === "credential_org" && typeof attachment.organizationUuid === "string" && attachment.organizationUuid !== "" ? attachment.organizationUuid : undefined;
+}
+
 export function applyLine(state: TranscriptState, line: string, sidechain = false): void {
   if (line.length < 2) return;
   let entry: unknown;
@@ -509,6 +518,13 @@ export function applyLine(state: TranscriptState, line: string, sidechain = fals
     case "cost-state":
       applyCheckpoint(state, e);
       return;
+    case "attachment": {
+      const org = credentialOrgOf(e);
+      if (org !== undefined) {
+        state.organizationUuid = org;
+        return;
+      }
+    }
   }
   // Subagent entries carry their own cwd and tools; only the main chain is the session.
   if (e.isSidechain === true && !sidechain) return;

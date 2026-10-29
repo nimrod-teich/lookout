@@ -175,6 +175,22 @@ describe("PastTranscripts", () => {
 });
 
 describe("transcriptInfo", () => {
+  const stamp = (org: string) => ({ type: "attachment", attachment: { type: "credential_org", organizationUuid: org } });
+
+  it("names the organization of the account the session last ran on, from Claude Code's stamps", () => {
+    const dir = tempConfigDir();
+    const file = transcriptPath(dir, "/work/app", sessionId(1));
+    appendEntries(file, [{ type: "user", cwd: "/work/app", message: { content: "Start" } }, stamp("org-work")]);
+    expect(transcriptInfo(file).organizationUuid).toBe("org-work");
+    // Resumed on another account, far past the head: the latest stamp counts.
+    appendEntries(file, [...Array.from({ length: 300 }, () => ({ type: "progress", data: "x".repeat(400) })), stamp("org-home")]);
+    expect(transcriptInfo(file).organizationUuid).toBe("org-home");
+    // A transcript from before the stamps names none.
+    const old = transcriptPath(dir, "/work/app", sessionId(2));
+    appendEntries(old, [{ type: "user", cwd: "/work/app", message: { content: "Old" } }]);
+    expect(transcriptInfo(old)).not.toHaveProperty("organizationUuid");
+  });
+
   it("reads where a session started and the branch it last worked on", () => {
     const file = transcriptPath(tempConfigDir(), "/work/app", sessionId(1));
     appendEntries(file, [

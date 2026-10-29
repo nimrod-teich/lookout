@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { PolledJson } from "../../polledJson";
 import type { ClaudeDir } from "./paths";
 
@@ -69,4 +70,26 @@ export function describeDirs(dirs: readonly ClaudeDir[], accounts: readonly (Acc
     else lines.push(`Claude Code directories ${first} and ${dir.label} are signed in to the same account`);
   });
   return lines;
+}
+
+/** What stands for an e-mail address where Lookout keeps one: a hash of it, so the address itself is never stored. */
+export function emailKey(email: string): string {
+  return createHash("sha256").update(email.trim().toLowerCase()).digest("hex").slice(0, 16);
+}
+
+/**
+ * The names the user gave accounts, by e-mail address, as `emailKey`s:
+ * addresses matched without regard to case, a name trimmed and its spaces
+ * made dashes, so it pins as `claude:<name>`. Entries that are not a
+ * non-empty name for a non-empty address are dropped.
+ */
+export function accountNames(setting: unknown): Map<string, string> {
+  const names = new Map<string, string>();
+  if (typeof setting !== "object" || setting === null || Array.isArray(setting)) return names;
+  for (const [email, name] of Object.entries(setting)) {
+    if (typeof name !== "string" || email.trim() === "") continue;
+    const label = name.trim().replace(/\s+/g, "-");
+    if (label) names.set(emailKey(email), label);
+  }
+  return names;
 }
