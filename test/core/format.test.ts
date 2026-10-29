@@ -113,6 +113,8 @@ describe("format", () => {
     });
     expect(describeAlert({ key: "weekly_all", label: "Week", percent: 91, resetsAt: new Date(2026, 9, 20, 23, 0).getTime() }, now).text).toBe("Your weekly limit is at 91%; it resets at Tue 23:00.");
     expect(describeAlert({ key: "session", label: "5h", percent: 90 }, now)).toEqual({ text: "Your 5-hour limit is at 90%.", title: "5-hour limit at 90%", body: "Usage" });
+    // One account's of several says which.
+    expect(describeAlert({ key: "session", label: "5h", percent: 90, account: "personal" }, now)).toEqual({ text: "Your 5-hour limit (personal) is at 90%.", title: "5-hour limit (personal) at 90%", body: "Usage" });
   });
 
   it("counts sessions per state", () => {

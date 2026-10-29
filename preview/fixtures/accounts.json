@@ -27,7 +27,40 @@
           "resetsAt": 400000000,
           "windowMs": 604800000
         }
-      ]
+      ],
+      "key": "claude-code:default",
+      "account": "default"
+    },
+    {
+      "agent": "claude-code",
+      "fetchedAt": 240000,
+      "stale": false,
+      "canRefresh": true,
+      "meters": [
+        {
+          "key": "session",
+          "label": "Session (5hr)",
+          "percent": 72,
+          "resetsAt": 7800000,
+          "windowMs": 18000000
+        },
+        {
+          "key": "weekly_all",
+          "label": "Weekly (7 day)",
+          "percent": 47,
+          "resetsAt": 400000000,
+          "windowMs": 604800000
+        },
+        {
+          "key": "weekly_scoped:Fable",
+          "label": "Weekly Fable",
+          "percent": 58,
+          "resetsAt": 400000000,
+          "windowMs": 604800000
+        }
+      ],
+      "key": "claude-code:personal",
+      "account": "personal"
     },
     {
       "agent": "codex",
@@ -38,7 +71,7 @@
         {
           "key": "primary",
           "label": "5h limit",
-          "percent": 64,
+          "percent": 40,
           "resetsAt": 8040000,
           "windowMs": 18000000
         },

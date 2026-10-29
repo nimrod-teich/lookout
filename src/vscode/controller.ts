@@ -1,17 +1,16 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { AgentHostSessions } from "../core/agentHost";
 import type { AgentProvider, ResumeCommand, SearchOutcome } from "../core/agents/agent";
 import { BackgroundReads } from "../core/background";
 import { SavedPositions } from "../core/savedPositions";
-import { accountFile, describeDirs } from "../core/agents/claude/account";
+import { accountFile, describeDirs, type AccountFile } from "../core/agents/claude/account";
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { closeStores, runScan } from "../core/agents/lineReaders";
 import { managedRetention, readRetention, retentionIn, userSettingsFile, writeRetention } from "../core/agents/claude/retention";
-import { signInEnv } from "../core/agents/claude/paths";
+import { signInEnv, type ClaudeDir } from "../core/agents/claude/paths";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
 import { chatStorageRoots, LocalChats } from "../core/agents/copilot/localChats";
@@ -148,6 +147,56 @@ export type EarlierScope = "folders" | "all";
  */
 export type RefreshOutcome = "fetched" | "failed" | "too soon" | "unavailable" | "rate-limited" | "no plan limits";
 
+/** One Claude Code directory's usage: the numbers it cached, and how Lookout has them refreshed. */
+interface UsageSource {
+  dir: ClaudeDir;
+  /** Its label, while several directories are watched. */
+  account?: string;
+  /** Names its usage group: the agent's id, with the label while several directories are watched. */
+  key: string;
+  cache: UsageCache;
+  /** Who the directory is signed in as: directories signed in to one account show one group. */
+  signedIn: AccountFile;
+  /** The directory's own settings file, which can switch refreshes off. */
+  settingsEnv: ClaudeSettingsEnv;
+  /** The environment the binary gets: the directory's own sign-in. */
+  env: NodeJS.ProcessEnv;
+  /** Where the numbers come from, named for the refreshes and the alerts. */
+  scope: string;
+  read: UsageRead;
+  /** The last refresh found that plan limits do not apply to the directory's sign-in. */
+  noPlanLimits: boolean;
+  /** The numbers the UI last got were stale. */
+  shownStale: boolean;
+  /** The note the UI last got for the group. */
+  shownNote: string | undefined;
+}
+
+/** A directory's usage source; with `accounts`, keyed and named by its label. */
+function usageSource(dir: ClaudeDir, accounts: boolean): UsageSource {
+  const file = usageCacheFile(dir.resolved);
+  return {
+    dir,
+    ...(accounts ? { account: dir.label } : {}),
+    key: accounts ? `${CLAUDE_CODE}:${dir.label}` : CLAUDE_CODE,
+    cache: new UsageCache(file),
+    signedIn: accountFile(file),
+    settingsEnv: new ClaudeSettingsEnv(path.join(dir.resolved, "settings.json")),
+    env: refreshEnv(process.env, dir),
+    scope: scopeOf(file),
+    read: { snapshot: undefined, why: "missing" },
+    noPlanLimits: false,
+    shownStale: false,
+    shownNote: undefined,
+  };
+}
+
+/** A source's numbers, or none: none cached, unreadable, or another account's. */
+function usageOf(source: UsageSource | undefined, now: number = Date.now()): Usage | undefined {
+  const snapshot = source?.read.snapshot;
+  return snapshot ? { ...snapshot, stale: isStale(snapshot, now) } : undefined;
+}
+
 /** Polls the sessions on this host and announces when what the UI shows changes. */
 export class Controller implements vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<readonly SessionView[]>();
@@ -240,26 +289,17 @@ export class Controller implements vscode.Disposable {
   private claudeConfigDir = "";
   /** Keep Claude Code's transcripts this many days, written into its user settings file; 0 leaves Claude Code's own. */
   private retentionDays = 0;
-  private usageCache: UsageCache | undefined;
   private usageMode: RefreshMode = "manual";
-  private usageRead: UsageRead = { snapshot: undefined, why: "missing" };
   private usageAlerts = true;
   /** Refresh is switched off for Claude Code in VS Code's environment or the Claude Code extension's settings. */
   private refreshDisabledByEnv = false;
-  /** Claude Code's own settings file, which can switch it off too. */
-  private settingsEnv: ClaudeSettingsEnv | undefined;
-  /** The environment the Claude Code binary gets: the config directory the numbers are read from. */
-  private refreshEnvironment: NodeJS.ProcessEnv = process.env;
+  /** Claude Code's usage: a source per directory watched, the primary first; none while Claude is not watched. */
+  private sources: UsageSource[] = [];
   private readonly ledger: RefreshLedger;
-  /** The numbers the UI last got were stale. */
-  private shownStale = false;
-  /** The note the UI last got for Claude's group. */
-  private shownNote: string | undefined;
-  /** The last refresh found that plan limits do not apply to Claude Code's sign-in. */
-  private noPlanLimits = false;
-  private refreshing: Promise<RefreshOutcome> | undefined;
-  /** The source of the numbers shown, named for the refreshes and the alerts. */
-  private scope = "";
+  /** The one refresh this window runs, and whose numbers it fetches. */
+  private refreshing: { key: string; promise: Promise<RefreshOutcome> } | undefined;
+  /** The groups the UI last got, and the directories each shares its account with. */
+  private shownSources = "";
   private readonly alerts: AlertLedger;
   /** Usage alerts this window waits to claim while it is not in front. */
   private readonly pendingAlerts = new Map<string, ReturnType<typeof setTimeout>>();
@@ -818,61 +858,110 @@ export class Controller implements vscode.Disposable {
     return out;
   }
 
-  /** The usage numbers, or nothing when there are none to show: none cached, unreadable, or another account's. */
+  /** The first account's usage numbers, or nothing when there are none to show: none cached, unreadable, or another account's. */
   get usage(): Usage | undefined {
-    const snapshot = this.usageRead.snapshot;
-    if (!snapshot) return undefined;
-    return { ...snapshot, stale: isStale(snapshot, Date.now()) };
+    return usageOf(this.distinctSources()[0]?.source);
   }
 
   /**
-   * Every agent's usage, one group each, every meter tagged with its agent.
-   * Claude's group is there without numbers too, to say there are none and
-   * whether a refresh can fetch them.
+   * The sources whose numbers show, each with the labels of the directories
+   * after it signed in to the same account: those show none of their own,
+   * and none of them is refreshed. A directory with no sign-in shows its own.
+   */
+  private distinctSources(): { source: UsageSource; also: string[] }[] {
+    const out: { source: UsageSource; also: string[] }[] = [];
+    const byAccount = new Map<string, { source: UsageSource; also: string[] }>();
+    for (const source of this.sources) {
+      const uuid = source.signedIn.read()?.uuid;
+      const first = uuid === undefined ? undefined : byAccount.get(uuid);
+      if (first) {
+        first.also.push(source.dir.label);
+        continue;
+      }
+      const entry = { source, also: [] as string[] };
+      if (uuid !== undefined) byAccount.set(uuid, entry);
+      out.push(entry);
+    }
+    return out;
+  }
+
+  /** The source a group's key names; without one, the first account's. */
+  private sourceOf(key?: string): UsageSource | undefined {
+    return key === undefined ? this.distinctSources()[0]?.source : this.sources.find((source) => source.key === key);
+  }
+
+  /** The accounts whose usage shows, each with its group's key: one, without a label, while one directory is watched. */
+  get usageAccounts(): { key: string; account?: string }[] {
+    return this.distinctSources().map(({ source }) => ({ key: source.key, ...(source.account ? { account: source.account } : {}) }));
+  }
+
+  /**
+   * Every agent's usage, one group each, and one per Claude account while
+   * several directories are watched; every meter tagged with its agent and
+   * account. A Claude group is there without numbers too, to say there are
+   * none and whether a refresh can fetch them.
    */
   get usageGroups(): UsageGroup[] {
-    const usage = this.usage;
     const now = Date.now();
-    const note = this.claudeNote;
-    const claude: UsageGroup = { agent: CLAUDE_CODE, fetchedAt: usage?.fetchedAt, stale: usage?.stale ?? false, meters: (usage?.meters ?? []).map((meter) => ({ ...meter, agent: CLAUDE_CODE })), canRefresh: this.canRefreshUsage, ...(note ? { note } : {}) };
+    const claude = this.distinctSources().map(({ source, also }): UsageGroup => {
+      const usage = usageOf(source, now);
+      const note = this.noteOf(source);
+      const account = source.account;
+      return {
+        agent: CLAUDE_CODE,
+        ...(account ? { key: source.key, account } : {}),
+        ...(also.length ? { also } : {}),
+        fetchedAt: usage?.fetchedAt,
+        stale: usage?.stale ?? false,
+        meters: (usage?.meters ?? []).map((meter) => ({ ...meter, agent: CLAUDE_CODE, ...(account ? { account } : {}) })),
+        canRefresh: this.canRefresh(source),
+        ...(note ? { note } : {}),
+      };
+    });
     // The others' numbers come with their sessions' records; Lookout cannot fetch them anew.
     const others = [...this.agentUsage].map(([agent, snapshot]): UsageGroup => ({ agent, fetchedAt: snapshot.fetchedAt, stale: isStale(snapshot, now), meters: snapshot.meters.map((meter) => ({ ...meter, agent })), canRefresh: false }));
-    return this.claudeOn ? [claude, ...others] : others;
+    return this.claudeOn ? [...claude, ...others] : others;
   }
 
-  /** Claude Code is told to make no network calls it can do without, which fetching usage is. Asked again each time: the settings file can change. */
-  private get refreshDisabled(): boolean {
-    return this.refreshDisabledByEnv || envFlag(this.settingsEnv?.get(NONESSENTIAL_TRAFFIC));
+  /** Claude Code is told to make no network calls it can do without, which fetching usage is: in the environment, or in the directory's settings file, asked again each time as it can change. */
+  private refreshDisabled(source: UsageSource | undefined): boolean {
+    return this.refreshDisabledByEnv || envFlag(source?.settingsEnv.get(NONESSENTIAL_TRAFFIC));
   }
 
-  /** Lookout can ask the agent for fresh usage numbers. */
+  /** Lookout can ask the agent for fresh numbers for this source. */
+  private canRefresh(source: UsageSource): boolean {
+    return this.claudeOn && this.usageMode !== "off" && !this.refreshDisabled(source) && this.host.claudeBinary() !== undefined;
+  }
+
+  /** Lookout can ask the agent for fresh usage numbers, for one account at least. */
   get canRefreshUsage(): boolean {
-    return this.claudeOn && this.usageMode !== "off" && !this.refreshDisabled && this.host.claudeBinary() !== undefined;
+    return this.distinctSources().some(({ source }) => this.canRefresh(source));
   }
 
-  /** Epoch ms until which the usage endpoint asked for no more requests from this account; -Infinity when it did not. */
-  get refreshHeldUntil(): number {
-    return this.ledger.heldUntil(this.scope);
+  /** Epoch ms until which the usage endpoint asked for no more requests from this account, the first without a key; -Infinity when it did not. */
+  refreshHeldUntil(key?: string): number {
+    const source = this.sourceOf(key);
+    return source ? this.ledger.heldUntil(source.scope) : -Infinity;
   }
 
-  /** Why Claude's group has no numbers, when Lookout knows: the usage endpoint asked for a wait, or plan limits do not apply. */
-  private get claudeNote(): string | undefined {
-    if (this.usageRead.snapshot) return undefined;
-    const held = this.refreshHeldUntil;
+  /** Why a Claude group has no numbers, when Lookout knows: the usage endpoint asked for a wait, or plan limits do not apply. */
+  private noteOf(source: UsageSource): string | undefined {
+    if (source.read.snapshot) return undefined;
+    const held = this.ledger.heldUntil(source.scope);
     if (held > Date.now()) return `Too many usage checks; next at ${clockTime(held)}`;
-    if (this.noPlanLimits) return "No plan limits for this sign-in";
+    if (source.noPlanLimits) return "No plan limits for this sign-in";
     return undefined;
   }
 
   /** Names the numbers shown, for the refreshes on file. */
-  private get ledgerKey(): string {
-    return `${this.scope}-${this.usageRead.snapshot?.fetchedAt ?? "none"}`;
+  private ledgerKey(source: UsageSource): string {
+    return `${source.scope}-${source.read.snapshot?.fetchedAt ?? "none"}`;
   }
 
-  /** Why Lookout cannot fetch the usage numbers, when it cannot. */
-  get usageNote(): string | undefined {
+  /** Why Lookout cannot fetch an account's usage numbers, the first's without a key, when it cannot. */
+  usageNote(key?: string): string | undefined {
     if (!this.claudeOn) return "Claude Code is turned off (lookout.agents.claude)";
-    if (this.refreshDisabled) return "refresh disabled by CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
+    if (this.refreshDisabled(this.sourceOf(key))) return "refresh disabled by CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
     if (this.usageMode === "off") return "refresh is off (lookout.usage.refresh)";
     if (this.host.claudeBinary() === undefined) return "refresh needs the Claude Code extension";
     return undefined;
@@ -955,14 +1044,9 @@ export class Controller implements vscode.Disposable {
       this.providers.push(new CopilotProvider(config.copilotHome, finder, this.proc, Date.now, runtimes, agentHost, localChats));
     }
     this.monitor = new Monitor(this.providers, this.proc);
-    const cacheFile = usageCacheFile(config.claudeConfigDir);
-    // Claude's usage is read from what Claude Code cached, only while Claude is watched.
-    this.usageCache = config.claudeEnabled ? new UsageCache(cacheFile) : undefined;
-    this.usageRead = { snapshot: undefined, why: "missing" };
-    this.noPlanLimits = false;
-    this.scope = scopeOf(cacheFile);
-    this.settingsEnv = new ClaudeSettingsEnv(path.join(config.claudeConfigDir, "settings.json"));
-    this.refreshEnvironment = refreshEnv(process.env, config.claudeConfigDir, path.join(os.homedir(), ".claude"));
+    // Claude's usage is read from what Claude Code cached in each directory, only while Claude is watched.
+    this.sources = config.claudeEnabled ? config.claudeDirs.map((dir) => usageSource(dir, accounts)) : [];
+    this.shownSources = "";
     this.usageMode = config.usageRefresh;
     this.usageAlerts = config.usageAlerts;
     this.refreshDisabledByEnv = config.usageRefreshDisabled;
@@ -973,7 +1057,7 @@ export class Controller implements vscode.Disposable {
     // An agent watched in several directories is named once; the next lines list its directories.
     this.log.info(this.providers.length ? `Watching ${[...new Set(this.providers.map((p) => p.label))].join(", ")} (${homes.join(", ")})` : "Watching no agent: every agent is turned off");
     // Several Claude Code directories: which is which, and who each is signed in as, by label only.
-    if (config.claudeEnabled) for (const line of describeDirs(config.claudeDirs, config.claudeDirs.map((dir) => accountFile(usageCacheFile(dir.resolved)).read()))) this.log.info(line);
+    for (const line of describeDirs(config.claudeDirs, this.sources.map((source) => source.signedIn.read()))) this.log.info(line);
     this.watch();
     if (this.background && this.readAheadAt === Infinity) {
       this.readAheadAt = Date.now() + READ_AHEAD_AFTER_MS;
@@ -1147,10 +1231,21 @@ export class Controller implements vscode.Disposable {
   private pollUsage(): void {
     if (this.disposed || !this.monitor) return;
     this.pollAgentUsage();
-    if (!this.usageCache) return;
-    this.consider(this.usageCache.readWithReason());
+    if (this.sources.length === 0) return;
+    for (const source of this.sources) this.consider(source, source.cache.readWithReason());
+    // A directory signed in, out, or to another account: the groups change.
+    const distinct = this.distinctSources();
+    const shown = JSON.stringify(distinct.map(({ source, also }) => [source.key, also]));
+    if (shown !== this.shownSources) {
+      this.shownSources = shown;
+      this.announceThresholds();
+      this.usageChanged.fire(this.usage);
+    }
+    // One fetch at a time: the first account whose numbers are due.
+    if (this.refreshing) return;
     const now = Date.now();
-    if (this.canRefreshUsage && wantsRefresh(this.usageMode, this.usageRead.snapshot, now) && now >= this.nextRefreshAt(false)) void this.refreshUsage();
+    const due = distinct.find(({ source }) => this.canRefresh(source) && wantsRefresh(this.usageMode, source.read.snapshot, now) && now >= this.nextRefreshAt(false, source.key));
+    if (due) void this.refreshUsage(false, due.source.key);
   }
 
   /**
@@ -1174,35 +1269,40 @@ export class Controller implements vscode.Disposable {
     this.usageChanged.fire(this.usage);
   }
 
-  /** Takes a read of the cache: newer numbers, or word that there are none to show; never older numbers. */
-  private consider(read: UsageRead): void {
-    const before = this.usageRead;
+  /** Takes a read of a source's cache: newer numbers, or word that there are none to show; never older numbers. */
+  private consider(source: UsageSource, read: UsageRead): void {
+    const before = source.read;
     const news = read.snapshot ? before.snapshot === undefined || read.snapshot.fetchedAt > before.snapshot.fetchedAt : before.snapshot !== undefined || read.why !== before.why;
-    if (news) this.acceptUsage(read);
-    else if ((this.usage?.stale ?? false) !== this.shownStale || this.claudeNote !== this.shownNote) this.fireUsage();
+    if (news) this.acceptUsage(source, read);
+    else if ((usageOf(source)?.stale ?? false) !== source.shownStale || this.noteOf(source) !== source.shownNote) this.fireUsage(source);
   }
 
-  private acceptUsage(read: UsageRead): void {
-    this.usageRead = read;
+  private acceptUsage(source: UsageSource, read: UsageRead): void {
+    source.read = read;
     this.announceThresholds();
-    this.fireUsage();
+    this.fireUsage(source);
   }
 
-  /** Tells the UI about the numbers; also when they only turned stale, which no new reading announces. */
-  private fireUsage(): void {
-    const usage = this.usage;
-    this.shownStale = usage?.stale ?? false;
-    this.shownNote = this.claudeNote;
-    this.usageChanged.fire(usage);
+  /** Tells the UI about a source's numbers; also when they only turned stale, which no new reading announces. */
+  private fireUsage(source: UsageSource): void {
+    source.shownStale = usageOf(source)?.stale ?? false;
+    source.shownNote = this.noteOf(source);
+    this.usageChanged.fire(this.usage);
   }
 
   /** The thresholds the numbers shown reach in windows still running; none from numbers too old to go by. */
   private currentAlerts(): UsageAlert[] {
     if (!this.usageAlerts) return [];
-    const usage = this.usage;
     const now = Date.now();
     const running = (meter: { resetsAt?: number }) => meter.resetsAt === undefined || meter.resetsAt > now;
-    const alerts = usage && !usage.stale ? reachedThresholds(usage.meters.filter(running), this.scope) : [];
+    const alerts: UsageAlert[] = [];
+    // Each Claude account's windows, named for the account while there are several: one set of alerts per account.
+    for (const { source } of this.distinctSources()) {
+      const usage = usageOf(source, now);
+      if (!usage || usage.stale) continue;
+      const account = source.account;
+      alerts.push(...reachedThresholds(usage.meters.filter(running).map((meter) => (account ? { ...meter, account } : meter)), source.scope));
+    }
     // Each other agent's windows, named for that agent: each threshold of each window is announced once.
     for (const [agent, snapshot] of this.agentUsage) {
       if (isStale(snapshot, now)) continue;
@@ -1239,53 +1339,60 @@ export class Controller implements vscode.Disposable {
   }
 
   /**
-   * Has the agent fetch fresh usage numbers: at most once every 180 s on the
-   * host, and less often after failures unless the user asks (`manual`);
-   * after the usage endpoint answered 429, not before the wait its
-   * Retry-After asks, the user's request neither. The numbers then come from
-   * the cache the agent rewrote, with its account check, not from its
-   * answer; a refresh that leaves the cache as it was failed. One fetch runs
-   * at a time; a call during a fetch waits for it.
+   * Has the agent fetch fresh usage numbers for one account, the first
+   * without a key: at most once every 180 s on the host, 10 s after any
+   * other account's unless the user asks (`manual`), and less often after
+   * failures unless the user asks; after the usage endpoint answered 429,
+   * not before the wait its Retry-After asks, the user's request neither.
+   * The numbers then come from the cache the agent rewrote, with its account
+   * check, not from its answer; a refresh that leaves the cache as it was
+   * failed. One fetch runs at a time: a call for the same account during a
+   * fetch waits for it, one for another account runs after it.
    */
-  refreshUsage(manual = false): Promise<RefreshOutcome> {
-    if (this.refreshing) return this.refreshing;
+  refreshUsage(manual = false, key?: string): Promise<RefreshOutcome> {
+    const source = this.sourceOf(key);
+    if (!source) return Promise.resolve("unavailable");
+    if (this.refreshing) {
+      if (this.refreshing.key === source.key) return this.refreshing.promise;
+      return this.refreshing.promise.then(() => this.refreshUsage(manual, source.key));
+    }
     const binary = this.host.claudeBinary();
-    const cache = this.usageCache;
-    if (!binary || !cache || !this.canRefreshUsage) return Promise.resolve("unavailable");
+    if (!binary || !this.canRefresh(source)) return Promise.resolve("unavailable");
     const now = Date.now();
-    if (now < this.refreshHeldUntil) return Promise.resolve("rate-limited");
-    const key = this.ledgerKey;
-    const scope = this.scope;
-    const before = this.usageRead.snapshot?.fetchedAt;
-    if (!this.ledger.claim(key, now, manual)) return Promise.resolve("too soon");
-    const refreshing: Promise<RefreshOutcome> = refreshUsage({ binary, env: this.refreshEnvironment })
+    if (now < this.ledger.heldUntil(source.scope)) return Promise.resolve("rate-limited");
+    const before = source.read.snapshot?.fetchedAt;
+    if (!this.ledger.claim(this.ledgerKey(source), now, manual, source.scope)) return Promise.resolve("too soon");
+    const named = source.account ? ` for ${source.account}` : "";
+    const promise: Promise<RefreshOutcome> = refreshUsage({ binary, env: source.env })
       .then((result): RefreshOutcome => {
         this.refreshing = undefined;
-        if (this.disposed || cache !== this.usageCache) return "failed";
-        this.noPlanLimits = result.answer?.kind === "no plan limits";
+        if (this.disposed || !this.sources.includes(source)) return "failed";
+        source.noPlanLimits = result.answer?.kind === "no plan limits";
         if (result.retryAfterMs !== undefined) {
           const until = Date.now() + result.retryAfterMs;
-          this.ledger.hold(scope, until);
-          this.log.info(`Usage refresh: the usage endpoint answered 429 (too many requests); no refresh before ${clockTime(until)}, the wait its Retry-After asks`);
+          this.ledger.hold(source.scope, until);
+          this.log.info(`Usage refresh${named}: the usage endpoint answered 429 (too many requests); no refresh before ${clockTime(until)}, the wait its Retry-After asks`);
         }
-        this.consider(cache.readWithReason());
-        const after = this.usageRead.snapshot?.fetchedAt;
+        this.consider(source, source.cache.readWithReason());
+        const after = source.read.snapshot?.fetchedAt;
         if (after !== undefined && (before === undefined || after > before)) return "fetched";
-        if (result.retryAfterMs === undefined) this.log.errorOnce(refreshFailure(result));
-        this.fireUsage();
+        if (result.retryAfterMs === undefined) this.log.errorOnce(`${named ? `Usage refresh${named}: ` : ""}${refreshFailure(result)}`);
+        this.fireUsage(source);
         if (result.retryAfterMs !== undefined) return "rate-limited";
-        return this.noPlanLimits ? "no plan limits" : "failed";
+        return source.noPlanLimits ? "no plan limits" : "failed";
       })
       .finally(() => {
-        if (this.refreshing === refreshing) this.refreshing = undefined;
+        if (this.refreshing?.promise === promise) this.refreshing = undefined;
       });
-    this.refreshing = refreshing;
-    return refreshing;
+    this.refreshing = { key: source.key, promise };
+    return promise;
   }
 
-  /** When a refresh may start again, automatic or asked for. */
-  nextRefreshAt(manual: boolean): number {
-    return Math.max(this.ledger.nextAt(this.ledgerKey, manual), this.refreshHeldUntil);
+  /** When a refresh of an account's numbers, the first's without a key, may start again, automatic or asked for. */
+  nextRefreshAt(manual: boolean, key?: string): number {
+    const source = this.sourceOf(key);
+    if (!source) return Infinity;
+    return Math.max(this.ledger.nextAt(this.ledgerKey(source), manual, source.scope), this.ledger.heldUntil(source.scope));
   }
 
   /**

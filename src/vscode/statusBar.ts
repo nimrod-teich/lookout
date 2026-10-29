@@ -25,7 +25,7 @@ export interface StatusBarInput {
   usage: Usage | undefined;
   /** Every agent's usage, one group each. */
   usageGroups?: readonly UsageGroup[];
-  /** Whose bar the item shows: `auto`, or an agent's key. */
+  /** Whose bar the item shows: `auto`, an agent's key, or one account's (`claude:personal`). */
   usageAgent?: string;
   /** Tell the agents apart: their marks in the hover, and before the bar. */
   markers?: boolean;
@@ -77,7 +77,9 @@ function usageText(bar: Bar | undefined, showReset: boolean, now: number): strin
   const { meter } = bar;
   const reset = showReset && meter.resetsAt !== undefined && meter.resetsAt > now ? ` · ${formatCountdown(meter.resetsAt - now)}` : "";
   const mark = bar.marked ? `${agentIcon(bar.group.agent)} ` : "";
-  return `${mark}${usageBar(meter.percent)} ${meter.percent}%${reset}`;
+  // Of an agent's several accounts, the one whose bar it is.
+  const account = bar.group.account ? `${bar.group.account} ` : "";
+  return `${mark}${account}${usageBar(meter.percent)} ${meter.percent}%${reset}`;
 }
 
 /** Grey when stale, else by consumption. */
@@ -89,7 +91,7 @@ function usageColor(bar: Bar | undefined): string {
 
 function spokenText(bar: Bar | undefined): string {
   if (!bar) return "Lookout";
-  const whose = bar.marked ? `${agentInfo(bar.group.agent).label} ` : "";
+  const whose = `${bar.marked ? `${agentInfo(bar.group.agent).label} ` : ""}${bar.group.account ? `${bar.group.account} ` : ""}`;
   return `Lookout: usage ${whose}${bar.meter.label} ${bar.meter.percent}%`;
 }
 
@@ -116,7 +118,9 @@ function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
     const groups = groupsOf(input);
     const marked = input.markers === true || groups.filter((group) => group.meters.length > 0).length > 1;
     for (const group of groups) {
-      md.appendMarkdown(`${marked ? `${hoverMark(group.agent)} ` : ""}**${groupHeading(group.agent)}**  \n`);
+      md.appendMarkdown(`${marked ? `${hoverMark(group.agent)} ` : ""}**`);
+      md.appendText(groupHeading(group));
+      md.appendMarkdown("**  \n");
       if (group.meters.length > 0) {
         for (const meter of group.meters) {
           const color = HOVER_COLORS[group.stale ? "stale" : usageLevel(meter.percent)];

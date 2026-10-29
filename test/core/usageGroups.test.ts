@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UsageMeter } from "../../src/core/usage";
-import { barMeter, chosenGroup, groupHeading, peakMeter, pickBar, sortGroups, tabMeters, type UsageGroup } from "../../src/core/usageGroups";
+import { barMeter, chosenGroup, groupHeading, groupKey, parsePin, peakMeter, pickBar, sortGroups, tabMeters, type UsageGroup } from "../../src/core/usageGroups";
 
 const HOUR = 3_600_000;
 
@@ -52,8 +52,10 @@ describe("usage groups", () => {
   it("come in the catalog's order, a group without an agent counted as Claude's, and are headed by the agent's name", () => {
     expect(sortGroups([{ agent: "copilot" }, { agent: "unlisted" }, { agent: "codex" }, { agent: "claude-code" }]).map((g) => g.agent)).toEqual(["claude-code", "codex", "copilot", "unlisted"]);
     expect(sortGroups([{ agent: "codex" }, {}]).map((g) => g.agent)).toEqual([undefined, "codex"]);
-    expect(groupHeading("claude-code")).toBe("Claude usage");
-    expect(groupHeading("codex")).toBe("Codex usage");
+    expect(groupHeading({ agent: "claude-code" })).toBe("Claude usage");
+    expect(groupHeading({ agent: "codex" })).toBe("Codex usage");
+    expect(groupHeading({ agent: "claude-code", account: "personal" })).toBe("Claude usage · personal");
+    expect(groupHeading({ agent: "claude-code", account: "default", also: ["spare"] })).toBe("Claude usage · default (also spare)");
   });
 });
 
@@ -87,5 +89,43 @@ describe("chosenGroup", () => {
     expect(chosenGroup(groups, "copilot", "codex")?.agent).toBe("codex");
     expect(chosenGroup(groups, "copilot")?.agent).toBe("claude-code");
     expect(chosenGroup([], "codex")).toBeUndefined();
+  });
+});
+
+describe("several accounts of one agent", () => {
+  const account = (name: string, percent: number, stale = false): UsageGroup => ({ agent: "claude-code", key: `claude-code:${name}`, account: name, fetchedAt: 0, stale, meters: [meter("session", percent, 5 * HOUR)] });
+  const work = account("default", 18);
+  const personal = account("personal", 64);
+  const codex = group("codex", [meter("primary", 40, 5 * HOUR)]);
+
+  it("names each group by its key, else by its agent", () => {
+    expect(groupKey(personal)).toBe("claude-code:personal");
+    expect(groupKey(codex)).toBe("codex");
+    expect(groupKey({})).toBe("claude-code");
+  });
+
+  it("reads a pin of an agent, or of one of its accounts", () => {
+    expect(parsePin("auto")).toBeUndefined();
+    expect(parsePin("claude")).toEqual({ agent: "claude-code" });
+    expect(parsePin("claude:personal")).toEqual({ agent: "claude-code", account: "personal" });
+    expect(parsePin("claude:")).toEqual({ agent: "claude-code" });
+    expect(parsePin("gemini:x")).toBeUndefined();
+  });
+
+  it("pins an account, or the agent's account under the most pressure, and falls back when the pin shows none", () => {
+    expect(pickBar([work, personal, codex], "claude:default")?.group.account).toBe("default");
+    expect(pickBar([work, personal, codex], "claude")?.group.account).toBe("personal");
+    expect(pickBar([work, account("personal", 64, true), codex], "claude")?.group.account).toBe("default");
+    expect(pickBar([work, personal, codex], "claude:spare")?.group.account).toBe("personal");
+    expect(pickBar([work, personal, codex])?.group.account).toBe("personal");
+    expect(pickBar([work, codex], "codex")?.group.agent).toBe("codex");
+  });
+
+  it("chooses a tab by its key; one picked before the accounts names the agent's first", () => {
+    expect(chosenGroup([work, personal, codex], "claude-code:personal")?.account).toBe("personal");
+    expect(chosenGroup([work, personal, codex], undefined, "claude-code:personal")?.account).toBe("personal");
+    expect(chosenGroup([work, personal, codex], "claude-code", "codex")?.agent).toBe("codex");
+    expect(chosenGroup([work, personal, codex], "claude-code")?.account).toBe("default");
+    expect(chosenGroup([work, personal, codex], "codex")?.agent).toBe("codex");
   });
 });

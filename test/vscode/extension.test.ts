@@ -437,6 +437,29 @@ describe("the extension", () => {
     }
   }, 60_000);
 
+  it("shows one usage group for two directories signed in to one account, naming both", async () => {
+    const spare = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-e2e-spare-"));
+    try {
+      const signedIn = (percent: number) => JSON.stringify({ oauthAccount: { accountUuid: "acc-1" }, cachedUsageUtilization: { fetchedAtMs: Date.now(), accountUuid: "acc-1", utilization: { five_hour: { utilization: percent } } } });
+      fs.writeFileSync(path.join(configDir, ".claude.json"), signedIn(18));
+      fs.writeFileSync(path.join(spare, ".claude.json"), signedIn(19));
+      stub.config["lookout.claudeConfigDirs"] = [`spare=${spare}`];
+      activate(context());
+      boardStates();
+      type Posted = { usage?: { key?: string; account?: string; also?: string[]; meters: { percent: number }[] }[] };
+      const usage = () => (statesBoard!.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as Posted | undefined)?.usage;
+      await vi.waitFor(() => expect(usage()?.map((group) => [group.account, group.also, group.meters[0]?.percent])).toEqual([[path.basename(configDir), ["spare"], 18]]), WAIT);
+      expect(statusText()).toBe(`$(lookout-lighthouse) ${path.basename(configDir)} ▰▰▱▱▱▱▱▱▱▱ 18%`);
+
+      // Signed in to another account: its own group.
+      fs.writeFileSync(path.join(spare, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "acc-2" }, cachedUsageUtilization: { fetchedAtMs: Date.now(), accountUuid: "acc-2", utilization: { five_hour: { utilization: 61 } } } }));
+      await vi.waitFor(() => expect(usage()?.map((group) => [group.account, group.meters[0]?.percent])).toEqual([[path.basename(configDir), 18], ["spare", 61]]), WAIT);
+      expect(statusText()).toBe("$(lookout-lighthouse) $(lookout-sloop) spare ▰▰▰▰▰▰▱▱▱▱ 61%");
+    } finally {
+      fs.rmSync(spare, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  }, 60_000);
+
   it("announces each usage threshold once per window, though every fetch reports the reset a fraction of a second apart", async () => {
     const resets = Date.now() + 2 * 3_600_000;
     const write = (percent: number, fraction: string) => {
@@ -566,6 +589,76 @@ describe("the extension", () => {
       // The hover is Markdown, with the text's hyphen escaped.
       await vi.waitFor(() => expect(tooltip().replace(/\\/g, "")).toContain("No plan limits for this sign-in"), WAIT);
       expect(runs()).toBe(1);
+    }, 60_000);
+
+    it("fetches each account's usage on its own directory's sign-in, holds only the account the endpoint asked to wait, and asks which account to refresh", async () => {
+      const personal = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-e2e-personal-"));
+      const ext = path.join(configDir, "claude-ext");
+      const bin = path.join(ext, "resources", "native-binaries", `${process.platform}-${process.arch}`);
+      fs.mkdirSync(bin, { recursive: true });
+      const runs = path.join(configDir, "runs.jsonl");
+      const script = path.join(configDir, "fake-claude.js");
+      // The primary's refresh rewrites its cache; the other's meets a 429 and leaves its cache alone.
+      fs.writeFileSync(
+        script,
+        `const fs = require("fs"), path = require("path");
+        const dir = process.env.CLAUDE_CONFIG_DIR;
+        fs.appendFileSync(${JSON.stringify(runs)}, JSON.stringify({ dir, token: process.env.CLAUDE_CODE_OAUTH_TOKEN ?? null, key: process.env.ANTHROPIC_API_KEY ?? null }) + "\\n");
+        const other = dir === ${JSON.stringify(personal)};
+        const debugFile = process.argv[process.argv.indexOf("--debug-file") + 1];
+        if (process.argv.includes("--debug-file")) fs.writeFileSync(debugFile, other ? "t [DEBUG] fetchUtilization: 429 remembered for this bearer; not asking again for 900s\\n" : "");
+        process.stdin.resume();
+        process.stdin.on("end", () => {
+          if (!other) fs.writeFileSync(path.join(dir, ".claude.json"), JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: Date.now(), utilization: { five_hour: { utilization: 44 } } } }));
+          const answer = { type: "control_response", response: { subtype: "success", request_id: "lookout-usage", response: { rate_limits_available: true, rate_limits: null } } };
+          process.stdout.write(JSON.stringify(answer) + "\\n");
+          process.exit(0);
+        });`,
+      );
+      fs.writeFileSync(path.join(bin, "claude"), `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`, { mode: 0o755 });
+      stub.extension = { extensionPath: ext };
+      const ran = () => (fs.existsSync(runs) ? fs.readFileSync(runs, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { dir: string; token: string | null; key: string | null }) : []);
+      const saved = { token: process.env.CLAUDE_CODE_OAUTH_TOKEN, key: process.env.ANTHROPIC_API_KEY };
+      // A token and a key in VS Code's environment would win over each directory's sign-in: the refreshes go without them.
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-test";
+      process.env.ANTHROPIC_API_KEY = "sk-ant-api03-test";
+      const primary = path.basename(configDir);
+      try {
+        stub.config["lookout.claudeConfigDirs"] = [`personal=${personal}`];
+        activate(context());
+        // No numbers anywhere: the primary's refresh at once, the other's once the spacing allows.
+        await vi.waitFor(() => expect(ran()).toHaveLength(2), WAIT);
+        expect(ran()).toEqual([
+          { dir: configDir, token: null, key: null },
+          { dir: personal, token: null, key: null },
+        ]);
+        await vi.waitFor(() => expect(tooltip()).toContain("Too many usage checks"), WAIT);
+        expect(statusText()).toBe(`$(lookout-lighthouse) ${primary} ▰▰▰▰▱▱▱▱▱▱ 44%`);
+        const tip = tooltip();
+        expect(tip.indexOf(`Claude usage · ${primary}`)).toBeLessThan(tip.indexOf("Claude usage · personal"));
+        expect(tip.slice(tip.indexOf("Claude usage · personal"))).toContain("Too many usage checks; next at");
+        // Only the account that met the 429 is held.
+        await stub.commands.get("lookout.refreshUsage")!("claude-code:personal");
+        expect(infoMessages().at(-1)).toMatch(/^Lookout \(personal\): Anthropic's usage endpoint asked for no more checks before (\w{3} )?\d\d:\d\d\.$/);
+        // From the Command Palette: which account, or all.
+        let offered: string[] = [];
+        stub.quickPick = (items) => {
+          offered = (items as { label: string }[]).map((item) => item.label);
+          return (items as unknown[])[0];
+        };
+        const said = infoMessages().length;
+        await stub.commands.get("lookout.refreshUsage")!();
+        expect(offered).toEqual(["All accounts", primary, "personal"]);
+        // The primary's numbers are too new to fetch again, which is not said; the other is still held.
+        expect(infoMessages().slice(said)).toEqual([expect.stringMatching(/^Lookout \(personal\): Anthropic's usage endpoint asked/)]);
+        expect(ran()).toHaveLength(2);
+      } finally {
+        for (const [name, value] of [["CLAUDE_CODE_OAUTH_TOKEN", saved.token], ["ANTHROPIC_API_KEY", saved.key]] as const) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+        fs.rmSync(personal, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      }
     }, 60_000);
 
     it("starts no refresh while Claude Code's settings switch nonessential traffic off, and notices when they no longer do", async () => {

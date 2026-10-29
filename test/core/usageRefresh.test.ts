@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { parseResponse, readDebugLog, refreshEnv, refreshUsage } from "../../src/core/usageRefresh";
+import { resolveConfigDirs } from "../../src/core/agents/claude/paths";
 import { tempConfigDir } from "./helpers";
 
 const RESPONSE = {
@@ -63,11 +64,20 @@ describe("readDebugLog", () => {
 });
 
 describe("refreshEnv", () => {
-  it("names an overridden config directory, and leaves the standard one to the binary's default", () => {
-    const home = path.join(path.sep, "home", "u");
-    expect(refreshEnv({ PATH: "/bin" }, path.join(home, ".claude-work"), path.join(home, ".claude"))).toEqual({ PATH: "/bin", CLAUDE_CONFIG_DIR: path.join(home, ".claude-work") });
+  const home = path.resolve(path.sep, "home", "u");
+  const [standard, work] = resolveConfigDirs({ home, env: {}, extra: ["~/.claude-work/"] });
+
+  it("names an overridden config directory as written, and leaves the standard one to the binary's default", () => {
+    expect(refreshEnv({ PATH: "/bin" }, work!)).toEqual({ PATH: "/bin", CLAUDE_CONFIG_DIR: path.join(home, ".claude-work") + path.sep });
     // With CLAUDE_CONFIG_DIR set, Claude Code keeps its config file inside the folder: the standard one must go unnamed.
-    expect(refreshEnv({ PATH: "/bin", CLAUDE_CONFIG_DIR: "/elsewhere" }, path.join(home, ".claude"), path.join(home, ".claude"))).toEqual({ PATH: "/bin" });
+    expect(refreshEnv({ PATH: "/bin", CLAUDE_CONFIG_DIR: "/elsewhere" }, standard!)).toEqual({ PATH: "/bin" });
+  });
+
+  it("drops a token or an API key in the environment, which would win over the directory's sign-in", () => {
+    const env = { PATH: "/bin", CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x", ANTHROPIC_API_KEY: "sk-ant-api03-x" };
+    expect(refreshEnv(env, standard!)).toEqual({ PATH: "/bin" });
+    expect(refreshEnv(env, work!)).toEqual({ PATH: "/bin", CLAUDE_CONFIG_DIR: path.join(home, ".claude-work") + path.sep });
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-x");
   });
 });
 
@@ -159,7 +169,7 @@ describe("refreshUsage", () => {
         }, 300);
       });
     `);
-    const { answer } = await refreshUsage({ binary, spawn, env: refreshEnv(process.env, dir, "/home/nobody/.claude") });
+    const { answer } = await refreshUsage({ binary, spawn, env: refreshEnv(process.env, { dir, resolved: dir, label: "test", isDefault: false }) });
     expect(answer?.kind === "numbers" && answer.snapshot.meters[0]).toMatchObject({ key: "session", percent: 18 });
     expect(fs.existsSync(path.join(dir, ".claude.json"))).toBe(true);
   });

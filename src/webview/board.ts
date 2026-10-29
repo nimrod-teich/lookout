@@ -5,7 +5,7 @@ import type { SearchResult } from "../core/history";
 import { GROUPINGS, sectionsBy, type GroupBy, type Section } from "../core/grouping";
 import { DEFAULT_SORT, dragInto, orderViews, SORTS, type SessionSort, type SortKey } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
-import { barMeter, chosenGroup, groupHeading, pickBar, sortGroups, tabMeters } from "../core/usageGroups";
+import { barMeter, chosenGroup, groupHeading, groupKey, pickBar, sortGroups, tabMeters } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
 import { Harbour } from "./harbour";
 import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isFoldKey, isGroupKey, pageOf, pulseBars, scheduleChip, secondLine, type Chip, type FoldKey, type GroupKey } from "./model";
@@ -788,13 +788,14 @@ function renderBeam(): void {
 /** The tide rises with the window the status bar shows, among the agents shown: Claude's 5 hours while it is the one agent with usage. */
 function tidePercent(): number | undefined {
   const groups = shownUsage().map((group) => ({ ...group, agent: group.agent ?? AGENTS[0]!.id }));
-  const pinned = groups.find((group) => group.agent === usageBar);
+  const pinned = groups.find((group) => groupKey(group) === usageBar);
   if (pinned) return barMeter(pinned.meters)?.percent;
   return pickBar(groups)?.meter.percent;
 }
 
-// Usage, under the beam: a tab per agent with its session window, the limit
-// that runs out first, and the chosen agent's limits below it, one line each.
+// Usage, under the beam: a tab per agent, or per account of an agent watched
+// in several, with its session window, the limit that runs out first, and the
+// chosen tab's limits below it, one line each.
 
 const meters = el("div", "meters");
 const usageTabs = el("div", "usage-tabs");
@@ -803,12 +804,12 @@ usageTabs.setAttribute("aria-label", "Usage by agent");
 const usageRefresh = el("button", "link", "refresh");
 usageRefresh.type = "button";
 usageRefresh.title = "Fetch the usage again now";
-usageRefresh.addEventListener("click", () => vscode.postMessage({ type: "refreshUsage", agent: usageRefresh.dataset.agent }));
+usageRefresh.addEventListener("click", () => vscode.postMessage({ type: "refreshUsage", agent: usageRefresh.dataset.agent, key: usageRefresh.dataset.key }));
 usageTabs.append(usageRefresh);
 const usageRows = el("div", "usage-rows");
 usageRows.setAttribute("role", "tabpanel");
 meters.append(usageTabs, usageRows);
-/** Each agent's tab, by agent id. */
+/** Each group's tab, by its key. */
 const usageTabEls = new Map<string, HTMLButtonElement>();
 /** The chosen agent's limits, by limit. */
 const meterRows = new Map<string, HTMLElement>();
@@ -824,7 +825,7 @@ function meterLevel(percent: number): "low" | "mid" | "high" {
   return percent >= 80 ? "high" : percent >= 50 ? "mid" : "low";
 }
 
-/** One tab per agent shown, in catalog order; the chosen agent's limits under them. */
+/** One tab per group of the agents shown, in catalog order; the chosen tab's limits under them. */
 function renderMeters(): void {
   const groups = shownUsage().map((group) => ({ ...group, agent: group.agent ?? AGENTS[0]!.id }));
   meters.classList.toggle("hidden", groups.length === 0);
@@ -832,49 +833,50 @@ function renderMeters(): void {
   if (!chosen) return;
   let previous: HTMLElement | undefined;
   for (const group of groups) {
-    let tab = usageTabEls.get(group.agent);
+    const key = groupKey(group);
+    let tab = usageTabEls.get(key);
     if (!tab) {
-      const agent = group.agent;
       tab = el("button", "usage-tab");
       tab.type = "button";
       tab.setAttribute("role", "tab");
-      const glyph = agentGlyph(agent, 11);
-      // The tab's name says the agent already.
+      const glyph = agentGlyph(group.agent, 11);
+      // The tab's name says the agent already; one account's of several says the account, the boat the agent.
       glyph.setAttribute("aria-hidden", "true");
-      tab.append(glyph, el("span", "name", agentInfo(agent).label), el("span", "share"));
+      tab.append(glyph, el("span", group.account ? "name account" : "name", group.account ?? agentInfo(group.agent).label), el("span", "share"));
       tab.addEventListener("click", () => {
-        usageTab = agent;
+        usageTab = key;
         saveState();
         renderMeters();
       });
-      usageTabEls.set(agent, tab);
+      usageTabEls.set(key, tab);
     }
     const { shown, closest } = tabMeters(group.meters);
-    const label = agentInfo(group.agent).label;
+    const label = group.account ? `${agentInfo(group.agent).label} · ${group.account}` : agentInfo(group.agent).label;
     const shareEl = tab.querySelector<HTMLElement>(".share")!;
     shareEl.textContent = shown ? `${Math.floor(shown.percent)}%` : "—";
     shareEl.className = `share ${shown ? meterLevel(shown.percent) : ""}`;
     tab.title = shown
-      ? `${groupHeading(group.agent)}: ${shown.label} at ${Math.floor(shown.percent)}%${closest ? `; ${closest.label} is the closest to its limit, at ${Math.floor(closest.percent)}%` : ""}`
+      ? `${groupHeading(group)}: ${shown.label} at ${Math.floor(shown.percent)}%${closest ? `; ${closest.label} is the closest to its limit, at ${Math.floor(closest.percent)}%` : ""}`
       : `${label}: no usage reported`;
     tab.classList.toggle("stale", group.stale);
-    tab.setAttribute("aria-selected", String(group.agent === chosen.agent));
+    tab.setAttribute("aria-selected", String(key === groupKey(chosen)));
     const at = previous ? previous.nextSibling : usageTabs.firstChild;
     if (tab !== at) usageTabs.insertBefore(tab, at);
     previous = tab;
   }
-  for (const [agent, tab] of usageTabEls) {
-    if (groups.some((group) => group.agent === agent)) continue;
+  for (const [key, tab] of usageTabEls) {
+    if (groups.some((group) => groupKey(group) === key)) continue;
     tab.remove();
-    usageTabEls.delete(agent);
+    usageTabEls.delete(key);
   }
   usageRefresh.dataset.agent = chosen.agent;
+  usageRefresh.dataset.key = groupKey(chosen);
   usageRefresh.classList.toggle("hidden", !chosen.canRefresh);
   meters.classList.toggle("stale", chosen.stale);
   const seen = new Set<string>();
   let row: Element | null = usageRows.firstElementChild;
   for (const meter of chosen.meters) {
-    const id = `${chosen.agent}:${meter.key}`;
+    const id = `${groupKey(chosen)}:${meter.key}`;
     seen.add(id);
     let line = meterRows.get(id);
     if (!line) {

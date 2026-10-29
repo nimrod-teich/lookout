@@ -51,11 +51,12 @@ export interface BoardActions {
   resume(id: string): void;
   /** One agent's usage, or each agent's. */
   usage(): BoardUsage | BoardUsage[] | undefined;
-  /** The agent whose bar the status bar shows. */
+  /** The key of the group whose bar the status bar shows. */
   usageBar?(): string | undefined;
   /** Tell the agents apart. */
   markers?(): boolean;
-  refreshUsage(): void;
+  /** Fetches the usage of the account a group's key names, the first's without one. */
+  refreshUsage(key?: string): void;
   /** How many agents Lookout watches. */
   watching?(): number;
   /** Opens Lookout's settings at the agents' switches. */
@@ -172,7 +173,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         this.actions.markAllSeen();
         return;
       case "refreshUsage":
-        this.actions.refreshUsage();
+        this.actions.refreshUsage(typeof message.key === "string" ? message.key : undefined);
         return;
       case "openAgentSettings":
         this.actions.openAgentSettings?.();

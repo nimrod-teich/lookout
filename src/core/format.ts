@@ -115,8 +115,9 @@ export function windowName(meter: UsageMeter): string {
 
 /** What a usage alert says: "Your 5-hour limit is at 72%; it resets at 17:05." */
 export function describeAlert(meter: UsageMeter, now: number = Date.now()): { text: string; title: string; body: string } {
-  // Another agent's limit says whose it is: "Codex 5-hour limit".
-  const name = meter.agent && meter.agent !== AGENTS[0]!.id ? `${agentInfo(meter.agent).label} ${windowName(meter)}` : windowName(meter);
+  // Another agent's limit says whose it is, "Codex 5-hour limit"; one account's of several, which: "5-hour limit (personal)".
+  const agentName = meter.agent && meter.agent !== AGENTS[0]!.id ? `${agentInfo(meter.agent).label} ${windowName(meter)}` : windowName(meter);
+  const name = meter.account ? `${agentName} (${meter.account})` : agentName;
   const resets = meter.resetsAt === undefined ? undefined : clockTime(meter.resetsAt, now);
   return {
     text: `Your ${name} is at ${meter.percent}%${resets ? `; it resets at ${resets}` : ""}.`,

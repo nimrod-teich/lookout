@@ -7,6 +7,8 @@ import { PolledJson } from "./polledJson";
 export interface UsageMeter {
   /** Id of the agent whose limit it is; set where the numbers are grouped per agent. */
   agent?: string;
+  /** The label of the agent's account it belongs to, when the agent is watched in several. */
+  account?: string;
   key: string;
   label: string;
   percent: number;

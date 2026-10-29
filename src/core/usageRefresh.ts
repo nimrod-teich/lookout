@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { signInEnv, type ClaudeDir } from "./agents/claude/paths";
 import { metersOf, type UsageSnapshot } from "./usage";
 
 export interface RefreshOptions {
@@ -45,11 +46,18 @@ const noDebugFlag = new Set<string>();
 /** How much of the binary's stderr is kept, from the end, for the log. */
 const STDERR_TAIL = 400;
 
-/** The environment for the binary: Claude Code reads `CLAUDE_CONFIG_DIR`, and without it uses `~/.claude` and `~/.claude.json`. */
-export function refreshEnv(env: NodeJS.ProcessEnv, configDir: string, standardDir: string): NodeJS.ProcessEnv {
+/**
+ * The environment for the binary: the directory's own sign-in (see
+ * `signInEnv`). Claude Code reads `CLAUDE_CONFIG_DIR` as written, and
+ * without it uses `~/.claude` and `~/.claude.json`; a token or API key in
+ * the environment would win over the directory's sign-in, so neither goes.
+ */
+export function refreshEnv(env: NodeJS.ProcessEnv, dir: ClaudeDir): NodeJS.ProcessEnv {
   const out = { ...env };
-  if (path.resolve(configDir) === path.resolve(standardDir)) delete out.CLAUDE_CONFIG_DIR;
-  else out.CLAUDE_CONFIG_DIR = configDir;
+  for (const [name, value] of Object.entries(signInEnv(dir))) {
+    if (value === null) delete out[name];
+    else out[name] = value;
+  }
   return out;
 }
 

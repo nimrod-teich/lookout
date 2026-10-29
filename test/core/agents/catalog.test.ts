@@ -64,13 +64,19 @@ describe("the agent catalog", () => {
 
   it("offers the catalog's agents in the settings, each with a switch at the top of the Agents section", () => {
     const sections = manifest.contributes.configuration;
-    const props = Object.assign({}, ...sections.map((section) => section.properties)) as Record<string, { enum?: string[]; default?: unknown }>;
+    const props = Object.assign({}, ...sections.map((section) => section.properties)) as Record<string, { enum?: string[]; examples?: string[]; pattern?: string; default?: unknown }>;
     const agents = sections.find((section) => section.title === "Agents")!;
     const switches = Object.entries(agents.properties).filter(([key]) => key.startsWith("lookout.agents."));
     expect(switches.map(([key]) => key)).toEqual(AGENTS.map((a) => `lookout.agents.${a.key}`));
     for (const [key, setting] of switches) expect(setting, key).toMatchObject({ type: "boolean", default: true });
     expect(switches.map(([, setting]) => (setting as { order: number }).order)).toEqual([1, 2, 3]);
-    expect(props["lookout.statusBar.usageAgent"]).toMatchObject({ enum: ["auto", ...AGENTS.map((a) => a.key)], default: "auto" });
+    // The pin offers every agent, and takes one account of Claude's too.
+    const pin = props["lookout.statusBar.usageAgent"]!;
+    expect(pin).toMatchObject({ default: "auto" });
+    expect(pin.examples).toEqual(["auto", ...AGENTS.map((a) => a.key), "claude:personal"]);
+    const pattern = new RegExp(pin.pattern!);
+    for (const value of pin.examples!) expect(value, value).toMatch(pattern);
+    for (const value of ["gemini", "claude:", "claude: x", "auto:x"]) expect(value, value).not.toMatch(pattern);
     expect(props["lookout.agentMarkers"]).toMatchObject({ enum: ["auto", "always", "never"], default: "auto" });
   });
 
