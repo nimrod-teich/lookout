@@ -88,9 +88,13 @@ function seedSchedules(file: string, state: TranscriptState, from: number, to: n
   scanLines(file, from, to, SCHEDULE_NEEDLES, (line) => applyScheduleLine(state, line));
 }
 
-/** Whatever is skipped, the title must not be: Claude Code stamps it once, and again on resume just before a checkpoint. */
+/**
+ * Whatever is skipped, the title must not be: Claude Code stamps it once,
+ * and again on resume just before a checkpoint. Nor the account the session
+ * runs on, stamped at each start.
+ */
 function seedTitles(file: string, state: TranscriptState): void {
-  for (const needle of ['"type":"custom-title"', '"type":"ai-title"']) {
+  for (const needle of ['"type":"custom-title"', '"type":"ai-title"', '"type":"credential_org"']) {
     const at = findLastLine(file, needle, CHECKPOINT_SEARCH_BYTES);
     if (at === undefined) continue;
     const line = readLineAt(file, at);
@@ -99,8 +103,14 @@ function seedTitles(file: string, state: TranscriptState): void {
 }
 
 export interface ClaudeProviderOptions {
-  /** The account's label, stamped on every session and past session: set when several directories are watched. */
+  /** The directory's label, stamped on every session and past session the account names nothing better for: set when several directories are watched. */
   account?: string;
+  /**
+   * The name the user gave the account of an organization, by the stamp
+   * Claude Code writes into each transcript at each start: it goes on the
+   * sessions that ran on that account, wherever they were signed in.
+   */
+  nameOf?: (organizationUuid: string) => string | undefined;
   /**
    * For a directory the Claude Code panel does not run: its past sessions
    * resume in a terminal, `claude --resume`, with this environment on top
@@ -153,9 +163,10 @@ export class ClaudeProvider implements AgentProvider {
       // A turn that is over while commands it started still run: still at work, in the background.
       const background = reported === "idle" ? this.backgroundOf(file.pid, now) : undefined;
       const status = background ? "working" : reported;
+      const account = this.accountOf(transcript.organizationUuid);
       return {
         agent: this.id,
-        ...(this.options.account ? { account: this.options.account } : {}),
+        ...(account ? { account } : {}),
         id: file.sessionId,
         pid: file.pid,
         status,
@@ -194,19 +205,27 @@ export class ClaudeProvider implements AgentProvider {
     this.pastFiles = new Map(all.map((p) => [p.id, p.file]));
     this.pastMeta = new Map(all.map((p) => [p.id, { cwd: p.cwd, branch: p.branch, modifiedAt: p.modifiedAt }]));
     this.indexes.keepOnly([...this.pastFiles.values(), ...[...this.tracked.values()].flatMap((tracked) => (tracked.file ? [tracked.file] : []))]);
-    const { account, terminalEnv } = this.options;
-    const session = (p: (typeof all)[number]): PastSession => ({
-      agent: this.id,
-      ...(account ? { account } : {}),
-      id: p.id,
-      cwd: p.cwd,
-      title: p.title,
-      branch: p.branch,
-      resumable: p.resumable,
-      modifiedAt: p.modifiedAt,
-      ...(terminalEnv ? { resumesIn: "terminal" as const } : {}),
-    });
+    const { terminalEnv } = this.options;
+    const session = (p: (typeof all)[number]): PastSession => {
+      const account = this.accountOf(p.organizationUuid);
+      return {
+        agent: this.id,
+        ...(account ? { account } : {}),
+        id: p.id,
+        cwd: p.cwd,
+        title: p.title,
+        branch: p.branch,
+        resumable: p.resumable,
+        modifiedAt: p.modifiedAt,
+        ...(terminalEnv ? { resumesIn: "terminal" as const } : {}),
+      };
+    };
     return { sessions: transcripts.map(session), capped, incomplete, also: also.map(session) };
+  }
+
+  /** The account a session ran on: the name of its organization's account, else the directory's label, else none. */
+  private accountOf(organizationUuid: string | undefined): string | undefined {
+    return (organizationUuid === undefined ? undefined : this.options.nameOf?.(organizationUuid)) ?? this.options.account;
   }
 
   /** A past session of a directory the panel does not run resumes in a terminal, in its folder, on the directory's sign-in. */

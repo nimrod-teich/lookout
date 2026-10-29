@@ -437,6 +437,49 @@ describe("the extension", () => {
     }
   }, 60_000);
 
+  it("names the accounts switched in one directory: each session by the organization it ran on, the usage by the account signed in", async () => {
+    const OLD = "00000000-0000-4000-8000-0000000000d1";
+    const stamp = (org: string) => JSON.stringify({ type: "attachment", attachment: { type: "credential_org", organizationUuid: org } }) + "\n";
+    const signIn = (who: string, org: string, percent: number) =>
+      fs.writeFileSync(
+        path.join(configDir, ".claude.json"),
+        JSON.stringify({ oauthAccount: { accountUuid: `acc-${who}`, emailAddress: `${who}@example.com`, organizationUuid: org }, cachedUsageUtilization: { fetchedAtMs: Date.now(), accountUuid: `acc-${who}`, utilization: { five_hour: { utilization: percent } } } }),
+      );
+    workspace.workspaceFolders = [{ uri: { fsPath: "/work/app" } }];
+    try {
+      writeTranscript();
+      fs.appendFileSync(path.join(configDir, "projects", "-work-app", `${SESSION}.jsonl`), stamp("org-work"));
+      fs.writeFileSync(path.join(configDir, "projects", "-work-app", `${OLD}.jsonl`), JSON.stringify({ type: "user", cwd: "/work/app", timestamp: new Date().toISOString(), message: { content: "a session at home" } }) + "\n" + stamp("org-home"));
+      writeSession({ status: "busy", statusUpdatedAt: Date.now() });
+      signIn("work", "org-work", 18);
+      stub.config["lookout.claudeAccountNames"] = { "Work@Example.com": "work", "home@example.com": "home" };
+      stub.config["lookout.retention.hint"] = false;
+      activate(context());
+      boardStates();
+      type Listed = { sessions: { id: string; account?: string }[]; past: { id: string; account?: string }[]; usage?: { account?: string; meters: { percent: number }[] }[] };
+      const listed = () => statesBoard!.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as Listed | undefined;
+      // Signed in to work: its session is named; the home session's organization is not known yet.
+      await vi.waitFor(() => {
+        expect(listed()?.sessions.map((v) => [v.id, v.account])).toEqual([[SESSION, "work"]]);
+        expect(listed()?.past.map((v) => [v.id, v.account])).toEqual([[OLD, undefined]]);
+        expect(listed()?.usage?.map((g) => [g.account, g.meters[0]?.percent])).toEqual([["work", 18]]);
+      }, WAIT);
+      // Switched to home: its earlier session is named once Lookout knows its organization, and the usage is home's.
+      signIn("home", "org-home", 61);
+      await vi.waitFor(() => {
+        expect(listed()?.past.map((v) => [v.id, v.account])).toEqual([[OLD, "home"]]);
+        expect(listed()?.usage?.map((g) => [g.account, g.meters[0]?.percent])).toEqual([["home", 61]]);
+      }, WAIT);
+      expect(listed()?.sessions.map((v) => [v.id, v.account])).toEqual([[SESSION, "work"]]);
+      // Lookout keeps each organization with a hash of its address, never the address.
+      const kept = savedGlobal["lookout.claudeOrgs"] as Record<string, string>;
+      expect(Object.keys(kept).sort()).toEqual(["org-home", "org-work"]);
+      expect(JSON.stringify(kept)).not.toContain("@");
+    } finally {
+      workspace.workspaceFolders = undefined;
+    }
+  }, 60_000);
+
   it("shows one usage group for two directories signed in to one account, naming both", async () => {
     const spare = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-e2e-spare-"));
     try {
