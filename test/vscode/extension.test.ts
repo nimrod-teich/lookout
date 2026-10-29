@@ -359,6 +359,42 @@ describe("the extension", () => {
     await vi.waitFor(() => expect(statusText()).toBe("$(lookout-lighthouse) ▰▰▱▱▱▱▱▱▱▱ 18%"), WAIT);
   }, 90_000);
 
+  it("names every Claude Code directory listed, with who each is signed in as, and starts over when the list changes", async () => {
+    const logged = () =>
+      stub.ops
+        .filter(([target, action]) => target === "output:Lookout" && action === "appendLine")
+        .map(([, , line]) => String(line).replace(/^\S+ \[\w+\] /, ""));
+    const starts = () => logged().filter((line) => line.startsWith("Watching Claude Code (")).length;
+    const personal = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-e2e-personal-"));
+    try {
+      fs.writeFileSync(path.join(configDir, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "acc-1", emailAddress: "work@example.com" } }));
+      activate(context());
+      await vi.waitFor(() => expect(starts()).toBe(1), WAIT);
+      expect(logged().some((line) => line.includes("directories"))).toBe(false);
+
+      // A second directory, named: both listed, the new one not signed in yet.
+      stub.config["lookout.claudeConfigDirs"] = [`personal=${personal}`];
+      stub.configChange.fire({ affectsConfiguration: () => true });
+      await vi.waitFor(() => expect(starts()).toBe(2), WAIT);
+      expect(logged()).toContain(`Watching Claude Code in 2 directories: ${path.basename(configDir)} (${configDir}), personal (${personal})`);
+      expect(logged()).toContain("Claude Code directory personal has no sign-in yet");
+
+      // The same list again: nothing to start over for.
+      stub.configChange.fire({ affectsConfiguration: () => true });
+      expect(starts()).toBe(2);
+
+      // Signed in to the same account, and renamed: started over, and said so; never the e-mail.
+      fs.writeFileSync(path.join(personal, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "acc-1", emailAddress: "work@example.com" } }));
+      stub.config["lookout.claudeConfigDirs"] = [`private=${personal}`];
+      stub.configChange.fire({ affectsConfiguration: () => true });
+      await vi.waitFor(() => expect(starts()).toBe(3), WAIT);
+      expect(logged()).toContain(`Claude Code directories ${path.basename(configDir)} and private are signed in to the same account`);
+      expect(logged().join("\n")).not.toContain("@");
+    } finally {
+      fs.rmSync(personal, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  }, 60_000);
+
   it("announces each usage threshold once per window, though every fetch reports the reset a fraction of a second apart", async () => {
     const resets = Date.now() + 2 * 3_600_000;
     const write = (percent: number, fraction: string) => {

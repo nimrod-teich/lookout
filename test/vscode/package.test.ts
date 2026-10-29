@@ -67,3 +67,19 @@ describe("the card menu", () => {
     for (const key of keys) expect(board, `${key} is never set on a card`).toMatch(new RegExp(`\\b${key}:`));
   });
 });
+
+// The Claude Code directories are where Claude Code keeps its sign-ins: one machine's, never a workspace's to choose.
+describe("the Claude Code directory settings", () => {
+  const root = path.join(__dirname, "..", "..");
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as {
+    contributes: { configuration: { properties: Record<string, { type?: string; items?: { type?: string }; default?: unknown; scope?: string; order?: number }> }[] };
+  };
+  const settings = Object.assign({}, ...pkg.contributes.configuration.map((section) => section.properties)) as (typeof pkg.contributes.configuration)[number]["properties"];
+
+  it("lists more directories as strings, for the machine, right after the primary one", () => {
+    const dirs = settings["lookout.claudeConfigDirs"];
+    expect(dirs).toMatchObject({ type: "array", items: { type: "string" }, default: [], scope: "machine" });
+    expect(settings["lookout.claudeConfigDir"]?.scope).toBe("machine");
+    expect(dirs?.order).toBe((settings["lookout.claudeConfigDir"]?.order ?? 0) + 1);
+  });
+});
