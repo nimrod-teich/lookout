@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { MAX_BACKOFF_MS, MIN_REFRESH_GAP_MS, RefreshLedger } from "../../src/core/refreshLedger";
+import { HOST_SPACING_MS, MAX_BACKOFF_MS, MIN_REFRESH_GAP_MS, RefreshLedger } from "../../src/core/refreshLedger";
 import { tempConfigDir } from "./helpers";
 
 const T = 1_800_000_000_000;
@@ -17,6 +17,23 @@ describe("RefreshLedger", () => {
     expect(b.nextAt("s-1", false)).toBe(T + 2 * MIN_REFRESH_GAP_MS);
     expect(b.nextAt("s-2", false)).toBe(T + MIN_REFRESH_GAP_MS);
     expect(b.nextAt("s-1", true)).toBe(T + MIN_REFRESH_GAP_MS);
+  });
+
+  it("keeps the 180 s gap per source, and only a short spacing between two sources' automatic refreshes", () => {
+    const dir = path.join(tempConfigDir(), "refresh");
+    const a = new RefreshLedger(dir);
+    const b = new RefreshLedger(dir);
+    expect(a.claim("work-1", T, false, "work")).toBe(true);
+    // Another account: the spacing, not the gap; asked for, not even that.
+    expect(b.nextAt("home-1", false, "home")).toBe(T + HOST_SPACING_MS);
+    expect(b.nextAt("home-1", true, "home")).toBe(-Infinity);
+    expect(b.claim("home-1", T + HOST_SPACING_MS - 1, false, "home")).toBe(false);
+    expect(b.claim("home-1", T + HOST_SPACING_MS, false, "home")).toBe(true);
+    // The same account waits for its own gap, the user's refresh too.
+    expect(a.nextAt("work-2", true, "work")).toBe(T + MIN_REFRESH_GAP_MS);
+    expect(a.nextAt("work-2", false, "work")).toBe(T + MIN_REFRESH_GAP_MS);
+    // A caller that names no source still waits 180 s after any refresh: a window of an older Lookout.
+    expect(a.nextAt("work-2", false)).toBe(T + HOST_SPACING_MS + MIN_REFRESH_GAP_MS);
   });
 
   it("gives each attempt to exactly one window, and only when it is due", () => {

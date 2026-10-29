@@ -1,9 +1,10 @@
 import * as vscode from "vscode";
-import { agentByKey, markerSetting, type MarkerSetting } from "../core/agents/catalog";
+import { markerSetting, type MarkerSetting } from "../core/agents/catalog";
 import { resolveConfigDirs, type ClaudeDir } from "../core/agents/claude/paths";
 import { codexHome } from "../core/agents/codex/paths";
 import { copilotHome } from "../core/agents/copilot/paths";
 import { envFlag, NONESSENTIAL_TRAFFIC, type RefreshMode } from "../core/usage";
+import { parsePin } from "../core/usageGroups";
 
 export interface Config {
   statusBarEnabled: boolean;
@@ -42,7 +43,7 @@ export interface Config {
   claudeDirs: ClaudeDir[];
   /** When to tell agents apart by hue and silhouette. */
   agentMarkers: MarkerSetting;
-  /** Whose usage the status bar's bar shows: `auto` or an agent's key. */
+  /** Whose usage the status bar's bar shows: `auto`, an agent's key, or one account's (`claude:personal`). */
   usageAgent: string;
   /** Watch Codex's sessions. */
   codexEnabled: boolean;
@@ -72,9 +73,10 @@ function nonessentialTrafficDisabled(): boolean {
   return envFlag(process.env[NONESSENTIAL_TRAFFIC]) || envFlag(claudeExtensionEnv(NONESSENTIAL_TRAFFIC));
 }
 
-/** `auto`, or the key of an agent the catalog lists. */
+/** `auto`, the key of an agent the catalog lists, or that key and an account's label: `claude:personal`. */
 function usageAgent(value: string | undefined): string {
-  return value !== undefined && agentByKey(value) ? value : "auto";
+  const trimmed = value?.trim();
+  return trimmed && parsePin(trimmed) ? trimmed : "auto";
 }
 
 function refreshMode(value: string | undefined): RefreshMode {

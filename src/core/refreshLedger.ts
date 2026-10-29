@@ -1,12 +1,16 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-/** No refresh starts within this long of the last one on the host. */
+/** No refresh of one source's numbers starts within this long of the last one on the host; without a source, of any. */
 export const MIN_REFRESH_GAP_MS = 180_000;
+/** No automatic refresh starts within this long of the last one on the host, whatever its source: two accounts never fetch at once. */
+export const HOST_SPACING_MS = 10_000;
 /** A refresh that keeps failing is tried at most this rarely. */
 export const MAX_BACKOFF_MS = 30 * 60_000;
-/** The file every attempt touches, for the gap. */
+/** The file every attempt touches, for the spacing. */
 const LAST = "last";
+/** The prefix of the file each attempt at one source's numbers touches too, for that source's gap. */
+const LAST_OF = "last-";
 /** The prefix of the files that hold off one source's refreshes, each holding the epoch ms it lasts until. */
 const HOLD = "hold-";
 
@@ -24,9 +28,10 @@ export interface Attempts {
  * `fetch-<key>-<n>`, created exclusively, so exactly one window makes it. A
  * successful refresh brings numbers with another fetch time, which have no
  * attempts yet; the attempts still on file for the numbers shown are the
- * failures, and each one doubles the wait for the next. When the usage
- * endpoint asks for a wait, `hold-<scope>` holds off every refresh of that
- * source's numbers until then.
+ * failures, and each one doubles the wait for the next. Each attempt also
+ * touches `last-<scope>`, for that source's gap, and `last`, for the
+ * spacing between any two. When the usage endpoint asks for a wait,
+ * `hold-<scope>` holds off every refresh of that source's numbers until then.
  */
 export class RefreshLedger {
   constructor(private readonly dir: string) {}
@@ -45,6 +50,10 @@ export class RefreshLedger {
 
   private static holdFile(scope: string): string {
     return `${HOLD}${scope.replace(/[^\w.-]/g, "_")}`;
+  }
+
+  private static lastFile(scope: string): string {
+    return `${LAST_OF}${scope.replace(/[^\w.-]/g, "_")}`;
   }
 
   /**
@@ -87,17 +96,19 @@ export class RefreshLedger {
   }
 
   /**
-   * When the next refresh may start: 180 s after the last one on the host,
-   * and after failed attempts at these numbers 360 s, 720 s, … up to 30
-   * minutes after the last of them. A refresh the user asks for waits only
-   * for the 180 s.
+   * When the next refresh may start: 180 s after the last one of the same
+   * source's numbers on the host, and 10 s after the last one of any; after
+   * failed attempts at these numbers 360 s, 720 s, … up to 30 minutes after
+   * the last of them. A refresh the user asks for waits only for the 180 s.
+   * Without a source, 180 s after the last refresh of any.
    */
-  nextAt(key: string, manual: boolean): number {
-    return this.due(this.attempts(key), manual);
+  nextAt(key: string, manual: boolean, scope?: string): number {
+    return this.due(this.attempts(key), manual, scope);
   }
 
-  private due({ count, lastAt }: Attempts, manual: boolean): number {
-    const gap = (this.mtime(LAST) ?? -Infinity) + MIN_REFRESH_GAP_MS;
+  private due({ count, lastAt }: Attempts, manual: boolean, scope: string | undefined): number {
+    const last = this.mtime(LAST) ?? -Infinity;
+    const gap = scope === undefined ? last + MIN_REFRESH_GAP_MS : Math.max((this.mtime(RefreshLedger.lastFile(scope)) ?? -Infinity) + MIN_REFRESH_GAP_MS, manual ? -Infinity : last + HOST_SPACING_MS);
     if (manual || count === 0 || lastAt === undefined) return gap;
     return Math.max(gap, lastAt + Math.min(MAX_BACKOFF_MS, MIN_REFRESH_GAP_MS * 2 ** count));
   }
@@ -107,9 +118,9 @@ export class RefreshLedger {
    * window on the host that gets to make it. The attempt it counted is the
    * file it creates, so a window that saw an older count loses the race.
    */
-  claim(key: string, now: number, manual: boolean = false): boolean {
+  claim(key: string, now: number, manual: boolean = false, scope?: string): boolean {
     const attempts = this.attempts(key);
-    if (now < this.due(attempts, manual)) return false;
+    if (now < this.due(attempts, manual, scope)) return false;
     const file = path.join(this.dir, RefreshLedger.file(key, attempts.count));
     const seconds = now / 1000;
     try {
@@ -119,12 +130,14 @@ export class RefreshLedger {
     } catch {
       return false;
     }
-    try {
-      const last = path.join(this.dir, LAST);
-      fs.closeSync(fs.openSync(last, "a"));
-      fs.utimesSync(last, seconds, seconds);
-    } catch {
-      // The attempt is on file; only the gap is lost.
+    for (const name of [LAST, ...(scope === undefined ? [] : [RefreshLedger.lastFile(scope)])]) {
+      try {
+        const last = path.join(this.dir, name);
+        fs.closeSync(fs.openSync(last, "a"));
+        fs.utimesSync(last, seconds, seconds);
+      } catch {
+        // The attempt is on file; only the gap is lost.
+      }
     }
     return true;
   }
@@ -138,7 +151,7 @@ export class RefreshLedger {
       return;
     }
     for (const name of names) {
-      const over = name.startsWith(HOLD) ? this.heldUntil(name.slice(HOLD.length)) <= now : name.startsWith("fetch-") && now - (this.mtime(name) ?? now) > keepMs;
+      const over = name.startsWith(HOLD) ? this.heldUntil(name.slice(HOLD.length)) <= now : (name.startsWith("fetch-") || name.startsWith(LAST_OF)) && now - (this.mtime(name) ?? now) > keepMs;
       if (!over) continue;
       try {
         fs.rmSync(path.join(this.dir, name), { force: true });

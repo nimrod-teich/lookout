@@ -132,3 +132,38 @@ describe("nextAttention", () => {
     expect(nextAttention([tab, terminal], "a")?.id).toBe("b");
   });
 });
+
+describe("the status bar with several Claude accounts", () => {
+  let bar: StatusBar;
+  const account = (name: string, percent: number): UsageGroup => ({
+    agent: "claude-code",
+    key: `claude-code:${name}`,
+    account: name,
+    fetchedAt: 0,
+    stale: false,
+    meters: [{ agent: "claude-code", account: name, key: "session", label: "Session (5hr)", percent, windowMs: 5 * HOUR }],
+  });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    stub.reset();
+    bar = new StatusBar("lookout.showBoard");
+  });
+
+  afterEach(() => {
+    bar.dispose();
+    vi.useRealTimers();
+  });
+
+  it("names the account whose bar it shows, lists each account in the hover, and takes an account's pin", () => {
+    bar.render(input({ usageGroups: [account("default", 18), { ...account("personal", 72), also: ["spare"] }] }), 0);
+    expect(lastSet("text")).toBe("$(lookout-lighthouse) $(lookout-sloop) personal ▰▰▰▰▰▰▰▱▱▱ 72%");
+    expect((lastSet("accessibilityInformation") as { label: string }).label).toBe("Lookout: usage Claude personal Session (5hr) 72%");
+    const tip = (lastSet("tooltip") as { value: string }).value;
+    expect(tip).toContain("**Claude usage · default**");
+    expect(tip).toContain("**Claude usage · personal \\(also spare\\)**");
+    expect(tip.indexOf("· default")).toBeLessThan(tip.indexOf("· personal"));
+    bar.render(input({ usageGroups: [account("default", 18), account("personal", 72)], usageAgent: "claude:default" }), 0);
+    expect(lastSet("text")).toBe("$(lookout-lighthouse) $(lookout-sloop) default ▰▰▱▱▱▱▱▱▱▱ 18%");
+  });
+});

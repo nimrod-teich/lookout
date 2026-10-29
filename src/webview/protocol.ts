@@ -8,6 +8,12 @@ import type { UsageMeter } from "../core/usage";
 export interface BoardUsage {
   /** Id of the agent; none from an extension that showed only Claude's, the first agent of the catalog. */
   agent?: string;
+  /** Names the group among the others, while the agent is watched in several accounts; else its agent does. */
+  key?: string;
+  /** The label of the agent's account the numbers belong to, while it is watched in several. */
+  account?: string;
+  /** The labels of the other directories signed in to the same account. */
+  also?: string[];
   /** Epoch ms the numbers were fetched; none when there are no numbers to show. */
   fetchedAt?: number;
   /** Old, and nothing will bring them up to date. */
@@ -46,7 +52,7 @@ export type ToBoard =
       now: number;
       /** One agent's usage, or each agent's. */
       usage?: BoardUsage | BoardUsage[];
-      /** The agent whose bar the status bar shows; the tide follows it. */
+      /** The key of the group whose bar the status bar shows; the tide follows it. */
       usageBar?: string;
       /** Tell the agents apart: hue, silhouette, name. */
       markers?: boolean;
@@ -76,7 +82,7 @@ export type FromBoard =
   | { type: "dismiss"; id: string }
   | { type: "seenAll" }
   /** Fetch an agent's usage again; Claude's when none is named. */
-  | { type: "refreshUsage"; agent?: string }
+  | { type: "refreshUsage"; agent?: string; key?: string }
   /** Open Lookout's settings at the agents' switches. */
   | { type: "openAgentSettings" }
   /** `zone`: the board's time zone, as `Date.getTimezoneOffset` gives it: in a remote window the extension's clock can be in another. */

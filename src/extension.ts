@@ -11,7 +11,7 @@ import { desktopOf, jumpKeyLabel } from "./core/osNotify";
 import { GROUPINGS, readGroupBy, type GroupBy } from "./core/grouping";
 import { readSort, SORTS, type SessionSort } from "./core/sorting";
 import type { PastView, SessionView } from "./core/types";
-import { pickBar } from "./core/usageGroups";
+import { groupKey, pickBar } from "./core/usageGroups";
 import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
@@ -160,6 +160,21 @@ export function activate(context: vscode.ExtensionContext): void {
     if (unreachable(view)) return openHit("", view.id);
     if (revealed(await jumpToSession(view, terminals, log))) controller.markSeen(view.id);
   };
+  /** Has one account's usage fetched, the first's without a key, and says what came of it unless new numbers came. */
+  const refreshAccount = async (key: string | undefined): Promise<void> => {
+    const account = controller.usageAccounts.find((one) => one.key === key)?.account;
+    const whose = account ? ` (${account})` : "";
+    const cannot = controller.usageNote(key);
+    if (cannot) {
+      void vscode.window.showInformationMessage(`Lookout can't fetch usage${whose}: ${cannot}.`);
+      return;
+    }
+    const outcome = await controller.refreshUsage(true, key);
+    if (outcome === "failed") void vscode.window.showWarningMessage(`Lookout${whose}: Claude Code gave no new usage numbers. Check the Lookout output log.`);
+    else if (outcome === "rate-limited") void vscode.window.showInformationMessage(`Lookout${whose}: Anthropic's usage endpoint asked for no more checks before ${clockTime(controller.refreshHeldUntil(key))}.`);
+    else if (outcome === "no plan limits") void vscode.window.showInformationMessage(`Lookout${whose}: Claude Code reports no plan limits for its sign-in (an API key, Bedrock or Vertex, or a long-lived token).`);
+  };
+
   /** Opens a session that is not running: the agent resumes it in its panel, when it belongs to this window's folders. */
   const resume = async (id: string) => {
     const view = controller.pastView(id);
@@ -330,7 +345,10 @@ export function activate(context: vscode.ExtensionContext): void {
     restore: restoreTranscript,
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
-    usageBar: () => pickBar(controller.usageGroups, config.usageAgent)?.group.agent,
+    usageBar: () => {
+      const picked = pickBar(controller.usageGroups, config.usageAgent)?.group;
+      return picked && groupKey(picked);
+    },
     markers,
     jump,
     rename: async (view) => {
@@ -339,8 +357,8 @@ export function activate(context: vscode.ExtensionContext): void {
     markSeen,
     markAllSeen,
     dismiss: (id) => controller.dismiss(id),
-    // The command, so the board's link says what the command says when it cannot fetch.
-    refreshUsage: () => void vscode.commands.executeCommand(REFRESH_USAGE),
+    // The command, so the board's link says what the command says when it cannot fetch; for the account its tab shows.
+    refreshUsage: (key) => void vscode.commands.executeCommand(REFRESH_USAGE, key),
     watching: () => controller.watching,
     openAgentSettings: () => void vscode.commands.executeCommand("workbench.action.openSettings", "lookout.agents"),
     search: (query, zone) => controller.search(query, zone),
@@ -502,15 +520,18 @@ export function activate(context: vscode.ExtensionContext): void {
       const picked = await vscode.window.showQuickPick(items, { placeHolder: "Make the board's sections by" });
       if (picked) setGroup(picked.key);
     }),
-    vscode.commands.registerCommand(REFRESH_USAGE, async () => {
-      if (!controller.canRefreshUsage) {
-        void vscode.window.showInformationMessage(`Lookout can't fetch usage: ${controller.usageNote ?? "usage refresh is off"}.`);
-        return;
+    vscode.commands.registerCommand(REFRESH_USAGE, async (key?: unknown) => {
+      // The board's link names the account its tab shows; from the Command Palette, with several accounts, the user picks.
+      const accounts = controller.usageAccounts;
+      let keys: (string | undefined)[] = [typeof key === "string" ? key : undefined];
+      if (typeof key !== "string" && accounts.length > 1) {
+        const items = [{ label: "All accounts", keys: accounts.map((account) => account.key) }, ...accounts.map((account) => ({ label: account.account ?? account.key, keys: [account.key] }))];
+        const picked = await vscode.window.showQuickPick(items, { placeHolder: "Fetch the usage of" });
+        if (!picked) return;
+        keys = picked.keys;
       }
-      const outcome = await controller.refreshUsage(true);
-      if (outcome === "failed") void vscode.window.showWarningMessage("Lookout: Claude Code gave no new usage numbers. Check the Lookout output log.");
-      else if (outcome === "rate-limited") void vscode.window.showInformationMessage(`Lookout: Anthropic's usage endpoint asked for no more checks before ${clockTime(controller.refreshHeldUntil)}.`);
-      else if (outcome === "no plan limits") void vscode.window.showInformationMessage("Lookout: Claude Code reports no plan limits for its sign-in (an API key, Bedrock or Vertex, or a long-lived token).");
+      // One after the other: one fetch runs at a time.
+      for (const one of keys) await refreshAccount(one);
     }),
   );
 

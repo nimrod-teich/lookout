@@ -169,7 +169,9 @@
       fixtureSessions = [...fixture.sessions, ...past, ...archive, ...purged];
       // Starred sessions that are not running and that the scope does not list come along.
       const favourites = { ids: favouriteIds, past: mark((fixture.past ?? []).filter((p) => favouriteIds.includes(p.id) && !past.includes(p))) };
-      window.postMessage({ type: "sessions", sessions: mark(fixture.sessions), past: mark(past), now, usage, markers, earlier: { ...earlier }, favourites, archive: mark(archive), purged: mark(purged), sort, group: groupBy }, "*");
+      // &bar=claude-code:personal: the group the status bar shows, which the extension names; the tab shown follows it.
+      const usageBar = params.get("bar") ?? undefined;
+      window.postMessage({ type: "sessions", sessions: mark(fixture.sessions), past: mark(past), now, usage, usageBar, markers, earlier: { ...earlier }, favourites, archive: mark(archive), purged: mark(purged), sort, group: groupBy }, "*");
     };
     post(earlier.scope);
     const q = params.get("q");
