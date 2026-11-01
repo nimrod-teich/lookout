@@ -5,6 +5,16 @@ import { AGENTS, agentInfo } from "./agents/catalog";
 /** A working session whose transcript has not changed for this long is quiet. */
 export const QUIET_MS = 10 * 60_000;
 
+const GB = 1024 ** 3;
+const MB = 1024 ** 2;
+
+/** Bytes on disk, rounded for reading: "4.2 GB", "310 MB", "12 KB". */
+export function formatBytes(bytes: number): string {
+  if (bytes >= GB) return `${(bytes / GB).toFixed(1)} GB`;
+  if (bytes >= MB) return `${Math.round(bytes / MB)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 /** "45s", "12m", "3h 05m", "2d". */
 export function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));

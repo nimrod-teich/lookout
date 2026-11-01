@@ -1,0 +1,67 @@
+<!doctype html>
+<!-- Dev preview of the worktrees page outside VS Code: npm run build, then open this file. ?busy=check for a check under way, ?done=1 for a removal's summary, &removed=1 for the Removed list, &empty=1 for no worktrees -->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="theme-dark.css" id="theme">
+<link rel="stylesheet" href="../media/worktrees.css">
+<style>html { background: var(--vscode-editor-background); }</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  const params = new URLSearchParams(location.search);
+  document.body.className = "vscode-dark";
+  const now = Date.now();
+  const H = 3_600_000, D = 24 * H, MB = 1024 ** 2, GB = 1024 ** 3;
+  const home = "/home/dev/src";
+  const repos = [
+    { repo: `${home}/infra`, name: "infra", defaultRef: "origin/main", fetchedAt: now - 2 * H },
+    { repo: `${home}/api`, name: "api", defaultRef: "origin/main", fetchedAt: now - 20 * 60_000 },
+    { repo: `${home}/web`, name: "web", defaultRef: "origin/main", fetchedAt: now - 5 * D },
+    { repo: `${home}/docs`, name: "docs", defaultRef: "origin/main" },
+  ];
+  const row = (repo, where, name, tier, reason, own, extra = {}) => ({ path: `${where}/${name}`, repo: `${home}/${repo}`, name, branch: name, tier, reason, ownBytes: own, sharedBytes: 0, headAt: now - (extra.days ?? 3) * D, ...extra });
+  let rows = params.get("empty") === "1" ? [] : [
+    ...["ops-4741", "ops-4753", "ops-4739", "ops-4713"].map((n, i) => row("infra", `${home}/infra/.claude/worktrees`, n, "safe", "already on origin/main", 4.24 * GB, { landed: true, days: 8 + i * 5 })),
+    row("infra", `${home}/_worktrees`, "alert-noise", "safe", "every commit is on a remote", 1.9 * GB, { days: 21 }),
+    row("api", `${home}/api/.claude/worktrees`, "fix-login", "safe", "already on origin/main", 412 * MB, { landed: true, sharedBytes: 1.6 * GB, days: 12 }),
+    row("api", `${home}/api/.claude/worktrees`, "billing-webhooks", "safe", "already on origin/main", 388 * MB, { landed: true, sharedBytes: 1.6 * GB, days: 30 }),
+    row("web", `${home}/web/.claude/worktrees`, "checkout-v2", "safe", "already on origin/main", 263 * MB, { landed: true, days: 40 }),
+    row("docs", `${home}/docs/.claude/worktrees`, "api-reference", "safe", "every commit is on a remote", 18 * MB, { days: 61 }),
+    row("infra", `${home}/infra/.claude/worktrees`, "rehearsal-j36", "review", "19 commits on no remote, kept in its branch", 4.1 * GB, { days: 2 }),
+    row("infra", `${home}/_worktrees`, "fleet-audit", "review", "1 ignored file no tool builds again", 3.4 * GB, { landed: true, ignored: ["ops/fleet.kubeconfig"], days: 14 }),
+    row("api", `${home}/api/.claude/worktrees`, "rate-limits", "review", "2 commits on no remote, kept in its branch; 1 ignored file no tool builds again", 401 * MB, { ignored: [".env"], days: 6 }),
+    row("web", `${home}/web-wt`, "web-wt", "review", "a starred session worked in it", 255 * MB, { branch: "feat/search", landed: true, days: 9 }),
+    row("api", `${home}/api/.claude/worktrees`, "notes-page", "keep", "a session is running in it", 405 * MB, { days: 0.2 }),
+    row("web", `${home}/web/.claude/worktrees`, "drag-order", "keep", "3 changed files", 270 * MB, { days: 1 }),
+    row("infra", `${home}/_worktrees`, "integration", "keep", "2 commits on no branch", 4.0 * GB, { branch: undefined, days: 4 }),
+    row("docs", "/tmp/scratch", "docs-3814", "gone", "its folder is gone", 0, { headAt: undefined }),
+    row("api", "/tmp/scratch", "wt-202", "gone", "its folder is gone", 0, { headAt: undefined }),
+  ];
+  const removed = params.get("removed") === "1" ? [
+    { path: `${home}/api/.claude/worktrees/search-page`, repo: `${home}/api`, name: "search-page", branch: "feat/search-page", branchDeleted: true, removedAt: now - 2 * D },
+    { path: `${home}/web/.claude/worktrees/sort-chip`, repo: `${home}/web`, name: "sort-chip", branch: "feat/sort-chip", removedAt: now - 5 * D },
+  ] : [];
+  const summary = params.get("done") === "1" ? { removed: 9, records: 2, freedBytes: 21.4 * GB, branchesDeleted: 7, freeSpaceGrew: 21.2 * GB, failed: [{ path: `${home}/web/.claude/worktrees/checkout-v2`, name: "checkout-v2", error: "changed since the check: 1 commit on no remote, kept in its branch" }], at: now } : undefined;
+  const busy = params.get("busy") ?? undefined;
+  const state = () => ({
+    busy,
+    progress: busy === "check" ? { done: 212, total: 610, current: `${home}/infra/.claude/worktrees/ops-4741` } : undefined,
+    checkedAt: busy === "check" ? undefined : now - 4 * 60_000,
+    repos: busy === "check" ? [] : repos,
+    rows: busy === "check" ? [] : rows,
+    summary,
+    removed,
+  });
+  const send = () => window.postMessage({ type: "state", state: state() }, "*");
+  window.acquireVsCodeApi = () => ({
+    postMessage: (m) => {
+      console.log("to extension:", JSON.stringify(m));
+      if (m.type === "ready") setTimeout(send, 0);
+    },
+  });
+</script>
+<script src="../dist/worktrees.js"></script>
+</body>
+</html>

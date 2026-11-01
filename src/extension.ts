@@ -6,6 +6,9 @@ import { sameDirs } from "./core/agents/claude/paths";
 import { clockTime, describeAlert, noticeBody } from "./core/format";
 import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
+import { RemovedWorktrees } from "./core/removedWorktrees";
+import { WorktreeWorker } from "./core/worktreeWorker";
+import { mainCheckoutOf } from "./core/worktrees";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
 import { GROUPINGS, readGroupBy, type GroupBy } from "./core/grouping";
@@ -19,6 +22,7 @@ import { panelAdapter } from "./vscode/agents";
 import { claudeTabLabel, claudeTabLabels } from "./vscode/agents/claudePanel";
 import { Findings } from "./vscode/findings";
 import { NotePage } from "./vscode/notePage";
+import { WorktreesPage } from "./vscode/worktreesPage";
 import { Controller } from "./vscode/controller";
 import { CrossWindowJumps, raiseWindow } from "./vscode/crossWindow";
 import { jumpToSession, renameSession, revealed } from "./vscode/jump";
@@ -42,6 +46,7 @@ const GROUP = "lookout.groupSessions";
 const SHOW_NOTES = "lookout.showNotes";
 const FORGET_PURGED = "lookout.forgetPurged";
 const OPEN_KEPT = "lookout.openKeptTranscripts";
+const CLEAN_UP_WORKTREES = "lookout.cleanUpWorktrees";
 /** How the board makes its sections; kept for every window. */
 const GROUP_KEY = "lookout.group";
 /** How the board orders the sessions in each group, and the user's own order; kept for every window. */
@@ -263,6 +268,21 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   });
   const editNote = (id: string) => notePage.show(id);
+  /** The worktrees page: every worktree of the repositories found, what removing each would lose, and the removal. */
+  const worktreeWorker = new WorktreeWorker(vscode.Uri.joinPath(context.extensionUri, "dist", "worktreeThread.js").fsPath);
+  const worktreesPage = new WorktreesPage(context.extensionUri, worktreeWorker, new RemovedWorktrees(path.join(context.globalStorageUri.fsPath, "worktrees", "removed.json")), {
+    input: () => {
+      const uses = controller.worktreeUses();
+      const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
+      const repos = [...new Set([...uses.cwds, ...folders].map(mainCheckoutOf).filter((repo): repo is string => repo !== undefined))];
+      // Unless the settings say where repositories live, they live beside the ones sessions ran in.
+      const where = config.worktreeFolders.length ? config.worktreeFolders : [...new Set(repos.map((repo) => path.dirname(repo)))];
+      return { folders: where, repos, inUse: uses.inUse, rebuildable: config.worktreeRebuildable };
+    },
+    confirm: async (message, detail, action) => (await vscode.window.showWarningMessage(message, { modal: true, detail }, action)) === action,
+    reveal: (folder) => void vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(folder)),
+    openSettings: () => void vscode.commands.executeCommand("workbench.action.openSettings", "lookout.worktrees"),
+  });
   /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
   const openHit = (query: string, id: string, index?: number) => {
     if (!findings.show(id, query, index)) void vscode.window.showInformationMessage(`Lookout has not found the transcript of "${controller.titleOf(id) ?? id}" yet.`);
@@ -391,6 +411,8 @@ export function activate(context: vscode.ExtensionContext): void {
     findings,
     notePage,
     searchPage,
+    worktreesPage,
+    worktreeWorker,
     controller.onDidChangeUsage(render),
     controller.onDidReachUsageThreshold((alert) => {
       const said = describeAlert(alert.meter);
@@ -462,6 +484,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(SEARCH, () => searchPage.show("")),
     // Every session with a note, on the search page: the notes first among each one's matches.
     vscode.commands.registerCommand(SHOW_NOTES, () => searchPage.show("has:note")),
+    vscode.commands.registerCommand(CLEAN_UP_WORKTREES, () => worktreesPage.show()),
     vscode.commands.registerCommand(FORGET_PURGED, async () => {
       const count = controller.purged.length;
       if (count === 0) {

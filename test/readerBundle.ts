@@ -13,3 +13,10 @@ export function buildReader(dir: string = fs.mkdtempSync(path.join(os.tmpdir(), 
   esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "src", "reader.ts")], outfile, bundle: true, platform: "node", format: "cjs", target: "node20", logLevel: "silent" });
   return outfile;
 }
+
+/** The worktree thread's bundle, built from source the way `npm run build` builds `dist/worktreeThread.js`. */
+export function buildWorktreeThread(dir: string = fs.mkdtempSync(path.join(os.tmpdir(), "lookout-worktrees-"))): string {
+  const outfile = path.join(dir, "dist", "worktreeThread.js");
+  esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "src", "worktreeThread.ts")], outfile, bundle: true, platform: "node", format: "cjs", target: "node20", logLevel: "silent" });
+  return outfile;
+}

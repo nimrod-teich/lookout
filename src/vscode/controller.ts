@@ -36,6 +36,7 @@ import type { UsageGroup } from "../core/usageGroups";
 import { refreshEnv, refreshUsage, type RefreshResult } from "../core/usageRefresh";
 import { WindowRegistry } from "../core/windows";
 import { WorkerScanner } from "../core/workerScanner";
+import type { InUse } from "../core/worktrees";
 import type { Config } from "./config";
 import type { Log } from "./log";
 import type { Terminals } from "./terminals";
@@ -437,6 +438,27 @@ export class Controller implements vscode.Disposable {
     this.earlierScope = scope;
     void this.host.state.update(EARLIER_SCOPE_KEY, scope);
     this.poll();
+  }
+
+  /**
+   * What uses a worktree outside git, for the worktrees page: the running
+   * sessions, every window's folders, and, holding one for review only, a
+   * starred or noted session; and the folders sessions ran in, to find
+   * their repositories.
+   */
+  worktreeUses(): { inUse: InUse[]; cwds: string[] } {
+    const inUse: InUse[] = [];
+    for (const view of this.current) inUse.push({ dir: view.cwd, why: view.restored ? "its session's tab is open" : "a session is running in it" });
+    for (const dir of this.host.workspaceFolders()) inUse.push({ dir, why: "open in this window" });
+    for (const other of this.windows.read(this.host.pid).values()) for (const dir of other.folders ?? []) inUse.push({ dir, why: `open in the window ${other.label}` });
+    const starred = new Set(this.favouriteIds());
+    for (const view of this.pastViews) {
+      if (starred.has(view.id)) inUse.push({ dir: view.cwd, why: "a starred session worked in it", soft: true });
+      else if (view.noteCount) inUse.push({ dir: view.cwd, why: "a session with notes worked in it", soft: true });
+    }
+    for (const record of this.records?.noted() ?? []) if (record.cwd) inUse.push({ dir: record.cwd, why: "a session with notes worked in it", soft: true });
+    const cwds = [...new Set([...this.current.map((view) => view.cwd), ...this.pastViews.map((view) => view.cwd)])];
+    return { inUse: inUse.filter((use) => use.dir), cwds };
   }
 
   /** The sessions the user starred, newest star first, and those of them that are not running. */
