@@ -42,7 +42,10 @@ describe("worktreeAt", () => {
     expect(worktreeAt(inside)).toEqual({ top: inside, main: repo });
     expect(worktreeAt(other)).toBeUndefined();
     // A relative path names no folder of a session's; it is never read against this process's own.
-    expect(worktreeAt(path.relative(process.cwd(), beside))).toBeUndefined();
+    // (Across Windows drives there is no relative path to it: path.relative gives the absolute one.)
+    const relative = path.relative(process.cwd(), beside);
+    if (!path.isAbsolute(relative)) expect(worktreeAt(relative)).toBeUndefined();
+    expect(worktreeAt(path.join("_worktrees", "fix-x"))).toBeUndefined();
   });
 
   it("names a bare repository by its own folder, and nothing for a submodule or a forgotten worktree", () => {
