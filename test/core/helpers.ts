@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -28,6 +29,35 @@ export function linkWorktree(repo: string, top: string, id = path.basename(top))
   fs.writeFileSync(path.join(own, "HEAD"), `ref: refs/heads/${id}\n`);
   fs.mkdirSync(top, { recursive: true });
   fs.writeFileSync(path.join(top, ".git"), `gitdir: ${own}\n`);
+}
+
+/** Git with an identity for the commits tests make. */
+const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" };
+
+export function gitIn(cwd: string, ...args: string[]): string {
+  return execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", ...args], { cwd, env: GIT_ENV, encoding: "utf8" }).trim();
+}
+
+export function commitFile(cwd: string, file: string, text: string, message = file): void {
+  fs.mkdirSync(path.dirname(path.join(cwd, file)), { recursive: true });
+  fs.writeFileSync(path.join(cwd, file), text);
+  gitIn(cwd, "add", "-A");
+  gitIn(cwd, "commit", "-q", "-m", message);
+}
+
+/** A git repository for the worktree tests, with a bare remote it pushed main to, under a real (link-free) temp folder. */
+export function gitFixture(): { root: string; repo: string; tree: (name: string) => string } {
+  const root = fs.realpathSync.native(tempConfigDir());
+  const remote = path.join(root, "remote.git");
+  gitIn(root, "init", "-q", "--bare", remote);
+  const repo = path.join(root, "app");
+  gitIn(root, "init", "-q", repo);
+  fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n.env\n");
+  commitFile(repo, "a.txt", "a\n");
+  gitIn(repo, "remote", "add", "origin", remote);
+  gitIn(repo, "push", "-q", "origin", "main");
+  gitIn(repo, "remote", "set-head", "origin", "main");
+  return { root, repo, tree: (name) => path.join(root, "wt", name) };
 }
 
 export const DOMAIN = "linux:feedfacefeedfacefeedfacefeedface:pid:[4026531836]";
