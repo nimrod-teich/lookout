@@ -35,6 +35,29 @@ describe("Board", () => {
     expect(webviewView.webview.options).toMatchObject({ enableScripts: true });
   });
 
+  it("passes an answer on only for a session it showed, of a kind there is, while the cards answer", () => {
+    const waiting = view({ state: "waiting", host: "terminal", terminalPid: 500, reason: { kind: "permission", ask: "Bash: npm test", call: "t1", answer: "yesno" } });
+    let on = true;
+    const answer = vi.fn();
+    const { webviewView } = setup([waiting], undefined, { answer, answers: () => on });
+    expect(webviewView.posted[0]).toMatchObject({ type: "sessions", answers: true });
+    webviewView.receive({ type: "answer", id: waiting.id, call: "t1", choice: "yes" });
+    webviewView.receive({ type: "answer", id: waiting.id, call: "t1", choice: 1 });
+    expect(answer.mock.calls).toEqual([
+      [waiting, "t1", "yes"],
+      [waiting, "t1", 1],
+    ]);
+    answer.mockClear();
+    webviewView.receive({ type: "answer", id: "someone-else", call: "t1", choice: "yes" });
+    webviewView.receive({ type: "answer", id: waiting.id, call: "t1", choice: "maybe" });
+    webviewView.receive({ type: "answer", id: waiting.id, call: "t1", choice: -1 });
+    webviewView.receive({ type: "answer", id: waiting.id, call: "t1", choice: 0.5 });
+    webviewView.receive({ type: "answer", id: waiting.id, choice: "yes" });
+    on = false;
+    webviewView.receive({ type: "answer", id: waiting.id, call: "t1", choice: "yes" });
+    expect(answer).not.toHaveBeenCalled();
+  });
+
   it("sends the sessions when the page is ready and whenever it refreshes", () => {
     const sessions = [view({ state: "working" })];
     const { board, webviewView } = setup(sessions);

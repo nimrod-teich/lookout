@@ -79,6 +79,59 @@
       }
     },
     {
+      "id": "10",
+      "agent": "claude-code",
+      "pid": 10,
+      "title": "Prune merged branches",
+      "state": "waiting",
+      "since": 95000,
+      "reason": {
+        "kind": "permission",
+        "ask": "Bash: git branch --merged main | grep -v main | xargs git branch -d",
+        "raw": "permission prompt",
+        "call": "toolu_p10",
+        "answer": "yesno"
+      },
+      "evidence": {
+        "source": "session file",
+        "at": 95000
+      },
+      "project": "tracker",
+      "cwd": "/work/tracker",
+      "host": "terminal",
+      "terminalPid": 72,
+      "agents": 0,
+      "model": "claude-sonnet-5-5",
+      "contextTokens": 38000,
+      "contextWindow": 200000,
+      "pulse": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3,
+        2,
+        1,
+        1
+      ],
+      "spend": {
+        "input": 800,
+        "output": 24000,
+        "cacheRead": 1900000,
+        "cacheWrite": 120000,
+        "costUsd": 1.42,
+        "estimated": true,
+        "partial": false
+      }
+    },
+    {
       "id": "2",
       "agent": "claude-code",
       "pid": 2,
@@ -93,7 +146,9 @@
           "All 41",
           "Show me the list first"
         ],
-        "raw": "input needed"
+        "raw": "input needed",
+        "call": "toolu_q2",
+        "answer": "options"
       },
       "evidence": {
         "source": "session file",
@@ -305,7 +360,7 @@
       "cwd": "/work/web",
       "host": "panel",
       "agents": 0,
-      "activity": "Bash \u00b7 npm test -- checkout",
+      "activity": "Bash · npm test -- checkout",
       "model": "claude-fable-5-1",
       "contextTokens": 189585,
       "contextWindow": 1000000,
@@ -353,7 +408,7 @@
       "host": "terminal",
       "terminalPid": 71,
       "agents": 0,
-      "activity": "Bash \u00b7 npm run reindex -- --all",
+      "activity": "Bash · npm run reindex -- --all",
       "model": "claude-sonnet-5-5",
       "contextTokens": 54000,
       "contextWindow": 200000,

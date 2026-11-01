@@ -14,6 +14,10 @@ export interface OpenTool {
   ask?: string;
   /** The answers a question offers. */
   options?: string[];
+  /** The ask is the whole of what the call works on: its command, path or address, neither clipped nor a summary of other input. */
+  whole?: boolean;
+  /** A question that takes one of its options: AskUserQuestion with a single question, not multi-select. */
+  single?: boolean;
 }
 
 /** The latest reply of the main chain, while the turn has not moved on from it. */
@@ -238,7 +242,7 @@ function relative(file: string, cwd: string | undefined): string {
  * whole command, the path, the address; for a question, the question and
  * its answers.
  */
-export function askOf(name: string, input: unknown, cwd?: string): Pick<OpenTool, "ask" | "options"> {
+export function askOf(name: string, input: unknown, cwd?: string): Pick<OpenTool, "ask" | "options" | "whole" | "single"> {
   const i = record(input);
   if (name === "AskUserQuestion") {
     const questions = Array.isArray(i.questions) ? i.questions : [];
@@ -247,11 +251,16 @@ export function askOf(name: string, input: unknown, cwd?: string): Pick<OpenTool
     if (!question) return {};
     const options = (Array.isArray(first.options) ? first.options : []).map((option) => str(record(option).label)).filter((label): label is string => label !== undefined).map((label) => quoteAsk(label, OPTION_MAX));
     const more = questions.length > 1 ? ` (+${questions.length - 1} more)` : "";
-    return { ask: clip(`${quoteAsk(question)}${more}`), options };
+    // Claude Code takes a single question's option by its number; with more questions, or several answers, the number only moves on or ticks.
+    const single = questions.length === 1 && first.multiSelect !== true;
+    return { ask: clip(`${quoteAsk(question)}${more}`), options, ...(single && { single }) };
   }
   for (const key of LITERAL_FIELDS) {
     const value = str(i[key]);
-    if (value) return { ask: clip(oneLine(key === "file_path" || key === "notebook_path" || key === "path" ? relative(value, cwd) : value)) };
+    if (!value) continue;
+    const line = oneLine(key === "file_path" || key === "notebook_path" || key === "path" ? relative(value, cwd) : value);
+    const ask = clip(line);
+    return ask === line ? { ask, whole: true } : { ask };
   }
   for (const key of ["plan", ...PROSE_FIELDS]) {
     const value = str(i[key]);

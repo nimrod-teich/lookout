@@ -1,5 +1,6 @@
 /// <reference lib="dom" />
 import { AGENTS, agentInfo, canJump, canRename, canResume, unreachable } from "../core/agents/catalog";
+import { answersOf, type Answer } from "../core/answers";
 import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import { GROUPINGS, sectionsBy, type GroupBy, type Section } from "../core/grouping";
@@ -53,6 +54,10 @@ let usageGroups: BoardUsage[] = [];
 let usageBar: string | undefined;
 /** Tell the agents apart: their hue and silhouette, their name in hovers. */
 let markers = false;
+/** The cards answer prompts, as `lookout.answers.enabled` says. */
+let answersOn = false;
+/** The tool calls answered from a card while their prompt shows: one click types one key. */
+const answered = new Set<string>();
 /** How many agents Lookout watches; unknown from an extension that does not say. */
 let watching: number | undefined;
 /** The search the user typed, trimmed; empty when the box is empty. */
@@ -973,6 +978,40 @@ function createCard(view: SessionView): HTMLElement {
   return card;
 }
 
+/**
+ * The answers under a card's ask: the options a question offers, as words, or,
+ * when the card can answer the prompt in the session's terminal, as buttons:
+ * Yes and No to a permission, or each option of a question.
+ */
+function setAnswers(options: HTMLElement, view: SessionView, words: string[]): void {
+  const offered = answersOn ? answersOf(view) : [];
+  const call = view.reason?.call;
+  const key = JSON.stringify(offered.length > 0 ? [view.id, call, offered.map((answer) => [answer.choice, answer.label])] : words);
+  if (options.dataset.key !== key) {
+    options.dataset.key = key;
+    options.replaceChildren(...(offered.length > 0 && call !== undefined ? offered.map((answer) => answerButton(options, view.id, call, answer)) : words.map((word) => el("span", "option", word))));
+  }
+  options.classList.toggle("hidden", offered.length === 0 && words.length === 0);
+  options.classList.toggle("answers", offered.length > 0);
+  options.classList.toggle("sent", call !== undefined && answered.has(call));
+}
+
+/** One answer as a button: a click types its key in the session's terminal, once, and does not jump. */
+function answerButton(options: HTMLElement, id: string, call: string, answer: Answer): HTMLElement {
+  const kind = answer.choice === "yes" ? " yes" : answer.choice === "no" ? " no" : "";
+  const button = el("span", `option answer${kind}`, answer.label);
+  button.title = answer.title;
+  button.setAttribute("role", "button");
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (answered.has(call)) return;
+    answered.add(call);
+    options.classList.add("sent");
+    vscode.postMessage({ type: "answer", id, call, choice: answer.choice });
+  });
+  return button;
+}
+
 /** A parking sign: the card goes under Parked. */
 const PARK_ICON =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6.4 11.6V4.6h2.3a2.1 2.1 0 0 1 0 4.2H6.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1182,14 +1221,7 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   line.classList.toggle("empty", second.text === undefined && second.label === undefined);
   line.classList.toggle("stuck", second.stuck === true);
   card.classList.toggle("background", view.background !== undefined);
-  const options = card.querySelector(".options") as HTMLElement;
-  const answers = second.options ?? [];
-  options.classList.toggle("hidden", answers.length === 0);
-  while (options.childNodes.length > answers.length) options.lastChild!.remove();
-  answers.forEach((answer, i) => {
-    const option = options.childNodes[i] ?? options.appendChild(el("span", "option"));
-    if (option.textContent !== answer) option.textContent = answer;
-  });
+  setAnswers(card.querySelector(".options") as HTMLElement, view, second.options ?? []);
   const seen = card.querySelector(".action.seen") as HTMLElement;
   seen.title = typed ? "Dismiss the question: the session goes back to idle until it asks another" : "Mark as seen";
   const pulse = card.querySelector(".pulse") as HTMLElement;
@@ -1924,6 +1956,9 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);
   usageBar = message.usageBar;
   markers = message.markers === true;
+  answersOn = message.answers === true;
+  // A prompt answered goes away; its call is not asked about again.
+  for (const call of answered) if (!message.sessions.some((view) => view.reason?.call === call)) answered.delete(call);
   watching = message.watching;
   clockOffset = message.now - Date.now();
   applyFilters();

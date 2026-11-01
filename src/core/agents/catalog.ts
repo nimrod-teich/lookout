@@ -30,6 +30,18 @@ export interface AgentGlyph {
   lamp: [number, number];
 }
 
+/**
+ * The keys that answer the agent's prompts in a terminal, as Lookout types
+ * them there: yes and no to a permission, and a question's option by its
+ * place. Only for an agent whose prompts Lookout reads for sure while they show.
+ */
+export interface AnswerKeys {
+  yes: string;
+  no: string;
+  /** The keys for the option at `index`, from 0. */
+  option(index: number): string;
+}
+
 export interface AgentInfo {
   /** The id its provider reports sessions with. */
   id: string;
@@ -45,6 +57,8 @@ export interface AgentInfo {
   capabilities: Capabilities;
   /** Where a session that is not running resumes: in the agent's editor panel, or in a terminal. */
   resumesIn: "panel" | "terminal";
+  /** How Lookout answers its prompts from a card, when it can. */
+  answerKeys?: AnswerKeys;
 }
 
 const HULL = "M1 11.2h14l-2.4 3.2H3.4z";
@@ -61,6 +75,8 @@ export const AGENTS: readonly AgentInfo[] = [
     glyph: { icon: "lookout-sloop", path: `${HULL}M7.5 1h1.1v10.2H7.5zM7.1 2v8.3H2.3z`, lamp: [8, 11.2] },
     capabilities: { jumpTerminal: true, jumpPanel: true, rename: true, resume: true, search: true, usage: true },
     resumesIn: "panel",
+    // Claude Code's prompts: 1 is always Yes and Esc always No (it stops the turn and asks what to do instead); a question's options are numbered from 1.
+    answerKeys: { yes: "1", no: "\u001b", option: (index) => String(index + 1) },
   },
   {
     id: "codex",

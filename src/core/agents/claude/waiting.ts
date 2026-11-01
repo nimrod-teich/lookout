@@ -22,6 +22,8 @@ const PLAN_TOOLS = ["ExitPlanMode", "EnterPlanMode"];
 export const SUBAGENT_TOOLS = ["Agent", "Task"];
 /** How much of a plan file is read for its title. */
 const PLAN_HEAD_BYTES = 8 * 1024;
+/** Claude Code numbers a question's options from 1, and a number key picks one: up to 9. */
+const MAX_PICKED = 9;
 
 /** "Bash", or "createJiraIssue (atlassian)" for an MCP server's tool. */
 export function toolLabel(name: string): string {
@@ -51,7 +53,13 @@ export function reasonOf(
   const kind = KINDS[word] ?? "dialog";
   const tools = [...state.openTools.values()];
   const question = tools.find((tool) => tool.name === "AskUserQuestion");
-  if ((word === PERMISSION_PROMPT || word === INPUT_NEEDED) && question?.ask) return { kind: "question", ask: question.ask, options: question.options, raw };
+  // The card answers only what Claude Code is sure to show: with one call open, the prompt is about that one.
+  const alone = tools.length === 1;
+  if ((word === PERMISSION_PROMPT || word === INPUT_NEEDED) && question?.ask) {
+    const options = question.options;
+    const pickable = alone && question.single === true && options !== undefined && options.length > 0 && options.length <= MAX_PICKED;
+    return { kind: "question", ask: question.ask, options, raw, ...(pickable && { call: question.id, answer: "options" as const }) };
+  }
   if (file.needs) return { kind, ask: quoteAsk(file.needs), raw };
   if (word === PERMISSION_PROMPT) {
     const plan = tools.find((tool) => PLAN_TOOLS.includes(tool.name));
@@ -65,7 +73,13 @@ export function reasonOf(
       const who = tool.ask ? ` · in subagent "${tool.ask}"` : " · in a subagent";
       if (inner) return { kind, ask: clip(`${toolAsk(inner)}${who}`), raw };
     }
-    if (tool) return { kind, ask: clip(word === "sandbox request" ? `${toolAsk(tool)} · network access` : toolAsk(tool)), raw };
+    if (tool && word === PERMISSION_PROMPT) {
+      const ask = toolAsk(tool);
+      // Yes or no from the card only to a prompt whose whole ask it shows.
+      const answerable = alone && tool.whole === true && clip(ask) === ask;
+      return { kind, ask: clip(ask), raw, ...(answerable && { call: tool.id, answer: "yesno" as const }) };
+    }
+    if (tool) return { kind, ask: clip(`${toolAsk(tool)} · network access`), raw };
   }
   // The tool call or the question can reach the transcript a moment after the wait is recorded.
   return { kind, ask: quoteAsk(word), raw, tentative: word === PERMISSION_PROMPT || word === INPUT_NEEDED || undefined };

@@ -1278,6 +1278,38 @@ body.vscode-reduce-motion .hover-card {
   line-height: 16px;
 }
 
+/* Answers the card gives in the session's terminal: buttons, Yes filled. */
+.option.answer {
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.option.answer:hover {
+  border-color: var(--waiting);
+  background: color-mix(in srgb, var(--waiting) 18%, transparent);
+}
+
+.option.answer.yes {
+  border-color: var(--waiting);
+  background: color-mix(in srgb, var(--waiting) 14%, transparent);
+  font-weight: 600;
+}
+
+.option.answer.yes:hover {
+  background: color-mix(in srgb, var(--waiting) 28%, transparent);
+}
+
+/* Sent: the key went to the terminal; the card waits for the prompt to go. */
+.options.sent .option.answer {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.options.sent .option.answer:hover {
+  border-color: color-mix(in srgb, var(--waiting) 45%, transparent);
+  background: none;
+}
+
 /* A question Lookout read in a reply: the same group, a dashed outline, a lighter hand. */
 .card.typed {
   border-style: dashed;

@@ -15,6 +15,8 @@ import { GROUPINGS, readGroupBy, type GroupBy } from "./core/grouping";
 import { readSort, SORTS, type SessionSort } from "./core/sorting";
 import type { PastView, SessionView } from "./core/types";
 import { groupKey, pickBar } from "./core/usageGroups";
+import type { Choice } from "./core/answers";
+import { Answerer } from "./vscode/answer";
 import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
@@ -164,6 +166,27 @@ export function activate(context: vscode.ExtensionContext): void {
     // Nothing here can bring it forward: its conversation, to read what it does.
     if (unreachable(view)) return openHit("", view.id);
     if (revealed(await jumpToSession(view, terminals, log))) controller.markSeen(view.id);
+  };
+  // A card's answer goes to the prompt the session shows now: the sessions are read again first.
+  const answerer = new Answerer({
+    refresh: () => {
+      controller.poll();
+      return controller.sessions;
+    },
+    send: (pid, keys) => terminals.send(pid, keys),
+    log,
+  });
+  const answer = (view: SessionView, call: string, choice: Choice) => {
+    if (!config.answers) return;
+    switch (answerer.answer(view.id, call, choice)) {
+      case "sent":
+        return;
+      case "moved-on":
+        void vscode.window.showInformationMessage(`"${view.title}" no longer shows that prompt, so Lookout typed nothing.`);
+        return;
+      case "no-terminal":
+        void vscode.window.showWarningMessage(`Lookout could not find the terminal of "${view.title}".`);
+    }
   };
   /** Has one account's usage fetched, the first's without a key, and says what came of it unless new numbers came. */
   const refreshAccount = async (key: string | undefined): Promise<void> => {
@@ -377,6 +400,8 @@ export function activate(context: vscode.ExtensionContext): void {
     markSeen,
     markAllSeen,
     dismiss: (id) => controller.dismiss(id),
+    answer,
+    answers: () => config.answers,
     // The command, so the board's link says what the command says when it cannot fetch; for the account its tab shows.
     refreshUsage: (key) => void vscode.commands.executeCommand(REFRESH_USAGE, key),
     watching: () => controller.watching,
