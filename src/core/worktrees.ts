@@ -650,6 +650,8 @@ export interface Removal {
   branchDeleted?: boolean;
   /** It had been a record only; its folder was already gone. */
   record?: boolean;
+  /** How it stands now, when the second look refused it: the tier and reason the page should show instead. */
+  now?: Pick<WorktreeCheck, "tier" | "reason" | "landed" | "ignored">;
 }
 
 export interface RemoveAsk {
@@ -683,8 +685,9 @@ export async function removeWorktree(ask: RemoveAsk, input: Omit<SurveyInput, "f
     const ran = await git(ask.repo, ["worktree", "remove", item.path]);
     return ran.code === 0 ? { ...known, ok: true, record: true } : { ...known, error: firstLine(ran.err) ?? "git refused" };
   }
-  if (now.tier === "keep") return { ...known, error: `kept now: ${now.reason}` };
-  if (now.tier === "review" && ask.shownAs === "safe") return { ...known, error: `changed since the check: ${now.reason}` };
+  const stands = { tier: now.tier, reason: now.reason, ...(now.landed ? { landed: true } : {}), ...(now.ignored ? { ignored: now.ignored } : {}) };
+  if (now.tier === "keep") return { ...known, error: `kept now: ${now.reason}`, now: stands };
+  if (now.tier === "review" && ask.shownAs === "safe") return { ...known, error: `changed since the check: ${now.reason}`, now: stands };
   const ran = await git(ask.repo, ["worktree", "remove", item.path]);
   if (ran.code !== 0) return { ...known, error: firstLine(ran.err) ?? "git refused" };
   const removed: Removal = { ...known, ok: true, freedBytes: ask.bytes ?? 0 };

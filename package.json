@@ -99,6 +99,12 @@
         "category": "Lookout"
       },
       {
+        "command": "lookout.cleanUpWorktrees",
+        "title": "Clean Up Worktrees",
+        "category": "Lookout",
+        "icon": "$(git-branch)"
+      },
+      {
         "command": "lookout.sortSessions",
         "title": "Sort Sessions",
         "category": "Lookout"
@@ -205,6 +211,11 @@
           "command": "lookout.showNotes",
           "when": "view == lookout.board",
           "group": "navigation@2"
+        },
+        {
+          "command": "lookout.cleanUpWorktrees",
+          "when": "view == lookout.board",
+          "group": "worktrees@1"
         }
       ],
       "commandPalette": [
@@ -553,6 +564,54 @@
             "minimum": 0,
             "maximum": 36500,
             "markdownDescription": "Keep Claude Code's transcripts this many days: Lookout writes `cleanupPeriodDays` into Claude Code's user settings file (`~/.claude/settings.json`) when it says otherwise, every other key kept and a copy of the file as it was beside it; Claude Code applies it at its next start. `0` leaves Claude Code's own setting (30 days by default); `3650` is ten years. Managed settings, and a folder's own `.claude/settings.json`, win over it."
+          },
+          "lookout.worktrees.folders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "machine",
+            "markdownDescription": "Folders that hold your git repositories: **Clean Up Worktrees** looks in each, and up to two levels below it, for repositories, and checks every worktree each one lists, wherever the worktree lives. Empty: the folders that hold the repositories your sessions ran in. The repositories your sessions ran in are always checked."
+          },
+          "lookout.worktrees.rebuildable": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "node_modules",
+              "dist",
+              "out",
+              "build",
+              ".next",
+              "next-env.d.ts",
+              ".nuxt",
+              ".svelte-kit",
+              ".turbo",
+              ".parcel-cache",
+              ".vite",
+              ".cache",
+              "coverage",
+              ".nyc_output",
+              "target",
+              ".gradle",
+              ".terraform",
+              ".terraform.lock.hcl",
+              ".venv",
+              "venv",
+              "__pycache__",
+              ".pytest_cache",
+              ".mypy_cache",
+              ".ruff_cache",
+              ".tox",
+              "*.pyc",
+              "*.tsbuildinfo",
+              "*.vsix",
+              ".DS_Store"
+            ],
+            "scope": "machine",
+            "markdownDescription": "Ignored files and folders a tool builds again, by name (`node_modules`, `.terraform`) or by extension (`*.pyc`): a worktree whose only ignored files are these loses nothing when it goes. Any other ignored file, an `.env` or a kubeconfig, holds the worktree for review, named on its row, since `git worktree remove` deletes ignored files without asking."
           },
           "lookout.agentMarkers": {
             "type": "string",

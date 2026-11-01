@@ -3,9 +3,9 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
 // .vscodeignore is an allowlist: a bundle or stylesheet a webview loads must be let through, or the view comes up blank once installed;
-// so must the reading thread's bundle, or the search reads in the extension host.
+// so must the reading thread's bundle, or the search reads in the extension host, and the worktree thread's, or the worktrees page cannot check.
 describe("the package allowlist", () => {
-  it("lets through every bundle and stylesheet the webviews load, and the reading thread's bundle", () => {
+  it("lets through every bundle and stylesheet the webviews load, and the threads' bundles", () => {
     const root = path.join(__dirname, "..", "..");
     const allowed = fs
       .readFileSync(path.join(root, ".vscodeignore"), "utf8")
@@ -13,11 +13,22 @@ describe("the package allowlist", () => {
       .filter((line) => line.startsWith("!"))
       .map((line) => line.slice(1).trim());
     const loaded = new Set<string>();
-    for (const file of ["vscode/board.ts", "vscode/findings.ts", "vscode/searchPage.ts", "extension.ts"]) {
+    for (const file of ["vscode/board.ts", "vscode/findings.ts", "vscode/searchPage.ts", "vscode/worktreesPage.ts", "extension.ts"]) {
       const source = fs.readFileSync(path.join(root, "src", file), "utf8");
       for (const match of source.matchAll(/"(dist|media)",\s*"([^"]+)"/g)) loaded.add(`${match[1]}/${match[2]}`);
     }
-    expect([...loaded].sort()).toEqual(["dist/board.js", "dist/findings.js", "dist/reader.js", "dist/search.js", "media/board.css", "media/findings.css", "media/search.css"]);
+    expect([...loaded].sort()).toEqual([
+      "dist/board.js",
+      "dist/findings.js",
+      "dist/reader.js",
+      "dist/search.js",
+      "dist/worktreeThread.js",
+      "dist/worktrees.js",
+      "media/board.css",
+      "media/findings.css",
+      "media/search.css",
+      "media/worktrees.css",
+    ]);
     for (const file of loaded) expect(allowed, `${file} is not in .vscodeignore`).toContain(file);
   });
 });
@@ -87,5 +98,16 @@ describe("the Claude Code directory settings", () => {
     const names = settings["lookout.claudeAccountNames"] as { type?: string; additionalProperties?: { type?: string }; default?: unknown; scope?: string; order?: number } | undefined;
     expect(names).toMatchObject({ type: "object", additionalProperties: { type: "string" }, default: {}, scope: "machine" });
     expect(names?.order).toBe((settings["lookout.claudeConfigDirs"]?.order ?? 0) + 1);
+  });
+});
+
+// The setting's default is the list the check uses when the setting is unset.
+describe("lookout.worktrees.rebuildable", () => {
+  it("defaults to the check's own list", async () => {
+    const { REBUILDABLE } = await import("../../src/core/worktrees");
+    const root = path.join(__dirname, "..", "..");
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as { contributes: { configuration: { properties: Record<string, { default?: unknown }> }[] } };
+    const setting = pkg.contributes.configuration.map((section) => section.properties["lookout.worktrees.rebuildable"]).find(Boolean);
+    expect(setting?.default).toEqual(REBUILDABLE);
   });
 });

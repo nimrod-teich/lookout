@@ -6,6 +6,7 @@ import { codexHome } from "../core/agents/codex/paths";
 import { copilotHome } from "../core/agents/copilot/paths";
 import { envFlag, NONESSENTIAL_TRAFFIC, type RefreshMode } from "../core/usage";
 import { parsePin } from "../core/usageGroups";
+import { REBUILDABLE } from "../core/worktrees";
 
 export interface Config {
   statusBarEnabled: boolean;
@@ -36,6 +37,10 @@ export interface Config {
   keepFavourites: boolean;
   /** Keep Claude Code's transcripts this many days, written into its user settings file; 0 leaves Claude Code's own. */
   retentionDays: number;
+  /** Folders that hold git repositories, for the worktrees page; none: the folders holding the repositories sessions ran in. */
+  worktreeFolders: string[];
+  /** Ignored files and folders a tool builds again, by name or `*.ext`. */
+  worktreeRebuildable: string[];
   /** Watch Claude Code: its sessions and its usage. */
   claudeEnabled: boolean;
   /** The Claude Code config directory to read sessions and transcripts from: the first of `claudeDirs`, resolved. */
@@ -111,6 +116,8 @@ export function readConfig(): Config {
     searchToolOutput: lookout.get<boolean>("search.toolOutput", false),
     keepFavourites: lookout.get<boolean>("keepTranscripts.favourites", false),
     retentionDays: retentionDaysOf(lookout.get<unknown>("retention.days", 0)),
+    worktreeFolders: strings(lookout.get<unknown>("worktrees.folders")) ?? [],
+    worktreeRebuildable: strings(lookout.get<unknown>("worktrees.rebuildable")) ?? [...REBUILDABLE],
     claudeEnabled: lookout.get<boolean>("agents.claude", true),
     claudeConfigDir: claudeDirs[0]!.resolved,
     claudeDirs,
@@ -122,6 +129,11 @@ export function readConfig(): Config {
     copilotEnabled: lookout.get<boolean>("agents.copilot", true),
     copilotHome: copilotHome(lookout.get<string>("copilotHome")),
   };
+}
+
+/** A setting's list of strings, blanks and anything else left out; undefined when it is not a list. */
+function strings(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "").map((item) => item.trim()) : undefined;
 }
 
 /** The retention setting as a whole number of days, 0 to a hundred years; anything else counts as 0, which leaves Claude Code's own. */
