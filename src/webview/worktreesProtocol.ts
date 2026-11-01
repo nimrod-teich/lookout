@@ -22,6 +22,8 @@ export interface WorktreeRow {
   ignored?: string[];
   /** Its branch goes with it: its change is on the default branch. */
   landed?: boolean;
+  /** The folder that holds it, when that is not `<repo>/.claude/worktrees`; the home folder as `~`. */
+  where?: string;
 }
 
 /** A repository the check looked at. */
@@ -78,4 +80,14 @@ export interface WorktreesState {
 export type ToWorktrees = { type: "state"; state: WorktreesState };
 
 /** Page → extension. */
-export type FromWorktrees = { type: "ready" } | { type: "check" } | { type: "remove"; paths: string[] } | { type: "restore"; path: string } | { type: "reveal"; path: string } | { type: "settings" };
+export type FromWorktrees =
+  | { type: "ready" }
+  | { type: "check" }
+  /** Stop the check under way; the rows stay from the one before. */
+  | { type: "stop" }
+  | { type: "remove"; paths: string[] }
+  | { type: "restore"; path: string }
+  | { type: "reveal"; path: string }
+  | { type: "settings" }
+  /** Take the last removal's summary off the page. */
+  | { type: "dismiss" };

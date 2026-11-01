@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RemovedWorktrees } from "../../src/core/removedWorktrees";
 import { REBUILDABLE, removeWorktree, restoreWorktree, survey, type SurveyInput } from "../../src/core/worktrees";
 import type { WorktreesState } from "../../src/webview/worktreesProtocol";
-import { WorktreesPage, type WorktreeRunner } from "../../src/vscode/worktreesPage";
+import { WorktreesPage, whereOf, type WorktreeRunner } from "../../src/vscode/worktreesPage";
 import { commitFile, gitFixture, gitIn } from "../core/helpers";
 import { stub } from "./stub-vscode";
 
@@ -17,6 +17,7 @@ const inProcess: WorktreeRunner = {
     return { removals };
   },
   restore: (record) => restoreWorktree(record),
+  stop: () => {},
 };
 
 function setup() {
@@ -92,6 +93,8 @@ describe("WorktreesPage", () => {
       "Remove",
     );
     expect(page.current.summary).toMatchObject({ removed: 2, records: 0, branchesDeleted: 1, failed: [] });
+    // Rows outside <repo>/.claude/worktrees say where they are.
+    expect(shown().rows.map((row) => row.where && path.basename(row.where))).toEqual(["wt"]);
     expect(fs.existsSync(landed)).toBe(false);
     expect(fs.existsSync(wip)).toBe(false);
     expect(fs.existsSync(busy)).toBe(true);
@@ -105,6 +108,71 @@ describe("WorktreesPage", () => {
     expect(fs.existsSync(path.join(landed, "l.txt"))).toBe(true);
     expect(removed.list().map((record) => record.path)).toEqual([wip]);
     page.dispose();
+  });
+
+  it("shows a worktree the second look refused as it stands now, unticked by the page, and clears the summary on the next check or a dismiss", async () => {
+    const { page, landed, repo } = setup();
+    page.show();
+    await settled(page);
+    const panel = stub.panels.at(-1)!;
+    // Between the check and the click, a commit lands in the safe worktree: the removal refuses it. Its branch's whole
+    // change is no longer the squash on main, so both of its commits count as on no remote.
+    commitFile(landed, "late.txt", "late\n");
+    panel.receive({ type: "remove", paths: [landed] });
+    await vi.waitFor(() => expect(page.current.summary).toBeDefined(), { timeout: 20_000 });
+    expect(page.current.summary).toMatchObject({ removed: 0, failed: [{ path: landed, error: "changed since the check: 2 commits on no remote, kept in its branch" }] });
+    expect(fs.existsSync(landed)).toBe(true);
+    const row = shown().rows.find((candidate) => candidate.path === landed)!;
+    expect([row.tier, row.reason, row.landed]).toEqual(["review", "2 commits on no remote, kept in its branch", undefined]);
+    panel.receive({ type: "dismiss" });
+    expect(page.current.summary).toBeUndefined();
+    panel.receive({ type: "remove", paths: [landed] });
+    await vi.waitFor(() => expect(page.current.summary).toBeDefined(), { timeout: 20_000 });
+    panel.receive({ type: "check" });
+    expect(page.current.busy).toBe("check");
+    expect(page.current.summary).toBeUndefined();
+    await settled(page);
+    expect(page.current.summary).toBeUndefined();
+    expect(gitIn(repo, "worktree", "list")).not.toContain(landed);
+    page.dispose();
+  });
+
+  it("stops a check on request, keeping the rows of the one before, and says so without an error", async () => {
+    const { actions, removed } = setup();
+    // The first check runs; the next hangs until stopped.
+    let checks = 0;
+    let hang: ((reason: Error) => void) | undefined;
+    const runner: WorktreeRunner = {
+      ...inProcess,
+      survey: (input, onProgress) => (checks++ === 0 ? inProcess.survey(input, onProgress) : new Promise((_, reject) => (hang = reject))),
+      stop: () => hang?.(new Error("The check was stopped")),
+    };
+    const stoppable = new WorktreesPage({ fsPath: "/ext" } as never, runner, removed, actions);
+    stoppable.show();
+    await settled(stoppable);
+    const rows = stoppable.current.rows;
+    const checkedAt = stoppable.current.checkedAt;
+    const panel = stub.panels.at(-1)!;
+    // Stop does nothing while nothing runs.
+    panel.receive({ type: "stop" });
+    expect(stoppable.current.busy).toBeUndefined();
+    panel.receive({ type: "check" });
+    await vi.waitFor(() => expect(hang).toBeDefined());
+    panel.receive({ type: "stop" });
+    await settled(stoppable);
+    expect(stoppable.current).toMatchObject({ rows, checkedAt, notice: "The check was stopped; the rows are from the one before.", error: undefined });
+    stoppable.dispose();
+  });
+
+  it("names the folder that holds a worktree only when it is not the usual one", () => {
+    const sep = path.sep;
+    const home = path.resolve(`${sep}home${sep}u`);
+    const repo = path.join(home, "src", "api");
+    expect(whereOf({ repo, path: path.join(repo, ".claude", "worktrees", "x") }, home)).toBeUndefined();
+    expect(whereOf({ repo, path: path.join(home, "src", "_worktrees", "x") }, home)).toBe(`~${sep}src${sep}_worktrees`);
+    expect(whereOf({ repo, path: path.join(home, "x") }, home)).toBe("~");
+    expect(whereOf({ repo, path: path.resolve(`${sep}tmp${sep}scratch${sep}x`) }, home)).toBe(path.resolve(`${sep}tmp${sep}scratch`));
+    expect(whereOf({ repo, path: path.join(home + "2", "x") }, home)).toBe(home + "2");
   });
 
   it("reveals only a folder it lists", async () => {

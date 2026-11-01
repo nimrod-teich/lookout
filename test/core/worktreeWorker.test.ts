@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { WorktreeWorker } from "../../src/core/worktreeWorker";
+import { STOPPED, WorktreeWorker } from "../../src/core/worktreeWorker";
 import { REBUILDABLE } from "../../src/core/worktrees";
 import { buildWorktreeThread } from "../readerBundle";
 import { gitFixture, gitIn, tempConfigDir } from "./helpers";
@@ -23,6 +23,23 @@ describe("WorktreeWorker", () => {
       const head = gitIn(repo, "rev-parse", "origin/main");
       expect(await worker.restore({ repo, path: top, head, removedAt: Date.now() })).toEqual({ ok: true });
       expect(fs.existsSync(path.join(top, "a.txt"))).toBe(true);
+    } finally {
+      worker.dispose();
+    }
+  });
+
+  it("stops what it was doing on request, rejecting it as stopped, and answers the next ask from a new thread", async () => {
+    const { root, repo, tree } = gitFixture();
+    const top = tree("one");
+    gitIn(repo, "worktree", "add", "-q", "--detach", top, "origin/main");
+    const worker = new WorktreeWorker(buildWorktreeThread(tempConfigDir()));
+    try {
+      const input = { folders: [root], repos: [], inUse: [], rebuildable: REBUILDABLE, quietMs: 0 };
+      const stopped = worker.survey(input);
+      worker.stop();
+      await expect(stopped).rejects.toThrow(STOPPED);
+      const survey = await worker.survey(input);
+      expect(survey.worktrees.map((check) => check.path)).toEqual([top]);
     } finally {
       worker.dispose();
     }

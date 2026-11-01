@@ -19,6 +19,9 @@ export interface WorktreeAnswer {
   error?: string;
 }
 
+/** The error an ask rejects with when `stop()` cut it short. */
+export const STOPPED = "The check was stopped";
+
 /** Ask with no id: the thread's client numbers each one. */
 type Unnumbered<T> = T extends { id: number } ? Omit<T, "id"> : never;
 
@@ -75,8 +78,10 @@ export class WorktreeWorker {
       if (answer.error !== undefined) waiting.reject(new Error(answer.error));
       else waiting.resolve(answer);
     });
+    // Only the thread in use fails what waits: one stopped earlier exits later, when the next may be at work.
     const fail = (error: unknown) => {
-      if (this.worker === worker) this.worker = undefined;
+      if (this.worker !== worker) return;
+      this.worker = undefined;
       for (const waiting of this.waiting.values()) waiting.reject(error);
       this.waiting.clear();
     };
@@ -84,6 +89,15 @@ export class WorktreeWorker {
     worker.on("exit", (code) => fail(new Error(`The worktree thread stopped (exit code ${code})`)));
     this.worker = worker;
     return worker;
+  }
+
+  /** Stops the thread and what it was doing: every waiting ask rejects as stopped, and the next ask starts another thread. */
+  stop(): void {
+    const worker = this.worker;
+    this.worker = undefined;
+    for (const waiting of this.waiting.values()) waiting.reject(new Error(STOPPED));
+    this.waiting.clear();
+    void worker?.terminate();
   }
 
   dispose(): void {

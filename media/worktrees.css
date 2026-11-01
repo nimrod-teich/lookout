@@ -44,6 +44,19 @@ button {
   color: inherit;
 }
 
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The keyboard's place, on the dark paper. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 1px solid var(--beam);
+  outline-offset: 2px;
+}
+
 input[type="checkbox"] {
   margin: 0;
   accent-color: var(--beam);
@@ -104,35 +117,20 @@ input[type="checkbox"] {
   gap: 8px;
 }
 
+/* The tools are quiet: the one coloured action on the page is Remove. */
 .tool {
   padding: 5px 12px;
-  border: 1px solid rgba(255, 176, 0, 0.45);
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: rgba(255, 176, 0, 0.12);
-  color: var(--lamp);
-  font-weight: 600;
+  background: none;
+  color: var(--muted);
+  font-weight: 500;
   cursor: pointer;
 }
 
 .tool:hover:not(:disabled) {
-  background: rgba(255, 176, 0, 0.22);
-}
-
-.tool.quiet {
-  border-color: var(--line-strong);
-  background: none;
-  color: var(--muted);
-  font-weight: 500;
-}
-
-.tool.quiet:hover {
   background: var(--paper-2);
   color: var(--ink);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 /* Progress ------------------------------------------------------------------ */
@@ -141,11 +139,23 @@ button:disabled {
   margin: 0 0 16px;
 }
 
-.progress-text {
+.progress-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 6px;
+}
+
+.progress-text {
+  flex: 1;
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+.stop {
+  padding: 2px 10px;
+  font-size: 12px;
 }
 
 .bar {
@@ -164,8 +174,9 @@ button:disabled {
 /* What the last removal did ---------------------------------------------------- */
 
 .banner {
+  position: relative;
   margin: 0 0 18px;
-  padding: 12px 14px;
+  padding: 12px 40px 12px 14px;
   border: 1px solid var(--line-strong);
   border-left: 3px solid var(--safe);
   border-radius: 6px;
@@ -174,6 +185,14 @@ button:disabled {
 
 .banner .done {
   font-weight: 600;
+}
+
+.banner .when {
+  margin-left: 10px;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .banner .aside {
@@ -201,6 +220,96 @@ button:disabled {
   color: var(--danger);
 }
 
+.dismiss {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dismiss:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* The filter and the order ----------------------------------------------------- */
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.field {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 160px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--well);
+  color: var(--muted);
+}
+
+.field:focus-within {
+  border-color: rgba(95, 180, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(95, 180, 255, 0.25);
+}
+
+.field svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  opacity: 0.7;
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.field input::placeholder {
+  color: var(--muted);
+}
+
+.field input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.sort {
+  flex: none;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--well);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.sort:hover {
+  color: var(--ink);
+}
+
 /* Sections, groups and rows ---------------------------------------------------- */
 
 .section {
@@ -221,6 +330,7 @@ button:disabled {
   background: none;
   font-size: calc(var(--vscode-font-size) + 3px);
   font-weight: 650;
+  text-align: left;
   cursor: pointer;
 }
 
@@ -266,6 +376,33 @@ button:disabled {
   line-height: 1.45;
 }
 
+/* The grid of a row: tick, the worktree, its size, the age of its last commit. */
+.row,
+.cols {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 84px 64px;
+  align-items: start;
+  column-gap: 8px;
+  padding: 6px 4px;
+  border-radius: 4px;
+}
+
+.cols {
+  padding-top: 0;
+  padding-bottom: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cols span {
+  white-space: nowrap;
+}
+
+.col-size,
+.col-age {
+  text-align: right;
+}
+
 .group {
   margin: 0 0 4px;
 }
@@ -298,18 +435,8 @@ button:disabled {
   font-size: 11px;
 }
 
-.row {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 76px 40px;
-  align-items: start;
-  column-gap: 8px;
-  padding: 6px 4px 6px 4px;
-  border-radius: 4px;
-}
-
 .group .row {
   padding-left: 24px;
-  grid-template-columns: 20px minmax(0, 1fr) 76px 40px;
 }
 
 .row:hover {
@@ -324,41 +451,69 @@ button:disabled {
   min-width: 0;
 }
 
+.main.tickable {
+  cursor: pointer;
+}
+
+/* The name first; what follows wraps under it before the name gives way. */
 .head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 2px;
   min-width: 0;
 }
 
 .name {
-  overflow: hidden;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.reveal {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: 0;
+  border-radius: 4px;
   background: none;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-  text-align: left;
+  color: var(--muted);
+  opacity: 0;
   cursor: pointer;
 }
 
-.name:hover:not(:disabled) {
-  text-decoration: underline;
+.reveal svg {
+  width: 14px;
+  height: 14px;
 }
 
-.name:disabled,
-.name.plain {
+.row:hover .reveal,
+.row:focus-within .reveal,
+.reveal:focus-visible {
   opacity: 1;
-  cursor: default;
+}
+
+.reveal:hover {
+  background: var(--paper);
+  color: var(--ink);
 }
 
 .branch {
-  overflow: hidden;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-family: var(--vscode-editor-font-family);
+  font-size: 12px;
+}
+
+.at {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -393,6 +548,12 @@ button:disabled {
   color: var(--ink);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+.shared {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .age {
@@ -466,12 +627,34 @@ button:disabled {
     row-gap: 6px;
   }
 
-  .row,
-  .group .row {
-    grid-template-columns: 20px minmax(0, 1fr) 64px;
+  .controls {
+    flex-wrap: wrap;
   }
 
-  .age {
+  .field {
+    flex-basis: 100%;
+  }
+
+  .row,
+  .cols {
+    grid-template-columns: 20px minmax(0, 1fr) 72px;
+  }
+
+  .age,
+  .col-age {
     display: none;
+  }
+
+  .restore {
+    grid-column: 3;
+  }
+
+  .foot {
+    gap: 10px;
+    padding: 8px 16px;
+  }
+
+  .foot-text {
+    font-size: 12px;
   }
 }
