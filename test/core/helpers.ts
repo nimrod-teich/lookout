@@ -20,6 +20,16 @@ export function tempConfigDir(): string {
   return dir;
 }
 
+/** A linked worktree at `top` of the repository at `repo`, written the way git writes one. */
+export function linkWorktree(repo: string, top: string, id = path.basename(top)): void {
+  const own = path.join(repo, ".git", "worktrees", id);
+  fs.mkdirSync(own, { recursive: true });
+  fs.writeFileSync(path.join(own, "commondir"), "../..\n");
+  fs.writeFileSync(path.join(own, "HEAD"), `ref: refs/heads/${id}\n`);
+  fs.mkdirSync(top, { recursive: true });
+  fs.writeFileSync(path.join(top, ".git"), `gitdir: ${own}\n`);
+}
+
 export const DOMAIN = "linux:feedfacefeedfacefeedfacefeedface:pid:[4026531836]";
 
 export class FakeProc implements ProcessTable {

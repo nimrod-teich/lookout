@@ -1,9 +1,11 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentProvider, AgentSession } from "../../src/core/agents/agent";
 import { nextAttention, projectOf, sortViews, UNTITLED } from "../../src/core/model";
 import { view } from "../vscode/helpers";
 import { Monitor } from "../../src/core/monitor";
-import { FakeProc } from "./helpers";
+import { FakeProc, linkWorktree, tempConfigDir } from "./helpers";
 
 const HOST = 1000;
 
@@ -28,6 +30,21 @@ describe("projectOf", () => {
   it("reads Windows paths on any platform", () => {
     expect(projectOf("C:\\Users\\dev\\app")).toEqual({ project: "app" });
     expect(projectOf("C:\\Users\\dev\\app\\.claude\\worktrees\\fix-x")).toEqual({ project: "app", worktree: "fix-x" });
+  });
+
+  it("names the repository a worktree belongs to, wherever it lives", () => {
+    const root = tempConfigDir();
+    const repo = path.join(root, "app");
+    fs.mkdirSync(path.join(repo, ".git"), { recursive: true });
+    const beside = path.join(root, "_worktrees", "fix-x");
+    linkWorktree(repo, beside);
+    expect(projectOf(beside)).toEqual({ project: "app", worktree: "fix-x" });
+    // Made by app, though it sits in web's folder.
+    const inside = path.join(root, "web", ".claude", "worktrees", "app-main");
+    fs.mkdirSync(path.join(root, "web", ".git"), { recursive: true });
+    linkWorktree(repo, inside);
+    expect(projectOf(inside)).toEqual({ project: "app", worktree: "app-main" });
+    expect(projectOf(repo)).toEqual({ project: "app" });
   });
 });
 

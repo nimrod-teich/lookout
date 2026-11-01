@@ -1,6 +1,7 @@
 import type { AgentSession, PastSession } from "./agents/agent";
 import { canJump } from "./agents/catalog";
 import { within } from "./folders";
+import { worktreeAt, type WorktreeAt } from "./git";
 import type { Host, PastView, SessionView, State } from "./types";
 import type { OtherWindow } from "./windows";
 
@@ -19,8 +20,32 @@ function baseName(dir: string): string {
   return parts.at(-1) ?? dir;
 }
 
-/** Splits a directory into its project and, inside a Claude Code worktree, the worktree name. */
+const WORKTREE_TTL_MS = 30_000;
+const worktrees = new Map<string, { at: number; tree: WorktreeAt | undefined }>();
+
+/** `worktreeAt`, asked again for a directory only every half minute: views are built on every poll. */
+function cachedWorktreeAt(cwd: string, now = Date.now()): WorktreeAt | undefined {
+  const known = worktrees.get(cwd);
+  if (known && now - known.at < WORKTREE_TTL_MS) return known.tree;
+  const tree = worktreeAt(cwd);
+  worktrees.set(cwd, { at: now, tree });
+  return tree;
+}
+
+/** A repository's name: its main checkout's folder, a bare one's less `.git`. */
+function repoName(main: string): string {
+  return baseName(main).replace(/\.git$/, "") || baseName(main);
+}
+
+/**
+ * Splits a directory into its project and, inside a git worktree, the
+ * worktree name. Git's own files say which repository a worktree belongs to,
+ * wherever it lives; a folder that is gone is read by Claude Code's layout,
+ * `<repo>/.claude/worktrees/<name>`.
+ */
 export function projectOf(cwd: string): { project: string; worktree?: string } {
+  const tree = cachedWorktreeAt(cwd);
+  if (tree) return { project: repoName(tree.main), worktree: baseName(tree.top) };
   const match = WORKTREE.exec(cwd);
   if (match?.[1] && match[2]) return { project: baseName(match[1]), worktree: match[2] };
   return { project: baseName(cwd) };
