@@ -88,9 +88,16 @@ describe("measure", () => {
     fs.writeFileSync(path.join(tree, "twice.bin"), "z".repeat(10_000));
     fs.linkSync(path.join(tree, "twice.bin"), path.join(tree, "sub", "twice.bin"));
     const first = measure([tree]);
-    expect(first.sharedBytes).toBeGreaterThan(0);
+    // What the platform reports for each file, said when this fails there.
+    const seen = JSON.stringify(
+      ["own.txt", "sub/pkg.js", "twice.bin", "sub/twice.bin"].map((file) => {
+        const st = fs.lstatSync(path.join(tree, file));
+        return { file, nlink: st.nlink, ino: st.ino, blocks: st.blocks, size: st.size };
+      }),
+    );
+    expect(first.sharedBytes, seen).toBeGreaterThan(0);
     // own.txt and the pair inside count once each: twice what the shared file takes.
-    expect(first.ownBytes).toBe(2 * first.sharedBytes);
+    expect(first.ownBytes, seen).toBe(2 * first.sharedBytes);
   });
 
   it.skipIf(process.platform === "win32")("does not follow a symbolic link", () => {
