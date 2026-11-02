@@ -5,7 +5,7 @@ import type { Removal, RemoveAsk, RemovedRecord, Survey, SurveyInput, SurveyProg
 export type WorktreeAsk =
   | { id: number; op: "survey"; input: SurveyInput }
   | { id: number; op: "remove"; asks: RemoveAsk[]; input: Omit<SurveyInput, "folders" | "repos"> }
-  | { id: number; op: "restore"; record: RemovedRecord };
+  | { id: number; op: "restore"; record: RemovedRecord; git?: string };
 
 /** What it answers: progress while it works, then one of the results, or the error that stopped it. */
 export interface WorktreeAnswer {
@@ -49,8 +49,8 @@ export class WorktreeWorker {
     return { removals: answer.removals ?? [], freeSpaceGrew: answer.freeSpaceGrew };
   }
 
-  async restore(record: RemovedRecord): Promise<{ ok: boolean; error?: string }> {
-    return (await this.ask({ op: "restore", record })).restored ?? { ok: false, error: "The worktree thread gave no answer" };
+  async restore(record: RemovedRecord, git?: string): Promise<{ ok: boolean; error?: string }> {
+    return (await this.ask({ op: "restore", record, ...(git ? { git } : {}) })).restored ?? { ok: false, error: "The worktree thread gave no answer" };
   }
 
   private ask(ask: Unnumbered<WorktreeAsk>, onProgress?: (progress: SurveyProgress) => void): Promise<WorktreeAnswer> {

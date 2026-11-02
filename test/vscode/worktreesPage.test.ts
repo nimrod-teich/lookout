@@ -51,7 +51,8 @@ async function settled(page: WorktreesPage): Promise<void> {
   await vi.waitFor(() => expect(page.current.busy).toBeUndefined(), { timeout: 20_000 });
 }
 
-describe("WorktreesPage", () => {
+// Each test builds real repositories and runs git many times, which takes a Windows runner seconds; the waits inside allow 20.
+describe("WorktreesPage", { timeout: 30_000 }, () => {
   beforeEach(() => stub.reset());
 
   it("checks the worktrees the first time it opens, in their tiers, and not again on the next", async () => {
@@ -175,6 +176,25 @@ describe("WorktreesPage", () => {
     expect(whereOf({ repo, path: path.join(home, "x") }, home)).toBe("~");
     expect(whereOf({ repo, path: path.resolve(`${sep}tmp${sep}scratch${sep}x`) }, home)).toBe(path.resolve(`${sep}tmp${sep}scratch`));
     expect(whereOf({ repo, path: path.join(home + "2", "x") }, home)).toBe(home + "2");
+  });
+
+  it("says why nothing was checked when git cannot run, and opens VS Code's git.path", async () => {
+    const { page, actions } = setup();
+    const input = actions.input();
+    actions.input = () => ({ ...input, git: path.join(path.dirname(input.folders[0]!), "no-such-git") });
+    page.show();
+    await settled(page);
+    expect(shown()).toMatchObject({ rows: [], repos: [], gitProblem: expect.stringMatching(/^Lookout could not run .*no-such-git/) });
+    const panel = stub.panels.at(-1)!;
+    panel.receive({ type: "settings", about: "git" });
+    expect(actions.openSettings).toHaveBeenLastCalledWith("git");
+    // With git back, the next check clears it.
+    actions.input = () => input;
+    panel.receive({ type: "check" });
+    await settled(page);
+    expect(shown().gitProblem).toBeUndefined();
+    expect(shown().rows.length).toBe(3);
+    page.dispose();
   });
 
   it("reveals only a folder it lists", async () => {

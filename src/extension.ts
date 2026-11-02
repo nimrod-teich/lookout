@@ -8,13 +8,15 @@ import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
 import { RemovedWorktrees } from "./core/removedWorktrees";
 import { WorktreeWorker } from "./core/worktreeWorker";
-import { mainCheckoutOf } from "./core/worktrees";
+import { mainCheckoutOf, pickGit } from "./core/worktrees";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
 import { GROUPINGS, readGroupBy, type GroupBy } from "./core/grouping";
 import { readSort, SORTS, type SessionSort } from "./core/sorting";
 import type { PastView, SessionView } from "./core/types";
 import { groupKey, pickBar } from "./core/usageGroups";
+import type { Choice } from "./core/answers";
+import { Answerer, type AnswerResult } from "./vscode/answer";
 import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
@@ -165,6 +167,28 @@ export function activate(context: vscode.ExtensionContext): void {
     if (unreachable(view)) return openHit("", view.id);
     if (revealed(await jumpToSession(view, terminals, log))) controller.markSeen(view.id);
   };
+  // A card's answer goes to the prompt the session shows now: the sessions are read again first.
+  const answerer = new Answerer({
+    refresh: () => {
+      controller.poll();
+      return controller.sessions;
+    },
+    send: (pid, keys) => terminals.send(pid, keys),
+    log,
+  });
+  const answer = (view: SessionView, call: string, choice: Choice): AnswerResult | undefined => {
+    if (!config.answers) return undefined;
+    const result = answerer.answer(view.id, call, choice);
+    switch (result) {
+      case "moved-on":
+        void vscode.window.showInformationMessage(`"${view.title}" no longer shows that prompt, so Lookout typed nothing.`);
+        break;
+      case "no-terminal":
+        void vscode.window.showWarningMessage(`Lookout could not find the terminal of "${view.title}".`);
+        break;
+    }
+    return result;
+  };
   /** Has one account's usage fetched, the first's without a key, and says what came of it unless new numbers came. */
   const refreshAccount = async (key: string | undefined): Promise<void> => {
     const account = controller.usageAccounts.find((one) => one.key === key)?.account;
@@ -277,11 +301,13 @@ export function activate(context: vscode.ExtensionContext): void {
       const repos = [...new Set([...uses.cwds, ...folders].map(mainCheckoutOf).filter((repo): repo is string => repo !== undefined))];
       // Unless the settings say where repositories live, they live beside the ones sessions ran in.
       const where = config.worktreeFolders.length ? config.worktreeFolders : [...new Set(repos.map((repo) => path.dirname(repo)))];
-      return { folders: where, repos, inUse: uses.inUse, rebuildable: config.worktreeRebuildable };
+      // The git VS Code's own git runs, when git.path names one that exists; else git from the PATH.
+      const git = pickGit(vscode.workspace.getConfiguration("git").get<unknown>("path"));
+      return { folders: where, repos, inUse: uses.inUse, rebuildable: config.worktreeRebuildable, ...(git ? { git } : {}) };
     },
     confirm: async (message, detail, action) => (await vscode.window.showWarningMessage(message, { modal: true, detail }, action)) === action,
     reveal: (folder) => void vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(folder)),
-    openSettings: () => void vscode.commands.executeCommand("workbench.action.openSettings", "lookout.worktrees"),
+    openSettings: (about) => void vscode.commands.executeCommand("workbench.action.openSettings", about === "git" ? "git.path" : "lookout.worktrees"),
   });
   /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
   const openHit = (query: string, id: string, index?: number) => {
@@ -377,6 +403,8 @@ export function activate(context: vscode.ExtensionContext): void {
     markSeen,
     markAllSeen,
     dismiss: (id) => controller.dismiss(id),
+    answer,
+    answers: () => config.answers,
     // The command, so the board's link says what the command says when it cannot fetch; for the account its tab shows.
     refreshUsage: (key) => void vscode.commands.executeCommand(REFRESH_USAGE, key),
     watching: () => controller.watching,

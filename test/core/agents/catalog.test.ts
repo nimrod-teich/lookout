@@ -92,13 +92,15 @@ describe("the agent catalog", () => {
       .filter((line) => !line.startsWith("| ---"))
       .map((line) => line.split("|").slice(1, -1).map((cell) => cell.trim()));
     const [header, ...body] = rows;
-    expect(header).toEqual(["Agent", "Live sessions", "Jump to terminal", "Jump to tab", "Rename", "Resume", "Search", "Usage"]);
+    expect(header).toEqual(["Agent", "Live sessions", "Jump to terminal", "Jump to tab", "Rename", "Resume", "Search", "Usage", "Answer"]);
     const order: (keyof Capabilities)[] = ["jumpTerminal", "jumpPanel", "rename", "resume", "search", "usage"];
     expect(body.length).toBeGreaterThan(0);
     for (const row of body) {
       const agent = AGENTS.find((a) => row[0]!.includes(a.label));
       expect(agent, row[0]).toBeDefined();
-      expect(row.slice(2).map((cell) => cell.startsWith("✓")), agent!.label).toEqual(order.map((name) => agent!.capabilities[name]));
+      expect(row.slice(2, -1).map((cell) => cell.startsWith("✓")), agent!.label).toEqual(order.map((name) => agent!.capabilities[name]));
+      // The cards answer only the agents whose prompt keys the catalog knows.
+      expect(row.at(-1)!.startsWith("✓"), `${agent!.label} answers`).toBe(agent!.answerKeys !== undefined);
     }
   });
 

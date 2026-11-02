@@ -1,11 +1,13 @@
 import * as crypto from "node:crypto";
 import * as vscode from "vscode";
+import type { Choice } from "../core/answers";
 import { countStates } from "../core/format";
 import type { SearchOutcome } from "../core/agents/agent";
 import { isGroupBy, type GroupBy } from "../core/grouping";
 import { isSortKey, type SessionSort } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "../webview/protocol";
+import type { AnswerResult } from "./answer";
 
 export const BOARD_VIEW = "lookout.board";
 
@@ -67,6 +69,10 @@ export interface BoardActions {
   markAllSeen(): void;
   /** Dismisses the question a session's last message asks. */
   dismiss(id: string): void;
+  /** Answers a session's prompt in its terminal and says what came of it; undefined when the cards do not answer. */
+  answer?(view: SessionView, call: string, choice: Choice): AnswerResult | undefined;
+  /** The cards answer prompts. */
+  answers?(): boolean;
   /** A search's results fill in as the conversations are read in the background: they are sent again as they do. */
   follows?(): boolean;
   /** Searches the live and the past sessions' conversations. */
@@ -142,6 +148,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
           watching: this.actions.watching?.(),
           sort: this.actions.sort?.(),
           group: this.actions.group?.(),
+          answers: this.actions.answers?.(),
         };
         void this.view.webview.postMessage(message);
       }
@@ -167,6 +174,19 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         else if (message.type === "rename") void this.actions.rename(view);
         else if (message.type === "dismiss") this.actions.dismiss(view.id);
         else this.actions.markSeen(view.id);
+        return;
+      }
+      case "answer": {
+        // The webview can only answer sessions it was shown, with an answer of the kinds there are.
+        const view = this.actions.sessions().find((s) => s.id === message.id);
+        const { call, choice } = message;
+        const valid = choice === "yes" || choice === "no" || (typeof choice === "number" && Number.isInteger(choice) && choice >= 0);
+        if (!view || typeof call !== "string" || !valid || !this.actions.answers?.()) return;
+        const result = this.actions.answer?.(view, call, choice);
+        if (result === undefined) return;
+        // The card fades its buttons on the click; when no key went, it offers them again.
+        const reply: ToBoard = { type: "answered", call, sent: result === "sent" || result === "already" };
+        void this.view?.webview.postMessage(reply);
         return;
       }
       case "seenAll":

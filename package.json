@@ -537,6 +537,11 @@
             "default": true,
             "markdownDescription": "Count an idle session as needing you when its last message asks you something: it ends with a question mark, or asks for a choice or a yes/no. Lookout reads this from the reply rather than from the agent, so the card marks it as less certain; dismiss it with the card's ✓."
           },
+          "lookout.answers.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Answer a Claude Code session's prompt from its card while the session runs in a terminal of this window: **Yes** or **No** to a permission when the card shows all the call would do (a whole command, address or file to read; not a file to write or edit), or one of a single question's options. Lookout reads the sessions again first and types the answer's key into the terminal only while the session still shows that prompt (Yes is `1`, No is Esc, an option is its number), without bringing the terminal forward."
+          },
           "lookout.parkAfterHours": {
             "type": "number",
             "default": 24,

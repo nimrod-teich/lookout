@@ -27,6 +27,8 @@ export interface Config {
   notifyCooldownMs: number;
   /** An idle session whose last message asks the user something counts as needing them. */
   typedQuestions: boolean;
+  /** The cards answer prompts of sessions in this window's terminals. */
+  answers: boolean;
   /** A session idle or finished this long goes under Parked; 0: never on its own. */
   parkAfterMs: number;
   /** Keep what was said in a conversation after the agent deletes its transcript, under Purged. */
@@ -111,6 +113,7 @@ export function readConfig(): Config {
     notifySound: lookout.get<boolean>("notifications.sound", false),
     notifyCooldownMs: Math.max(0, lookout.get<number>("notifications.cooldownSeconds", 30)) * 1000,
     typedQuestions: lookout.get<boolean>("state.typedQuestions", true),
+    answers: lookout.get<boolean>("answers.enabled", true),
     parkAfterMs: Math.max(0, lookout.get<number>("parkAfterHours", 24)) * 3_600_000,
     historyKeep: lookout.get<boolean>("history.keep", true),
     searchToolOutput: lookout.get<boolean>("search.toolOutput", false),

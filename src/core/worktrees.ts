@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { within } from "./folders";
 
@@ -116,6 +117,76 @@ interface Ran {
   err: string;
 }
 
+/** The git the check, a removal and a restore run: `git` from the PATH unless VS Code's `git.path` names one. */
+let gitBinary = "git";
+
+/** Runs this git from now on; none given means `git` from the PATH. Each entry point (survey, removal, restore) sets it from its input. */
+export function useGit(binary?: string): void {
+  gitBinary = binary || "git";
+}
+
+/**
+ * The git VS Code's `git.path` setting names: a path, or a list of paths of
+ * which the first that exists counts. Undefined when it names none that
+ * exists, and git is looked for on the PATH, as VS Code's own git does then.
+ */
+export function pickGit(setting: unknown, exists: (file: string) => boolean = fs.existsSync): string | undefined {
+  const candidates = typeof setting === "string" ? [setting] : Array.isArray(setting) ? setting.filter((item): item is string => typeof item === "string") : [];
+  return candidates.map((item) => item.trim()).find((item) => item && exists(item));
+}
+
+/** The first git release that removes a worktree (`git worktree remove`). */
+export const MIN_GIT: readonly [number, number] = [2, 17];
+
+/** The version `git --version` prints: "git version 2.45.1", "2.39.3 (Apple Git-145)", "2.47.0.windows.2". */
+export function parseGitVersion(text: string): [number, number, number] | undefined {
+  const m = /git version (\d+)\.(\d+)(?:\.(\d+))?/.exec(text);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)] : undefined;
+}
+
+/** Where a command name is found on the PATH, the way a shell finds it; undefined when it is not. */
+export function onPath(name: string, env: NodeJS.ProcessEnv = process.env, exists: (file: string) => boolean = fs.existsSync): string | undefined {
+  const exts = process.platform === "win32" ? (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").filter(Boolean) : [""];
+  for (const dir of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      const file = path.join(dir, name + ext);
+      if (exists(file)) return file;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Why the worktrees cannot be checked or removed with this git, in a
+ * sentence for the page; undefined when they can. A Mac without the Command
+ * Line Tools has a stand-in `/usr/bin/git` that opens an install dialog when
+ * run, so there it is asked about first, and git is not run.
+ */
+export async function gitProblem(platform: NodeJS.Platform = process.platform, find: (name: string) => string | undefined = (name) => onPath(name)): Promise<string | undefined> {
+  if (platform === "darwin" && gitBinary === "git" && find("git") === "/usr/bin/git") {
+    const tools = await new Promise<number>((resolve) => {
+      try {
+        const child = spawn("xcode-select", ["-p"], { stdio: "ignore" });
+        child.on("error", () => resolve(-1));
+        child.on("close", (code) => resolve(code ?? -1));
+      } catch {
+        resolve(-1);
+      }
+    });
+    if (tools !== 0) return "This Mac's git is Apple's stand-in until the Command Line Tools are installed: run xcode-select --install, or install git another way, then check again.";
+  }
+  const ran = await git(os.tmpdir(), ["--version"], 15_000);
+  const named = gitBinary === "git" ? "git" : gitBinary;
+  if (ran.code === -1) return `Lookout could not run ${named} (${firstLine(ran.err.replace(/^Error:\s*/, "")) ?? "it did not start"}). Install git, or point VS Code's git.path setting at it, then check again.`;
+  const version = parseGitVersion(ran.out);
+  if (!version) return `${named} did not say which version it is, so Lookout leaves the worktrees alone.`;
+  const [major, minor] = version;
+  if (major < MIN_GIT[0] || (major === MIN_GIT[0] && minor < MIN_GIT[1])) {
+    return `git ${version.join(".")} is older than ${MIN_GIT.join(".")}, the first that removes a worktree. Update git to clean up worktrees here, then check again.`;
+  }
+  return undefined;
+}
+
 /** Runs git in `cwd`; never rejects: a git that is missing or fails answers with a code. */
 export function git(cwd: string, args: readonly string[], timeoutMs = 60_000): Promise<Ran> {
   return new Promise((resolve) => {
@@ -123,7 +194,7 @@ export function git(cwd: string, args: readonly string[], timeoutMs = 60_000): P
     let err = "";
     let child;
     try {
-      child = spawn("git", ["-C", cwd, "-c", "core.quotePath=false", ...args], { env: GIT_ENV, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn(gitBinary, ["-C", cwd, "-c", "core.quotePath=false", ...args], { env: GIT_ENV, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     } catch (error) {
       resolve({ code: -1, out: "", err: String(error) });
       return;
@@ -154,8 +225,8 @@ function patchIds(cwd: string, args: readonly string[]): Promise<Map<string, str
     let producer;
     let consumer;
     try {
-      producer = spawn("git", ["-C", cwd, ...args], { env: GIT_ENV, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-      consumer = spawn("git", ["-C", cwd, "patch-id", "--stable"], { env: GIT_ENV, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+      producer = spawn(gitBinary, ["-C", cwd, ...args], { env: GIT_ENV, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+      consumer = spawn(gitBinary, ["-C", cwd, "patch-id", "--stable"], { env: GIT_ENV, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
     } catch {
       producer?.kill();
       resolve(ids);
@@ -211,7 +282,29 @@ export function real(dir: string): string {
 /** The repository's linked worktrees; none when git cannot list them. */
 export async function listWorktrees(repo: string): Promise<GitWorktree[]> {
   const ran = await git(repo, ["worktree", "list", "--porcelain"]);
-  return ran.code === 0 ? parseWorktreeList(ran.out).map((item) => ({ ...item, path: real(item.path) })) : [];
+  if (ran.code !== 0) return [];
+  return parseWorktreeList(ran.out).map((item) => {
+    const listed = { ...item, path: real(item.path) };
+    // Git says a worktree is locked in this list from 2.31 on; before, only its own file says so.
+    if (listed.locked !== undefined) return listed;
+    const locked = lockedFromFile(listed.path);
+    return locked === undefined ? listed : { ...listed, locked };
+  });
+}
+
+/**
+ * The reason a worktree is locked, from git's own file (`locked` in the
+ * worktree's git directory, which its `.git` file names): "" when it is
+ * locked with no reason, undefined when it is not locked or cannot be read.
+ */
+export function lockedFromFile(top: string): string | undefined {
+  try {
+    const gitDir = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(path.join(top, ".git"), "utf8"))?.[1]?.trim();
+    if (!gitDir) return undefined;
+    return fs.readFileSync(path.join(path.resolve(top, gitDir), "locked"), "utf8").trim();
+  } catch {
+    return undefined;
+  }
 }
 
 /** The branch the repository's work lands on: the remote's default, else `main` or `master`, remote first. */
@@ -539,6 +632,8 @@ export interface SurveyInput {
   rebuildable: readonly string[];
   /** Git work in a worktree this recently holds it for review; 24 hours when not given. */
   quietMs?: number;
+  /** The git to run, from VS Code's `git.path`; `git` from the PATH when not given. */
+  git?: string;
 }
 
 export interface Survey {
@@ -546,6 +641,8 @@ export interface Survey {
   worktrees: WorktreeCheck[];
   /** Epoch ms the check finished. */
   at: number;
+  /** Why nothing could be checked with this git: missing, Apple's stand-in, or too old. */
+  gitProblem?: string;
 }
 
 export interface SurveyProgress {
@@ -581,6 +678,9 @@ async function inTurn<T, R>(items: readonly T[], width: number, work: (item: T) 
 
 /** Every linked worktree of the repositories found, each with how it stands and what it takes on disk. */
 export async function survey(input: SurveyInput, onProgress?: (progress: SurveyProgress) => void): Promise<Survey> {
+  useGit(input.git);
+  const problem = await gitProblem();
+  if (problem) return { repos: [], worktrees: [], at: Date.now(), gitProblem: problem };
   const repos = [...new Set([...findRepos(input.folders), ...input.repos.map(real)])].sort();
   const inUse = input.inUse.map((use) => ({ ...use, dir: real(use.dir) }));
   const lists = await inTurn(repos, 4, async (repo) => ({ info: { repo, defaultRef: await defaultBranch(repo), fetchedAt: fetchedAt(repo) }, items: await listWorktrees(repo) }));
@@ -693,6 +793,9 @@ const REMOVAL_LANES = 4;
  * order asked.
  */
 export async function removeWorktrees(asks: readonly RemoveAsk[], input: Omit<SurveyInput, "folders" | "repos">, onProgress?: (progress: SurveyProgress) => void): Promise<Removal[]> {
+  useGit(input.git);
+  const problem = await gitProblem();
+  if (problem) return asks.map((ask) => ({ repo: ask.repo, path: ask.path, ok: false, freedBytes: 0, error: problem }));
   const shared = new RemovalShared();
   const byRepo = new Map<string, number[]>();
   asks.forEach((ask, i) => byRepo.set(ask.repo, [...(byRepo.get(ask.repo) ?? []), i]));
@@ -767,8 +870,11 @@ export interface RemovedRecord {
  * return, its ignored ones (dependencies, build output) do not. Refused when
  * something is in its place, or the commit is gone from the repository.
  */
-export async function restoreWorktree(record: RemovedRecord): Promise<{ ok: boolean; error?: string }> {
+export async function restoreWorktree(record: RemovedRecord, binary?: string): Promise<{ ok: boolean; error?: string }> {
   if (fs.existsSync(record.path)) return { ok: false, error: "something is in its place" };
+  useGit(binary);
+  const problem = await gitProblem();
+  if (problem) return { ok: false, error: problem };
   const hasBranch = record.branch ? (await git(record.repo, ["rev-parse", "-q", "--verify", `refs/heads/${record.branch}`])).code === 0 : false;
   if (!hasBranch && !record.head) return { ok: false, error: "its commit is not known" };
   if (!hasBranch && (await git(record.repo, ["cat-file", "-e", `${record.head}^{commit}`])).code !== 0) return { ok: false, error: "its commit is gone from the repository" };

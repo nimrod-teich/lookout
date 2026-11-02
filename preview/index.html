@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked; &sort=name|project|recent|custom orders the groups; &group=project|branch|model|agent|window makes the sections; &tools=1 adds a tool match to the search's answers. -->
+<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked; &sort=name|project|recent|custom orders the groups; &group=project|branch|model|agent|window makes the sections; &tools=1 adds a tool match to the search's answers; &answers=0 as with lookout.answers.enabled off; &typed=0 has a card's answer come back untyped. -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -69,6 +69,8 @@
       console.log("to extension:", JSON.stringify(m));
       if (m.type === "search") setTimeout(() => window.postMessage({ type: "search", query: m.query, results: fakeSearch(m.query, fixtureSessions), pending: 0 }, "*"), 100);
       if (m.type === "earlierScope") post(m.scope);
+      // &typed=0: the extension typed nothing, as when the terminal is gone, and the card offers its answers again.
+      if (m.type === "answer") setTimeout(() => window.postMessage({ type: "answered", call: m.call, sent: params.get("typed") !== "0" }, "*"), 400);
       if (m.type === "order") {
         sort = { by: "custom", order: m.ids };
         post(earlierScope);
@@ -171,7 +173,7 @@
       const favourites = { ids: favouriteIds, past: mark((fixture.past ?? []).filter((p) => favouriteIds.includes(p.id) && !past.includes(p))) };
       // &bar=claude-code:personal: the group the status bar shows, which the extension names; the tab shown follows it.
       const usageBar = params.get("bar") ?? undefined;
-      window.postMessage({ type: "sessions", sessions: mark(fixture.sessions), past: mark(past), now, usage, usageBar, markers, earlier: { ...earlier }, favourites, archive: mark(archive), purged: mark(purged), sort, group: groupBy }, "*");
+      window.postMessage({ type: "sessions", sessions: mark(fixture.sessions), past: mark(past), now, usage, usageBar, markers, earlier: { ...earlier }, favourites, archive: mark(archive), purged: mark(purged), sort, group: groupBy, answers: params.get("answers") !== "0" }, "*");
     };
     post(earlier.scope);
     const q = params.get("q");

@@ -37,12 +37,12 @@ describe("why a recorded session waits", () => {
   it("names the tool and its whole command for a permission prompt", () => {
     const session = pollOne(recorded("permission", "permission").provider);
     expect(session.status).toBe("waiting");
-    expect(session.reason).toEqual({ kind: "permission", ask: "Bash: ls -la /tmp", raw: "permission prompt" });
+    expect(session.reason).toEqual({ kind: "permission", ask: "Bash: ls -la /tmp", raw: "permission prompt", call: "toolu_01PFM91fpEuH9PGVq8vXRwBj", answer: "yesno" });
   });
 
   it("quotes the question and its answers while AskUserQuestion is open", () => {
     const session = pollOne(recorded("question", "question").provider);
-    expect(session.reason).toEqual({ kind: "question", ask: "Which color do you prefer?", options: ["Red", "Blue"], raw: "input needed" });
+    expect(session.reason).toEqual({ kind: "question", ask: "Which color do you prefer?", options: ["Red", "Blue"], raw: "input needed", call: "toolu_01AerPTm6BqVUvGyqAjGfvuF", answer: "options" });
   });
 
   it("names the plan to approve, from the plan in the tool call", () => {
@@ -146,6 +146,93 @@ describe("reasonOf", () => {
     const ask = reasonOf({ waitingFor: "permission prompt" }, state).ask;
     expect(ask).toHaveLength(160);
     expect(ask.endsWith("…")).toBe(true);
+  });
+});
+
+describe("what the card can answer", () => {
+  const ts = "2026-10-16T10:00:00.000Z";
+  const call = (id: string, name: string, input: unknown) => JSON.stringify({ type: "assistant", cwd: "/work/app", timestamp: ts, message: { id: `m-${id}`, content: [{ type: "tool_use", id, name, input }] } });
+  const result = (id: string) => JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+  const question = (q: string, labels: string[], multiSelect = false) => ({ question: q, header: "Q", multiSelect, options: labels.map((label) => ({ label, description: "" })) });
+  const waitingOn = (...calls: [string, string, unknown][]) => {
+    const state = emptyTranscript();
+    for (const [id, name, input] of calls) applyLine(state, call(id, name, input));
+    return state;
+  };
+
+  it("answers yes or no to the one call a permission prompt is about, when the card shows all of it", () => {
+    expect(reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", "Bash", { command: "npm test", description: "Run the tests" }]))).toEqual({
+      kind: "permission",
+      ask: "Bash: npm test",
+      raw: "permission prompt",
+      call: "t1",
+      answer: "yesno",
+    });
+    const yes = (name: string, input: unknown) => reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", name, input])).answer;
+    expect(yes("Bash", { command: "npm test", timeout: 60000, run_in_background: false, dangerouslyDisableSandbox: false })).toBe("yesno");
+    expect(yes("Read", { file_path: "/etc/hosts", offset: 1, limit: 20 })).toBe("yesno");
+    expect(yes("WebFetch", { url: "https://example.com/a", prompt: "Summarise it" })).toBe("yesno");
+    expect(yes("mcp__playwright__browser_navigate", { url: "https://example.com" })).toBe("yesno");
+  });
+
+  it("leaves a permission to its terminal when the input holds more than the card shows", () => {
+    const yes = (name: string, input: unknown) => reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", name, input])).answer;
+    // The terminal shows the file's new content or the edit; the card only names the file.
+    expect(yes("Write", { file_path: "/work/app/out.txt", content: "hello" })).toBeUndefined();
+    expect(yes("Edit", { file_path: "/work/app/out.txt", old_string: "a", new_string: "b" })).toBeUndefined();
+    expect(yes("NotebookEdit", { notebook_path: "/work/app/n.ipynb", new_source: "x = 1" })).toBeUndefined();
+    // Outside the sandbox: more than the command is asked.
+    expect(yes("Bash", { command: "curl https://example.com", dangerouslyDisableSandbox: true })).toBeUndefined();
+    // Where a search looks, or an MCP tool's other arguments.
+    expect(yes("Grep", { pattern: "TODO", path: "/etc" })).toBeUndefined();
+    expect(yes("mcp__db__run", { query: "DELETE FROM users", database: "prod" })).toBeUndefined();
+  });
+
+  it("leaves a permission to its terminal when the card cannot show what it allows", () => {
+    // Clipped: the card shows 160 characters of a longer command.
+    const long = reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", "Bash", { command: `echo ${"x".repeat(300)}` }]));
+    expect(long.answer).toBeUndefined();
+    // Only a summary: the call's input is more than the card says.
+    const summary = reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", "mcp__atlassian__createJiraIssue", { projectKey: "MAG", summary: "Fix the cache" }]));
+    expect(summary).toMatchObject({ ask: "createJiraIssue (atlassian): Fix the cache" });
+    expect(summary.answer).toBeUndefined();
+    // Nothing but the tool's name.
+    expect(reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", "TodoWrite", { todos: [] }])).answer).toBeUndefined();
+  });
+
+  it("leaves it to the terminal while more than one call is open: the prompt could be about either", () => {
+    const state = waitingOn(["t1", "Bash", { command: "sleep 60" }], ["t2", "Bash", { command: "npm test" }]);
+    const reason = reasonOf({ waitingFor: "permission prompt" }, state);
+    expect(reason.ask).toBe("Bash: sleep 60");
+    expect(reason.answer).toBeUndefined();
+    applyLine(state, result("t1"));
+    expect(reasonOf({ waitingFor: "permission prompt" }, state)).toMatchObject({ ask: "Bash: npm test", call: "t2", answer: "yesno" });
+  });
+
+  it("does not answer a subagent's prompt, a plan, network access, a dialog, or a prompt not read yet", () => {
+    const agent = waitingOn(["t1", "Agent", { description: "Audit the cache layer", prompt: "…" }]);
+    expect(reasonOf({ waitingFor: "permission prompt" }, agent, { subagentTool: () => ({ id: "s1", name: "Bash", ask: "npm run audit", whole: true }) }).answer).toBeUndefined();
+    expect(reasonOf({ waitingFor: "permission prompt" }, agent, { subagentTool: () => undefined }).answer).toBeUndefined();
+    expect(reasonOf({ waitingFor: "permission prompt" }, waitingOn(["p1", "ExitPlanMode", { plan: "# Add a cache" }])).answer).toBeUndefined();
+    expect(reasonOf({ waitingFor: "permission prompt" }, waitingOn(["p1", "EnterPlanMode", {}])).answer).toBeUndefined();
+    const curl = waitingOn(["t1", "Bash", { command: "curl https://example.com" }]);
+    expect(reasonOf({ waitingFor: "sandbox request" }, curl).answer).toBeUndefined();
+    expect(reasonOf({ waitingFor: "permission prompt", needs: "choose: allow or deny the computer-use action" }, curl).answer).toBeUndefined();
+    expect(reasonOf({ waitingFor: "dialog open" }, curl).answer).toBeUndefined();
+    expect(reasonOf({ waitingFor: "permission prompt" }, emptyTranscript()).answer).toBeUndefined();
+  });
+
+  it("picks an option of a single question, and leaves several questions or several answers to the terminal", () => {
+    const one = reasonOf({ waitingFor: "input needed" }, waitingOn(["q1", "AskUserQuestion", { questions: [question("Which colour?", ["Red", "Blue", "Green"])] }]));
+    expect(one).toEqual({ kind: "question", ask: "Which colour?", options: ["Red", "Blue", "Green"], raw: "input needed", call: "q1", answer: "options" });
+    // A number moves on to the next question; with several answers it ticks one.
+    const two = reasonOf({ waitingFor: "input needed" }, waitingOn(["q1", "AskUserQuestion", { questions: [question("Which colour?", ["Red", "Blue"]), question("Which size?", ["S", "L"])] }]));
+    expect(two).toMatchObject({ ask: "Which colour? (+1 more)", options: ["Red", "Blue"] });
+    expect(two.answer).toBeUndefined();
+    const many = reasonOf({ waitingFor: "input needed" }, waitingOn(["q1", "AskUserQuestion", { questions: [question("Which checks?", ["Lint", "Test"], true)] }]));
+    expect(many.answer).toBeUndefined();
+    const none = reasonOf({ waitingFor: "input needed" }, waitingOn(["q1", "AskUserQuestion", { questions: [question("Anything else?", [])] }]));
+    expect(none.answer).toBeUndefined();
   });
 });
 

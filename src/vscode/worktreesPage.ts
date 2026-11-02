@@ -13,7 +13,7 @@ export const WORKTREES_VIEW_TYPE = "lookout.worktrees";
 export interface WorktreeRunner {
   survey(input: SurveyInput, onProgress?: (progress: SurveyProgress) => void): Promise<Survey>;
   remove(asks: RemoveAsk[], input: Omit<SurveyInput, "folders" | "repos">, onProgress?: (progress: SurveyProgress) => void): Promise<{ removals: Removal[]; freeSpaceGrew?: number }>;
-  restore(record: RemovedRecord): Promise<{ ok: boolean; error?: string }>;
+  restore(record: RemovedRecord, git?: string): Promise<{ ok: boolean; error?: string }>;
   /** Stops the check under way: what it was asked rejects, and the next ask starts afresh. */
   stop(): void;
 }
@@ -25,8 +25,8 @@ export interface WorktreesPageActions {
   confirm(message: string, detail: string, action: string): Promise<boolean>;
   /** Shows a folder in the system's file manager. */
   reveal(folder: string): void;
-  /** Opens the worktree settings. */
-  openSettings(): void;
+  /** Opens the worktree settings, or with "git" VS Code's git.path. */
+  openSettings(about?: "git"): void;
 }
 
 /** Progress is sent to the page at most this often. */
@@ -114,12 +114,12 @@ export class WorktreesPage implements vscode.Disposable {
   async check(): Promise<void> {
     if (this.state.busy) return;
     this.stopped = false;
-    this.set({ busy: "check", progress: undefined, summary: undefined, error: undefined, notice: undefined });
+    this.set({ busy: "check", progress: undefined, summary: undefined, error: undefined, notice: undefined, gitProblem: undefined });
     try {
       const survey = await this.runner.survey(this.actions.input(), (progress) => this.progress(progress));
       const rows = survey.worktrees.map(rowOf).sort((a, b) => b.ownBytes - a.ownBytes || a.path.localeCompare(b.path));
       const repos = survey.repos.map((info) => ({ repo: info.repo, name: path.basename(info.repo), defaultRef: info.defaultRef, fetchedAt: info.fetchedAt }));
-      this.set({ busy: undefined, progress: undefined, checkedAt: survey.at, rows, repos });
+      this.set({ busy: undefined, progress: undefined, checkedAt: survey.at, rows, repos, gitProblem: survey.gitProblem });
     } catch (error) {
       if (this.stopped) this.set({ busy: undefined, progress: undefined, notice: this.state.checkedAt === undefined ? "The check was stopped." : "The check was stopped; the rows are from the one before." });
       else this.set({ busy: undefined, progress: undefined, error: `The check stopped: ${error instanceof Error ? error.message : String(error)}` });
@@ -163,7 +163,7 @@ export class WorktreesPage implements vscode.Disposable {
     const input = this.actions.input();
     const asks: RemoveAsk[] = rows.map((row) => ({ repo: row.repo, path: row.path, shownAs: row.tier, bytes: row.ownBytes }));
     try {
-      const done = await this.runner.remove(asks, { inUse: input.inUse, rebuildable: input.rebuildable, quietMs: input.quietMs }, (progress) => this.progress(progress));
+      const done = await this.runner.remove(asks, { inUse: input.inUse, rebuildable: input.rebuildable, quietMs: input.quietMs, ...(input.git ? { git: input.git } : {}) }, (progress) => this.progress(progress));
       const now = Date.now();
       const ok = done.removals.filter((removal) => removal.ok);
       this.removed.add(ok.filter((removal) => !removal.record).map((removal) => ({ repo: removal.repo, path: removal.path, branch: removal.branch, head: removal.head, branchDeleted: removal.branchDeleted, removedAt: now })));
@@ -196,7 +196,7 @@ export class WorktreesPage implements vscode.Disposable {
     if (!record) return;
     this.set({ busy: "restore", error: undefined, notice: undefined });
     try {
-      const restored = await this.runner.restore(record);
+      const restored = await this.runner.restore(record, this.actions.input().git);
       if (restored.ok) {
         this.removed.drop(folder);
         const on = record.branch ? ` on ${record.branch}` : "";
@@ -270,7 +270,7 @@ export class WorktreesPage implements vscode.Disposable {
         if (typeof message.path === "string" && this.state.rows.some((row) => row.path === message.path)) this.actions.reveal(message.path);
         return;
       case "settings":
-        this.actions.openSettings();
+        this.actions.openSettings(message.about === "git" ? "git" : undefined);
         return;
       default:
         return;

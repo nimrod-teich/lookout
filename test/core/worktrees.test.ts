@@ -1,21 +1,27 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   checkWorktree,
   findRepos,
   gitEnv,
+  gitProblem,
   isRebuildable,
   listWorktrees,
+  lockedFromFile,
   MainPatchIds,
   measure,
+  onPath,
+  parseGitVersion,
   parseWorktreeList,
+  pickGit,
   REBUILDABLE,
   RemovalShared,
   removeWorktree,
   removeWorktrees,
   restoreWorktree,
   survey,
+  useGit,
   type CheckContext,
   type InUse,
   type SurveyProgress,
@@ -325,5 +331,96 @@ describe("removeWorktrees", () => {
     expect(defaultRef).toBe("origin/main");
     expect(mainIds).toBeInstanceOf(MainPatchIds);
     expect(await removeWorktrees([], { inUse: [], rebuildable: REBUILDABLE, quietMs: 0 })).toEqual([]);
+  });
+});
+
+describe("which git, and whether it will do", () => {
+  // Each entry point sets the git it runs; a test that changes it puts the PATH's back.
+  afterEach(() => useGit());
+
+  it("reads the version git prints, wherever it was built", () => {
+    expect(parseGitVersion("git version 2.45.1\n")).toEqual([2, 45, 1]);
+    expect(parseGitVersion("git version 2.39.3 (Apple Git-145)")).toEqual([2, 39, 3]);
+    expect(parseGitVersion("git version 2.47.0.windows.2")).toEqual([2, 47, 0]);
+    expect(parseGitVersion("git version 2.7")).toEqual([2, 7, 0]);
+    expect(parseGitVersion("command not found")).toBeUndefined();
+  });
+
+  it("takes VS Code's git.path when it names a git that exists: a path, or the first of a list", () => {
+    const exists = (file: string) => file === "/opt/git/bin/git" || file === "C:\\Git\\bin\\git.exe";
+    expect(pickGit("/opt/git/bin/git", exists)).toBe("/opt/git/bin/git");
+    expect(pickGit(" /opt/git/bin/git ", exists)).toBe("/opt/git/bin/git");
+    expect(pickGit(["/missing/git", 7, "C:\\Git\\bin\\git.exe", "/opt/git/bin/git"], exists)).toBe("C:\\Git\\bin\\git.exe");
+    expect(pickGit("/missing/git", exists)).toBeUndefined();
+    expect(pickGit(["", "/missing/git"], exists)).toBeUndefined();
+    for (const empty of [null, undefined, "", 3, {}]) expect(pickGit(empty, exists)).toBeUndefined();
+  });
+
+  it("finds a command on the PATH the way a shell does", () => {
+    const dirs = [path.resolve("/a"), path.resolve("/b")];
+    const env = { PATH: dirs.join(path.delimiter), PATHEXT: ".EXE;.CMD" };
+    const want = path.join(dirs[1]!, process.platform === "win32" ? "git.EXE" : "git");
+    expect(onPath("git", env, (file) => file === want)).toBe(want);
+    expect(onPath("git", env, () => false)).toBeUndefined();
+    expect(onPath("git", {}, () => true)).toBeUndefined();
+  });
+
+  it("says nothing of a git that will do", async () => {
+    expect(await gitProblem()).toBeUndefined();
+  });
+
+  it("says when git cannot run, and the check, a removal and a restore stop there", async () => {
+    const missing = path.join(tempConfigDir(), "no-such-git");
+    useGit(missing);
+    expect(await gitProblem()).toMatch(new RegExp(`^Lookout could not run ${missing.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")} \\(spawn .*ENOENT\\)\\. Install git, or point VS Code's git\\.path setting at it, then check again\\.$`));
+    const { root, repo, tree } = gitFixture();
+    const top = tree("one");
+    gitIn(repo, "worktree", "add", "-q", "--detach", top, "origin/main");
+    const checked = await survey({ folders: [root], repos: [], inUse: [], rebuildable: REBUILDABLE, quietMs: 0, git: missing });
+    expect(checked).toMatchObject({ repos: [], worktrees: [], gitProblem: expect.stringMatching(/^Lookout could not run/) });
+    const removals = await removeWorktrees([{ repo, path: top, shownAs: "safe" }], { inUse: [], rebuildable: REBUILDABLE, quietMs: 0, git: missing });
+    expect(removals).toMatchObject([{ path: top, ok: false, error: expect.stringMatching(/^Lookout could not run/) }]);
+    expect(fs.existsSync(top)).toBe(true);
+    const elsewhere = path.join(root, "put-back");
+    expect(await restoreWorktree({ repo, path: elsewhere, head: gitIn(repo, "rev-parse", "HEAD"), removedAt: 0 }, missing)).toMatchObject({ ok: false, error: expect.stringMatching(/^Lookout could not run/) });
+    expect(fs.existsSync(elsewhere)).toBe(false);
+    // The next check with the PATH's git finds the worktree again.
+    expect((await survey({ folders: [root], repos: [], inUse: [], rebuildable: REBUILDABLE, quietMs: 0 })).worktrees.map((check) => check.path)).toEqual([top]);
+  });
+
+  it.skipIf(process.platform === "win32")("says when git is older than the first that removes a worktree", async () => {
+    const old = path.join(tempConfigDir(), "git");
+    fs.writeFileSync(old, "#!/bin/sh\necho 'git version 2.7.4'\n", { mode: 0o755 });
+    useGit(old);
+    expect(await gitProblem()).toBe("git 2.7.4 is older than 2.17, the first that removes a worktree. Update git to clean up worktrees here, then check again.");
+    fs.writeFileSync(old, "#!/bin/sh\necho 'git version 2.17.0'\n", { mode: 0o755 });
+    expect(await gitProblem()).toBeUndefined();
+    fs.writeFileSync(old, "#!/bin/sh\necho 'hello'\n", { mode: 0o755 });
+    expect(await gitProblem()).toBe(`${old} did not say which version it is, so Lookout leaves the worktrees alone.`);
+  });
+
+  it("asks a Mac whether its git is Apple's stand-in before running it", async () => {
+    // Elsewhere than a Mac, xcode-select is not there, which is how a Mac without the Command Line Tools answers too.
+    if (process.platform !== "darwin") {
+      expect(await gitProblem("darwin", () => "/usr/bin/git")).toBe("This Mac's git is Apple's stand-in until the Command Line Tools are installed: run xcode-select --install, or install git another way, then check again.");
+    }
+    // A git from elsewhere on the PATH, or one git.path names, is not the stand-in.
+    expect(await gitProblem("darwin", () => "/opt/homebrew/bin/git")).toBeUndefined();
+    expect(await gitProblem("linux", () => "/usr/bin/git")).toBeUndefined();
+  });
+
+  it("reads a lock from git's own file, which older git leaves out of its list", () => {
+    const { repo, tree } = gitFixture();
+    const reasoned = tree("reasoned");
+    const bare = tree("bare");
+    const open = tree("open");
+    for (const dir of [reasoned, bare, open]) gitIn(repo, "worktree", "add", "-q", "--detach", dir, "origin/main");
+    gitIn(repo, "worktree", "lock", "--reason", "a long rehearsal", reasoned);
+    gitIn(repo, "worktree", "lock", bare);
+    expect(lockedFromFile(reasoned)).toBe("a long rehearsal");
+    expect(lockedFromFile(bare)).toBe("");
+    expect(lockedFromFile(open)).toBeUndefined();
+    expect(lockedFromFile(path.join(repo, "nowhere"))).toBeUndefined();
+    expect(lockedFromFile(repo)).toBeUndefined();
   });
 });
