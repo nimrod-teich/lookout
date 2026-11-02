@@ -97,13 +97,13 @@ describe("StatusBar", () => {
     expect(lastSet("backgroundColor")).toBeUndefined();
   });
 
-  it("shows another limit nearly used up in place of the 5-hour one, on red", () => {
+  it("keeps the 5-hour window when a model's own week is nearly used up, and lists the week in the hover", () => {
     const fable = usage({ meters: [{ key: "session", label: "Session (5hr)", percent: 15, resetsAt: 2 * 3_600_000 }, { key: "weekly_scoped:Fable", label: "Weekly Fable", percent: 97, resetsAt: 3 * 86_400_000 }] });
     bar.render(input({ usage: fable, showReset: true }), 0);
-    expect(lastSet("text")).toBe(`${L} ▰▰▰▰▰▰▰▰▰▰ 97% · 3d`);
-    expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.errorBackground" });
-    expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: usage Weekly Fable 97%" });
-    expect((lastSet("tooltip") as { value: string }).value).toContain("Session \\(5hr\\): 15%");
+    expect(lastSet("text")).toBe(`${L} ▰▰▱▱▱▱▱▱▱▱ 15% · 2h00m`);
+    expect(lastSet("backgroundColor")).toBeUndefined();
+    expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: usage Session (5hr) 15%" });
+    expect((lastSet("tooltip") as { value: string }).value).toContain("Weekly Fable: 97%");
   });
 
   it("colours the bar by the 5-hour usage alone and leaves the week to the hover", () => {

@@ -21,10 +21,11 @@ describe("barMeter", () => {
     expect(barMeter([meter("weekly_all", 41, 168 * HOUR), meter("weekly_scoped:Fable", 51, 168 * HOUR)])?.key).toBe("weekly_all");
   });
 
-  it("takes a limit nearly used up over the session window: the fullest from 95%", () => {
-    expect(barMeter([meter("session", 15, 5 * HOUR), meter("weekly_scoped:Fable", 94, 168 * HOUR)])?.key).toBe("session");
-    expect(barMeter([meter("session", 15, 5 * HOUR), meter("weekly_scoped:Fable", 95, 168 * HOUR)])?.key).toBe("weekly_scoped:Fable");
-    expect(barMeter([meter("session", 96, 5 * HOUR), meter("weekly_all", 99, 168 * HOUR)])?.key).toBe("weekly_all");
+  it("keeps the session window, or the all-models week, however full a model's own week is", () => {
+    expect(barMeter([meter("session", 15, 5 * HOUR), meter("weekly_all", 64, 168 * HOUR), meter("weekly_scoped:Fable", 97, 168 * HOUR)])?.key).toBe("session");
+    expect(barMeter([meter("session", 96, 5 * HOUR), meter("weekly_all", 99, 168 * HOUR)])?.key).toBe("session");
+    // No 5-hour window: the all-models week, wherever it comes in the list.
+    expect(barMeter([meter("weekly_scoped:Fable", 97, 168 * HOUR), meter("weekly_all", 41, 168 * HOUR)])?.key).toBe("weekly_all");
     expect(barMeter([])).toBeUndefined();
   });
 });
@@ -81,6 +82,8 @@ describe("tabMeters", () => {
     expect(tabMeters([meter("session", 90), meter("weekly", 40)])).toEqual({ shown: expect.objectContaining({ key: "session" }), closest: undefined });
     expect(tabMeters([meter("session", 40), meter("weekly", 40)]).closest).toBeUndefined();
     expect(tabMeters([])).toEqual({ shown: undefined, closest: undefined });
+    // A model's own week nearly used up: the tab keeps the session window and its hover names the week.
+    expect(tabMeters([meter("session", 15, 5 * HOUR), meter("weekly_all", 64, 168 * HOUR), meter("weekly_scoped:Fable", 97, 168 * HOUR)])).toMatchObject({ shown: { key: "session", percent: 15 }, closest: { key: "weekly_scoped:Fable" } });
   });
 });
 

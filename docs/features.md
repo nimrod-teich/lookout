@@ -5,7 +5,7 @@ Every part of Lookout, in full: the board and its cards, favourites, the Earlier
 <table>
   <tr>
     <td><b>Board</b></td>
-    <td>The Lookout view in the activity bar. At the top, the harbour: a night scene where every session is a boat on the water. Its lane says its state, its distance from the lighthouse how long it has been there; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with the usage the status bar shows, your 5-hour usage unless a limit is nearly used up or the account has no 5-hour window, named at the waterline (<code>5h 18%</code>, <code>week 41%</code>, <code>Fable 97%</code>). Hover a boat for the session's details; its card lights up below.</td>
+    <td>The Lookout view in the activity bar. At the top, the harbour: a night scene where every session is a boat on the water. Its lane says its state, its distance from the lighthouse how long it has been there; the beam lights the boats it passes and swings to a boat before a jump, and the tide rises with the usage the status bar shows, your 5-hour usage, or your week on an account without a 5-hour window, named at the waterline (<code>5h 18%</code>, <code>week 41%</code>). Hover a boat for the session's details; its card lights up below.</td>
   </tr>
   <tr>
     <td><b>Cards</b></td>
@@ -73,7 +73,7 @@ Every part of Lookout, in full: the board and its cards, favourites, the Earlier
   </tr>
   <tr>
     <td><b>Status bar</b></td>
-    <td>One status bar item, the lighthouse, shows your usage and nothing else: the 5-hour window as a ten-cell bar coloured by consumption (the weekly limit on an account without a 5-hour one), with the time to its reset, its background red when a limit is nearly used up: from 95% that limit takes the bar, whatever its window, since it is the one that stops the agent (<code>97% · 3d</code> for a week). With no usage reported it is the lighthouse alone. Hover for every agent's limits; click it to open the board.</td>
+    <td>One status bar item, the lighthouse, shows your usage and nothing else: the 5-hour window as a ten-cell bar coloured by consumption (the weekly limit on an account without a 5-hour one), with the time to its reset, its background red when that window is nearly used up (95%). A model's own weekly limit, such as Fable's, never takes the bar, however full; it shows in the hover, and its alert says when it reaches 90%. With no usage reported it is the lighthouse alone. Hover for every agent's limits; click it to open the board.</td>
   </tr>
   <tr>
     <td><b>Jump</b></td>
