@@ -5,10 +5,10 @@ Every `lookout.*` setting, with its default. The settings come in two sections, 
 | Setting | Default | Description |
 | --- | --- | --- |
 | `lookout.statusBar.enabled` | `true` | Show Lookout's item in the status bar: the usage, and a click to open the board. |
-| `lookout.statusBar.showUsage` | `true` | Show the 5-hour usage as a coloured bar in the status bar item; the hover lists every limit. |
+| `lookout.statusBar.showUsage` | `true` | Show the 5-hour usage as a coloured bar in the status bar item, the weekly usage on an account without a 5-hour limit (a verified Ultra account); the hover lists every limit. |
 | `lookout.statusBar.usageReset` | `true` | After the usage bar, the time until the 5-hour window resets: `32% · 1h12m`. |
 | `lookout.usage.refresh` | `auto` | `auto`: fetch when the numbers are older than 10 minutes or a window has reset; at most once every 3 minutes on the machine, and after a fetch that brought no new numbers the wait doubles each time, up to 30 minutes. When Anthropic's usage endpoint answers 429, no fetch starts before the wait its `Retry-After` asks, as Claude Code reads it (5 minutes without one, an hour at most), in either mode. `manual`: fetch only on `Lookout: Refresh Usage`. `off`: never start the Claude Code binary; show only what it cached. While `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set for Claude Code, Lookout does not fetch either. |
-| `lookout.usage.alerts` | `true` | Say when the 5-hour window reaches 70% and 90% and the weekly limit 90%: once per window, in the VS Code window in front (any window when none is) and, while VS Code is not in front, on the desktop. |
+| `lookout.usage.alerts` | `true` | Say when the 5-hour window reaches 70% and 90% and a weekly limit 90%, the all-models one or a model's own such as Fable's: once per window, in the VS Code window in front (any window when none is) and, while VS Code is not in front, on the desktop. |
 | `lookout.notifications.waiting` | `true` | Notify when a session of this window starts to wait for you and you are not looking at it. |
 | `lookout.notifications.done` | `false` | Notify when a session of this window finishes a turn and you are not looking at it. |
 | `lookout.notifications.os` | `true` | While VS Code is not in front, also show those notifications on the desktop. |

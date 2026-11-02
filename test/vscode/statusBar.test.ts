@@ -97,6 +97,15 @@ describe("StatusBar", () => {
     expect(lastSet("backgroundColor")).toBeUndefined();
   });
 
+  it("shows another limit nearly used up in place of the 5-hour one, on red", () => {
+    const fable = usage({ meters: [{ key: "session", label: "Session (5hr)", percent: 15, resetsAt: 2 * 3_600_000 }, { key: "weekly_scoped:Fable", label: "Weekly Fable", percent: 97, resetsAt: 3 * 86_400_000 }] });
+    bar.render(input({ usage: fable, showReset: true }), 0);
+    expect(lastSet("text")).toBe(`${L} ▰▰▰▰▰▰▰▰▰▰ 97% · 3d`);
+    expect(lastSet("backgroundColor")).toMatchObject({ id: "statusBarItem.errorBackground" });
+    expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: usage Weekly Fable 97%" });
+    expect((lastSet("tooltip") as { value: string }).value).toContain("Session \\(5hr\\): 15%");
+  });
+
   it("colours the bar by the 5-hour usage alone and leaves the week to the hover", () => {
     const meters = (session: number, week: number) => usage({ meters: [{ key: "session", label: "5h", percent: session }, { key: "weekly_all", label: "Week", percent: week }] });
     bar.render(input({ usage: meters(55, 90) }), 0);

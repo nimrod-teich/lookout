@@ -28,7 +28,7 @@ export interface UsageSnapshot {
 export type UsageRead = { snapshot: UsageSnapshot } | { snapshot: undefined; why: "missing" | "unreadable" | "other account" };
 
 const HOUR = 3_600_000;
-/** Labelled as Claude Code's panel labels them. */
+/** Labelled as Claude Code's panel labels them. A verified Ultra account has no `session` window. */
 const WINDOWS: Record<string, { label: string; windowMs: number }> = {
   session: { label: "Session (5hr)", windowMs: 5 * HOUR },
   weekly_all: { label: "Weekly (7 day)", windowMs: 7 * 24 * HOUR },
@@ -68,10 +68,12 @@ export function metersOf(limits: unknown): UsageMeter[] {
       const kind = typeof limit.kind === "string" ? limit.kind : "limit";
       const percent = num(limit.percent);
       if (percent === undefined) continue;
-      const model = (limit.scope as { model?: { display_name?: unknown } } | undefined)?.model?.display_name;
+      // A row is scoped to a model ("Fable") or to a surface, each with the server's name for it.
+      const scope = limit.scope as { model?: { display_name?: unknown } | null; surface?: { display_name?: unknown } | null } | null | undefined;
+      const scopedTo = scope?.model?.display_name ?? scope?.surface?.display_name;
       const known = WINDOWS[kind];
-      const label = kind === "weekly_scoped" && typeof model === "string" ? `Weekly ${model}` : (known?.label ?? kind);
-      meters.push({ key: typeof model === "string" ? `${kind}:${model}` : kind, label, percent, resetsAt: when(limit.resets_at), windowMs: known?.windowMs });
+      const label = kind === "weekly_scoped" && typeof scopedTo === "string" ? `Weekly ${scopedTo}` : (known?.label ?? kind);
+      meters.push({ key: typeof scopedTo === "string" ? `${kind}:${scopedTo}` : kind, label, percent, resetsAt: when(limit.resets_at), windowMs: known?.windowMs });
     }
     if (meters.length) return meters;
   }

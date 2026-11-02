@@ -504,7 +504,7 @@
           "lookout.usage.alerts": {
             "type": "boolean",
             "default": true,
-            "description": "Say when the 5-hour window reaches 70% and 90%, and the weekly limit 90%: once per window, in the VS Code window in front (any window when none is) and, while VS Code is not in front, on the desktop."
+            "description": "Say when the 5-hour window reaches 70% and 90%, and a weekly limit 90%, the all-models one or a model's own such as Fable's: once per window, in the VS Code window in front (any window when none is) and, while VS Code is not in front, on the desktop."
           },
           "lookout.notifications.waiting": {
             "type": "boolean",
