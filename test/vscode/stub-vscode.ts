@@ -21,6 +21,7 @@ export interface StubTerminal {
   processId: Promise<number | undefined>;
   exitStatus: undefined | { code: number };
   show(preserveFocus?: boolean): void;
+  sendText(text: string, shouldExecute?: boolean): void;
 }
 
 export class EventEmitter<T> {
@@ -114,6 +115,7 @@ export const stub = {
       processId: Promise.resolve(pid),
       exitStatus: undefined,
       show: (preserveFocus) => void this.ops.push([`terminal:${name}`, "show", preserveFocus]),
+      sendText: (text, shouldExecute) => void this.ops.push([`terminal:${name}`, "sendText", { text, shouldExecute }]),
     };
     this.terminals.push(terminal);
     return terminal;

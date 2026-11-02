@@ -1,3 +1,4 @@
+import type { Choice } from "../core/answers";
 import type { GroupBy } from "../core/grouping";
 import type { SearchResult } from "../core/history";
 import type { SessionSort, SortKey } from "../core/sorting";
@@ -68,9 +69,13 @@ export type ToBoard =
       sort?: SessionSort;
       /** How the board makes its sections: by state, or by what the sessions share. */
       group?: GroupBy;
+      /** The cards answer prompts, as `lookout.answers.enabled` says. */
+      answers?: boolean;
     }
   /** `pending` sessions were not read yet: the board asks again, unless `follows`, when the extension sends the results again as they are read. */
-  | { type: "search"; query: string; results: SearchResult[]; pending: number; follows?: boolean };
+  | { type: "search"; query: string; results: SearchResult[]; pending: number; follows?: boolean }
+  /** What came of a card's answer to tool call `call`: `sent` when its key went to the terminal, now or at an earlier click; otherwise the card offers its answers again. */
+  | { type: "answered"; call: string; sent: boolean };
 
 /** Webview → extension. */
 export type FromBoard =
@@ -80,6 +85,8 @@ export type FromBoard =
   | { type: "seen"; id: string }
   /** Dismiss the question the session's last message asks. */
   | { type: "dismiss"; id: string }
+  /** Answer the prompt about tool call `call` from the card: yes or no, or an option by its place. */
+  | { type: "answer"; id: string; call: string; choice: Choice }
   | { type: "seenAll" }
   /** Fetch an agent's usage again; Claude's when none is named. */
   | { type: "refreshUsage"; agent?: string; key?: string }

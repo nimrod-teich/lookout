@@ -14,6 +14,10 @@ export interface OpenTool {
   ask?: string;
   /** The answers a question offers. */
   options?: string[];
+  /** The ask is all a Yes allows: the call's command, path or address, not clipped, and nothing else in its input that matters (a file's new content, an edit, other arguments). */
+  whole?: boolean;
+  /** A question that takes one of its options: AskUserQuestion with a single question, not multi-select. */
+  single?: boolean;
 }
 
 /** The latest reply of the main chain, while the turn has not moved on from it. */
@@ -220,6 +224,25 @@ export function summarizeTool(name: string, input: unknown): string | undefined 
 const LITERAL_FIELDS = ["command", "file_path", "notebook_path", "url", "pattern", "query", "skill", "path"];
 /** Fields that describe it in words: shown without their Markdown. */
 const PROSE_FIELDS = ["description", "prompt", "title", "summary", "name"];
+/**
+ * A tool's fields beside the one its ask shows that change nothing a Yes
+ * allows: Bash's description and timeout, the lines of a file Read reads.
+ * Any other field (a file's new content, an edit, an MCP tool's arguments)
+ * is part of what the prompt asks, which the card does not show.
+ */
+const ASIDE: Readonly<Record<string, readonly string[]>> = {
+  Bash: ["description", "timeout", "run_in_background"],
+  Read: ["offset", "limit", "pages"],
+  WebFetch: ["prompt"],
+  WebSearch: ["allowed_domains", "blocked_domains"],
+};
+
+/** Every field of the input but `key` is one a Yes does not depend on. */
+function onlyField(name: string, input: Record<string, unknown>, key: string): boolean {
+  const aside = ASIDE[name] ?? [];
+  // A command run outside the sandbox asks more than its command.
+  return Object.entries(input).every(([field, value]) => field === key || aside.includes(field) || (name === "Bash" && field === "dangerouslyDisableSandbox" && value !== true));
+}
 
 function record(v: unknown): Record<string, unknown> {
   return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
@@ -241,7 +264,7 @@ function relative(file: string, cwd: string | undefined): string {
  * whole command, the path, the address; for a question, the question and
  * its answers.
  */
-export function askOf(name: string, input: unknown, cwd?: string): Pick<OpenTool, "ask" | "options"> {
+export function askOf(name: string, input: unknown, cwd?: string): Pick<OpenTool, "ask" | "options" | "whole" | "single"> {
   const i = record(input);
   if (name === "AskUserQuestion") {
     const questions = Array.isArray(i.questions) ? i.questions : [];
@@ -250,11 +273,16 @@ export function askOf(name: string, input: unknown, cwd?: string): Pick<OpenTool
     if (!question) return {};
     const options = (Array.isArray(first.options) ? first.options : []).map((option) => str(record(option).label)).filter((label): label is string => label !== undefined).map((label) => quoteAsk(label, OPTION_MAX));
     const more = questions.length > 1 ? ` (+${questions.length - 1} more)` : "";
-    return { ask: clip(`${quoteAsk(question)}${more}`), options };
+    // Claude Code takes a single question's option by its number; with more questions, or several answers, the number only moves on or ticks.
+    const single = questions.length === 1 && first.multiSelect !== true;
+    return { ask: clip(`${quoteAsk(question)}${more}`), options, ...(single && { single }) };
   }
   for (const key of LITERAL_FIELDS) {
     const value = str(i[key]);
-    if (value) return { ask: clip(oneLine(key === "file_path" || key === "notebook_path" || key === "path" ? relative(value, cwd) : value)) };
+    if (!value) continue;
+    const line = oneLine(key === "file_path" || key === "notebook_path" || key === "path" ? relative(value, cwd) : value);
+    const ask = clip(line);
+    return ask === line && onlyField(name, i, key) ? { ask, whole: true } : { ask };
   }
   for (const key of ["plan", ...PROSE_FIELDS]) {
     const value = str(i[key]);

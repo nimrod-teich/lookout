@@ -29,6 +29,14 @@ export interface Reason {
   raw?: string;
   /** Only the agent's word is known yet; its transcript may say more a moment later. */
   tentative?: boolean;
+  /** The tool call the prompt is about, when known: an answer from the card is for this call only. */
+  call?: string;
+  /**
+   * The card can answer the prompt, since the agent's reader knows what its
+   * terminal shows: yes or no to a permission whose whole ask the card shows,
+   * or one of a single question's options.
+   */
+  answer?: "yesno" | "options";
 }
 
 /** Where a session's state comes from, and how old that is. */

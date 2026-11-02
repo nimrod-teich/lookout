@@ -31,6 +31,25 @@ beforeEach(() => {
   cancelNewest();
 });
 
+describe("Terminals.send", () => {
+  it("types into the terminal with that shell pid, without Enter and without bringing it forward", async () => {
+    stub.addTerminal("claude", 500);
+    stub.addTerminal("shell", 501);
+    const t = await terminals();
+    expect(t.send(500, "1")).toBe(true);
+    expect(stub.ops).toEqual([["terminal:claude", "sendText", { text: "1", shouldExecute: false }]]);
+    expect(t.send(999, "1")).toBe(false);
+  });
+
+  it("types nothing into a terminal that has exited", async () => {
+    const terminal = stub.addTerminal("claude", 500);
+    const t = await terminals();
+    terminal.exitStatus = { code: 0 };
+    expect(t.send(500, "\u001b")).toBe(false);
+    expect(stub.ops).toEqual([]);
+  });
+});
+
 describe("claudeTabLabel", () => {
   it("cuts titles the way the Claude Code extension labels its tabs", () => {
     expect(claudeTabLabel("Short title")).toBe("Short title");

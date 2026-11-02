@@ -63,6 +63,17 @@ export class Terminals implements vscode.Disposable {
     return true;
   }
 
+  /**
+   * Types `text` into the terminal with this shell pid, as keys, without
+   * Enter and without bringing it forward. Returns whether the terminal is open.
+   */
+  send(pid: number, text: string): boolean {
+    const terminal = this.byPid.get(pid);
+    if (!terminal || terminal.exitStatus !== undefined) return false;
+    terminal.sendText(text, false);
+    return true;
+  }
+
   private cameForward(terminal: vscode.Terminal | undefined): void {
     if (!terminal) return;
     const at = Date.now();
