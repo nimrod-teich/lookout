@@ -1282,6 +1282,7 @@ body.vscode-reduce-motion .hover-card {
 .option.answer {
   cursor: pointer;
   color: var(--ink);
+  background: color-mix(in srgb, var(--waiting) 7%, transparent);
 }
 
 .option.answer:hover {
@@ -1307,7 +1308,7 @@ body.vscode-reduce-motion .hover-card {
 
 .options.sent .option.answer:hover {
   border-color: color-mix(in srgb, var(--waiting) 45%, transparent);
-  background: none;
+  background: color-mix(in srgb, var(--waiting) 7%, transparent);
 }
 
 /* A question Lookout read in a reply: the same group, a dashed outline, a lighter hand. */
