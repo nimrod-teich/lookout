@@ -17,6 +17,14 @@ describe("barMeter", () => {
     expect(barMeter([meter("weekly_all", 90, 168 * HOUR), meter("session", 10, 5 * HOUR)])?.key).toBe("session");
     expect(barMeter([meter("secondary", 90, 168 * HOUR), meter("primary", 10, 5 * HOUR)])?.key).toBe("primary");
     expect(barMeter([meter("a", 1), meter("b", 2)])?.key).toBe("a");
+    // No 5-hour window, as on a verified Ultra account: the all-models week, ahead of a model's own.
+    expect(barMeter([meter("weekly_all", 41, 168 * HOUR), meter("weekly_scoped:Fable", 51, 168 * HOUR)])?.key).toBe("weekly_all");
+  });
+
+  it("takes a limit nearly used up over the session window: the fullest from 95%", () => {
+    expect(barMeter([meter("session", 15, 5 * HOUR), meter("weekly_scoped:Fable", 94, 168 * HOUR)])?.key).toBe("session");
+    expect(barMeter([meter("session", 15, 5 * HOUR), meter("weekly_scoped:Fable", 95, 168 * HOUR)])?.key).toBe("weekly_scoped:Fable");
+    expect(barMeter([meter("session", 96, 5 * HOUR), meter("weekly_all", 99, 168 * HOUR)])?.key).toBe("weekly_all");
     expect(barMeter([])).toBeUndefined();
   });
 });

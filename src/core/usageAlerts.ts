@@ -2,10 +2,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { UsageMeter } from "./usage";
 
-/** The thresholds announced per meter, in percent. */
+/** The thresholds announced per kind of meter, in percent: a model's own weekly limit (`weekly_scoped:Fable`) as the all-models one. */
 export const ALERT_THRESHOLDS: Readonly<Record<string, readonly number[]>> = {
   session: [70, 90],
   weekly_all: [90],
+  weekly_scoped: [90],
 };
 
 export interface UsageAlert {
@@ -31,7 +32,8 @@ function windowOf(resetsAt: number | undefined): string {
 export function reachedThresholds(meters: readonly UsageMeter[], scope: string = ""): UsageAlert[] {
   const alerts: UsageAlert[] = [];
   for (const meter of meters) {
-    const reached = (ALERT_THRESHOLDS[meter.key] ?? []).filter((threshold) => meter.percent >= threshold);
+    const kind = meter.key.split(":")[0]!;
+    const reached = (ALERT_THRESHOLDS[kind] ?? []).filter((threshold) => meter.percent >= threshold);
     const threshold = reached.at(-1);
     if (threshold === undefined) continue;
     alerts.push({ id: `${scope ? `${scope}-` : ""}${meter.key}-${threshold}-${windowOf(meter.resetsAt)}`, meter, threshold });

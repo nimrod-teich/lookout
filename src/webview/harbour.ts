@@ -3,7 +3,9 @@
 // as boats on the water. The beam sweeps on its own, lights the boats it
 // passes, and swings to a boat before a jump.
 import { agentInfo } from "../core/agents/catalog";
+import { windowTag } from "../core/format";
 import type { SessionView } from "../core/types";
+import type { UsageMeter } from "../core/usage";
 import { HARBOUR, layoutBoats, waterline, type Boat } from "./model";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -97,9 +99,9 @@ export class Harbour {
   }
 
   /** Updates the boats and the tide; with `markers`, each boat wears its agent's silhouette and hue. */
-  update(views: readonly SessionView[], usagePercent: number | undefined, now: number, markers = false): void {
-    const water = waterline(usagePercent);
-    this.setWater(water, usagePercent);
+  update(views: readonly SessionView[], tide: UsageMeter | undefined, now: number, markers = false): void {
+    const water = waterline(tide?.percent);
+    this.setWater(water, tide);
     const seen = new Set<string>();
     for (const boat of layoutBoats(views, now, water)) {
       seen.add(boat.id);
@@ -189,14 +191,14 @@ export class Harbour {
     return { x: boat.x * scale, y: boat.y * scale, width: rect.width };
   }
 
-  private setWater(water: number, usagePercent: number | undefined): void {
+  private setWater(water: number, tide: UsageMeter | undefined): void {
     this.sea.setAttribute("y", String(water));
     this.sea.setAttribute("height", String(HARBOUR.height - water));
     const [a, b] = this.waves.children as unknown as [SVGPathElement, SVGPathElement];
     a.setAttribute("d", `M-10 ${water + 12} Q 40 ${water + 10} 90 ${water + 12} T 190 ${water + 12} T 310 ${water + 12}`);
     b.setAttribute("d", `M-10 ${water + 30} Q 50 ${water + 28} 110 ${water + 30} T 230 ${water + 30} T 310 ${water + 30}`);
     this.tideLabel.setAttribute("y", String(water - 3));
-    this.tideLabel.textContent = usagePercent === undefined ? "" : `5h ${Math.round(usagePercent)}%`;
+    this.tideLabel.textContent = tide === undefined ? "" : `${windowTag(tide)} ${Math.round(tide.percent)}%`;
   }
 
   /** Swings the beam to the boat, then jumps; without the boat, or under reduced motion, jumps at once. */
