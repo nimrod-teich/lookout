@@ -596,8 +596,58 @@ input[type="checkbox"] {
 }
 
 .foot-text {
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How far the work got, along the bar's top edge. */
+.foot-bar {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--beam);
+  transition: width 0.2s ease;
+}
+
+.foot.busy .foot-text {
+  color: var(--ink);
+}
+
+/* While it removes, the button turns a ring, so the page never looks stopped. */
+.foot.removing .remove::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  vertical-align: -1px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: turn 0.8s linear infinite;
+}
+
+.foot.removing .remove:disabled {
+  opacity: 0.8;
+}
+
+@keyframes turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .foot.removing .remove::before {
+    animation: none;
+    border-right-color: currentColor;
+  }
 }
 
 .remove {

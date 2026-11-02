@@ -551,6 +551,8 @@ export interface Survey {
 export interface SurveyProgress {
   done: number;
   total: number;
+  /** While removing: the bytes given back so far. */
+  freedBytes?: number;
   /** The worktree being looked at. */
   current?: string;
 }
@@ -664,6 +666,54 @@ export interface RemoveAsk {
 }
 
 /**
+ * What a batch of removals reads once per repository rather than once per
+ * worktree: its default branch, and that branch's patch ids, which take
+ * seconds to read in a repository with a long history. The default branch
+ * does not move during a removal: only worktrees and their own branches go.
+ */
+export class RemovalShared {
+  private readonly repos = new Map<string, Promise<{ defaultRef?: string; mainIds?: MainPatchIds }>>();
+
+  of(repo: string): Promise<{ defaultRef?: string; mainIds?: MainPatchIds }> {
+    let found = this.repos.get(repo);
+    if (!found) {
+      found = defaultBranch(repo).then((defaultRef) => (defaultRef ? { defaultRef, mainIds: new MainPatchIds(repo, defaultRef) } : {}));
+      this.repos.set(repo, found);
+    }
+    return found;
+  }
+}
+
+/** Repositories worked on at once by a removal; each one's worktrees go in turn, so git never races itself in one repository. */
+const REMOVAL_LANES = 4;
+
+/**
+ * Removes the worktrees asked for, each after its second look, saying how
+ * far it got and how much has come back so far. The answers are in the
+ * order asked.
+ */
+export async function removeWorktrees(asks: readonly RemoveAsk[], input: Omit<SurveyInput, "folders" | "repos">, onProgress?: (progress: SurveyProgress) => void): Promise<Removal[]> {
+  const shared = new RemovalShared();
+  const byRepo = new Map<string, number[]>();
+  asks.forEach((ask, i) => byRepo.set(ask.repo, [...(byRepo.get(ask.repo) ?? []), i]));
+  const out: Removal[] = new Array(asks.length);
+  let done = 0;
+  let freedBytes = 0;
+  onProgress?.({ done, total: asks.length, freedBytes });
+  await inTurn([...byRepo.values()], REMOVAL_LANES, async (indexes) => {
+    for (const i of indexes) {
+      const ask = asks[i]!;
+      onProgress?.({ done, total: asks.length, current: ask.path, freedBytes });
+      const removal = await removeWorktree(ask, input, shared);
+      out[i] = removal;
+      freedBytes += removal.freedBytes;
+      onProgress?.({ done: ++done, total: asks.length, freedBytes });
+    }
+  });
+  return out;
+}
+
+/**
  * Removes one worktree after looking at it again, since things change
  * between the check and the click: it goes only while it is still what the
  * page showed (safe, or for review when picked from there), never when it is
@@ -671,7 +721,7 @@ export interface RemoveAsk {
  * files and a lock. Its branch goes too when its change is on the default
  * branch.
  */
-export async function removeWorktree(ask: RemoveAsk, input: Omit<SurveyInput, "folders" | "repos">): Promise<Removal> {
+export async function removeWorktree(ask: RemoveAsk, input: Omit<SurveyInput, "folders" | "repos">, shared: RemovalShared = new RemovalShared()): Promise<Removal> {
   const base = { repo: ask.repo, path: ask.path, ok: false, freedBytes: 0 };
   const items = await listWorktrees(ask.repo);
   const wanted = real(ask.path);
@@ -680,7 +730,8 @@ export async function removeWorktree(ask: RemoveAsk, input: Omit<SurveyInput, "f
   const known = { ...base, branch: item.branch, head: item.head };
   const allTops = [real(ask.repo), ...items.map((candidate) => candidate.path)];
   const inUse = input.inUse.map((use) => ({ ...use, dir: real(use.dir) }));
-  const now = await checkWorktree(ask.repo, item, { defaultRef: await defaultBranch(ask.repo), inUse, allTops, rebuildable: new Set(input.rebuildable), noMeasure: true, quietMs: input.quietMs });
+  const { defaultRef, mainIds } = await shared.of(ask.repo);
+  const now = await checkWorktree(ask.repo, item, { defaultRef, inUse, allTops, rebuildable: new Set(input.rebuildable), noMeasure: true, mainIds, quietMs: input.quietMs });
   if (now.tier === "gone") {
     const ran = await git(ask.repo, ["worktree", "remove", item.path]);
     return ran.code === 0 ? { ...known, ok: true, record: true } : { ...known, error: firstLine(ran.err) ?? "git refused" };

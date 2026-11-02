@@ -63,7 +63,7 @@ export interface RemovedRow {
 export interface WorktreesState {
   /** What runs now: a check, a removal, a restore, or nothing. */
   busy?: "check" | "remove" | "restore";
-  progress?: { done: number; total: number; current?: string };
+  progress?: WorkProgress;
   /** The last check, when there was one. */
   checkedAt?: number;
   repos: RepoRow[];
@@ -76,8 +76,18 @@ export interface WorktreesState {
   notice?: string;
 }
 
-/** Extension → page. */
-export type ToWorktrees = { type: "state"; state: WorktreesState };
+/** How far a check, a removal or a restore got. */
+export interface WorkProgress {
+  done: number;
+  total: number;
+  /** The worktree being worked on. */
+  current?: string;
+  /** While removing: the bytes given back so far. */
+  freedBytes?: number;
+}
+
+/** Extension → page: the whole state, or, while work runs, only how far it got. */
+export type ToWorktrees = { type: "state"; state: WorktreesState } | { type: "progress"; progress: WorkProgress };
 
 /** Page → extension. */
 export type FromWorktrees =
