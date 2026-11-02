@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5
+
+- **Accounts found by themselves.** Lookout finds the config directory of each Claude account you run with its own `CLAUDE_CONFIG_DIR` and watches it, with no setting to write: a folder in your home directory named `.claude-<name>` that Claude Code has run in, or the directory a running process of yours was given in `CLAUDE_CONFIG_DIR`, read from the processes' environments on Linux and macOS, wherever it is. It looks every minute, says each directory it finds in its output, and keeps watching one found while it holds Claude Code's config file, so an account's sessions stay on the board after its last `claude` exits. A process's directory keeps the spelling it was given, which names the directory's stored sign-in. `lookout.claudeConfigDirs` still names a directory, or adds one no process runs now outside your home directory; `lookout.claudeDiscoverDirs` turns the search off.
+
 ## 0.1.4
 
 Answers to a waiting prompt from its card, several Claude accounts on one board, a page that cleans up worktrees, and Anthropic's current prices and plans.
