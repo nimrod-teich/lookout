@@ -74,6 +74,8 @@ export interface WorktreesState {
   error?: string;
   /** What the last restore did, in a sentence. */
   notice?: string;
+  /** Why the last check could not run: git missing, Apple's stand-in, or too old. */
+  gitProblem?: string;
 }
 
 /** How far a check, a removal or a restore got. */
@@ -98,6 +100,7 @@ export type FromWorktrees =
   | { type: "remove"; paths: string[] }
   | { type: "restore"; path: string }
   | { type: "reveal"; path: string }
-  | { type: "settings" }
+  /** The worktree settings, or with `about: "git"` VS Code's git.path. */
+  | { type: "settings"; about?: "git" }
   /** Take the last removal's summary off the page. */
   | { type: "dismiss" };

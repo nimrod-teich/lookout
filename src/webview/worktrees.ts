@@ -177,6 +177,11 @@ foot.append(footBar, footText, removeButton);
 
 root.append(top, progress, banner, removedHost, controls, body, foot);
 
+/** A check ran and found what it could: the rows, the filter and the foot have something to show. */
+function checked(): boolean {
+  return state.checkedAt !== undefined && !state.gitProblem;
+}
+
 function renderTop(): void {
   const repos = state.repos.length;
   const worktrees = state.rows.length;
@@ -185,9 +190,24 @@ function renderTop(): void {
       ? state.busy === "check"
         ? "Looking for repositories and their worktrees…"
         : "Not checked yet."
-      : `${plural(worktrees, "worktree")} in ${plural(repos, "repository", "repositories")} · checked ${clock(state.checkedAt)}`;
+      : state.gitProblem
+        ? `Not checked: git is needed · tried ${clock(state.checkedAt)}`
+        : `${plural(worktrees, "worktree")} in ${plural(repos, "repository", "repositories")} · checked ${clock(state.checkedAt)}`;
   checkButton.disabled = state.busy !== undefined;
-  controls.classList.toggle("hidden", state.checkedAt === undefined);
+  controls.classList.toggle("hidden", !checked());
+}
+
+/** Why nothing was checked, and the two ways on: VS Code's git.path, and a check once git is there. */
+function gitProblemView(problem: string): HTMLElement {
+  const box = el("section", "git-problem");
+  box.append(el("h2", "git-problem-title", "Git is needed to check worktrees"), el("p", "git-problem-text", problem));
+  const actions = el("div", "git-problem-actions");
+  actions.append(
+    button("tool", "Open git.path", "VS Code's setting for where git is", () => vscode.postMessage({ type: "settings", about: "git" }), "git-settings"),
+    button("tool", "Check again", "Look for git and the worktrees again", () => vscode.postMessage({ type: "check" }), "git-check"),
+  );
+  box.append(actions);
+  return box;
 }
 
 function renderProgress(): void {
@@ -430,7 +450,7 @@ function renderFoot(): void {
     footBar.style.width = p && p.total ? `${Math.round((100 * p.done) / p.total)}%` : "0%";
     removeButton.textContent = state.busy === "remove" ? "Removing…" : "Remove";
     removeButton.disabled = true;
-    foot.classList.toggle("hidden", state.checkedAt === undefined);
+    foot.classList.toggle("hidden", !checked());
     return;
   }
   footBar.style.width = "0%";
@@ -443,7 +463,7 @@ function renderFoot(): void {
   footText.textContent = parts.length ? `Ticked: ${parts.join(" and ")}` : "Nothing ticked.";
   removeButton.textContent = picked.length ? `Remove ${picked.length}` : "Remove";
   removeButton.disabled = !picked.length || state.busy !== undefined;
-  foot.classList.toggle("hidden", state.checkedAt === undefined);
+  foot.classList.toggle("hidden", !checked());
 }
 
 function render(): void {
@@ -459,7 +479,8 @@ function render(): void {
   removedHost.replaceChildren();
   if (state.removed.length) removedHost.append(removedView(state.removed, now));
   body.replaceChildren();
-  if (state.checkedAt !== undefined) {
+  if (state.gitProblem && state.busy !== "check") body.append(gitProblemView(state.gitProblem));
+  else if (checked()) {
     let shown = 0;
     for (const section of SECTIONS) {
       const all = state.rows.filter((row) => row.tier === section.tier);

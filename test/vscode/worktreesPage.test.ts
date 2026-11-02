@@ -177,6 +177,25 @@ describe("WorktreesPage", () => {
     expect(whereOf({ repo, path: path.join(home + "2", "x") }, home)).toBe(home + "2");
   });
 
+  it("says why nothing was checked when git cannot run, and opens VS Code's git.path", async () => {
+    const { page, actions } = setup();
+    const input = actions.input();
+    actions.input = () => ({ ...input, git: path.join(path.dirname(input.folders[0]!), "no-such-git") });
+    page.show();
+    await settled(page);
+    expect(shown()).toMatchObject({ rows: [], repos: [], gitProblem: expect.stringMatching(/^Lookout could not run .*no-such-git/) });
+    const panel = stub.panels.at(-1)!;
+    panel.receive({ type: "settings", about: "git" });
+    expect(actions.openSettings).toHaveBeenLastCalledWith("git");
+    // With git back, the next check clears it.
+    actions.input = () => input;
+    panel.receive({ type: "check" });
+    await settled(page);
+    expect(shown().gitProblem).toBeUndefined();
+    expect(shown().rows.length).toBe(3);
+    page.dispose();
+  });
+
   it("reveals only a folder it lists", async () => {
     const { page, actions, landed } = setup();
     page.show();

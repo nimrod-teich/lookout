@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the worktrees page outside VS Code: npm run build, then open this file. ?busy=check for a check under way, ?busy=remove for a removal under way, ?done=1 for the page after a removal (its summary, the rows that remain, the Removed list), &removed=1 for earlier removals in that list, &empty=1 for no worktrees -->
+<!-- Dev preview of the worktrees page outside VS Code: npm run build, then open this file. ?busy=check for a check under way, ?busy=remove for a removal under way, ?done=1 for the page after a removal (its summary, the rows that remain, the Removed list), &removed=1 for earlier removals in that list, &empty=1 for no worktrees, ?git=missing, ?git=old or ?git=mac for a check git could not run -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -42,6 +42,7 @@
     row("api", `${home}/api/.claude/worktrees`, "notes-page", "keep", "a session is running in it", 405 * MB, { days: 0.2 }),
     row("web", `${home}/web/.claude/worktrees`, "drag-order", "keep", "3 changed files", 270 * MB, { days: 1 }),
     row("infra", `${home}/_worktrees`, "integration", "keep", "2 commits on no branch", 4.0 * GB, { branch: undefined, days: 4 }),
+    row("infra", `${home}/infra/.claude/worktrees`, "long-rehearsal", "keep", "locked: a long rehearsal", 4.2 * GB, { days: 3 }),
   ];
   const gone = [
     row("docs", "/tmp/scratch", "docs-3814", "gone", "its folder is gone", 0, { headAt: undefined }),
@@ -62,6 +63,11 @@
   const freed = went.reduce((s, r) => s + r.ownBytes, 0);
   const summary = done ? { removed: went.length, records: 2, freedBytes: freed, branchesDeleted: went.filter((r) => r.landed).length, freeSpaceGrew: freed - 0.2 * GB, failed: [{ path: refused.path, name: refused.name, error: "changed since the check: 1 commit on no remote, kept in its branch" }], at: now - 40_000 } : undefined;
   const busy = params.get("busy") ?? undefined;
+  const gitProblem = {
+    missing: "Lookout could not run git (spawn git ENOENT). Install git, or point VS Code's git.path setting at it, then check again.",
+    old: "git 2.7.4 is older than 2.17, the first that removes a worktree. Update git to clean up worktrees here, then check again.",
+    mac: "This Mac's git is Apple's stand-in until the Command Line Tools are installed: run xcode-select --install, or install git another way, then check again.",
+  }[params.get("git")];
   const progress = busy === "check" ? { done: 212, total: 610, current: `${home}/infra/.claude/worktrees/ops-4741` } : busy === "remove" ? { done: 36, total: 421, current: `${home}/infra/.claude/worktrees/ops-4753`, freedBytes: 6.1 * GB } : undefined;
   const state = () => ({
     busy,
@@ -71,6 +77,7 @@
     rows: busy === "check" ? [] : rows,
     summary,
     removed,
+    ...(gitProblem ? { gitProblem, repos: [], rows: [], summary: undefined } : {}),
   });
   const send = () => window.postMessage({ type: "state", state: state() }, "*");
   window.acquireVsCodeApi = () => ({

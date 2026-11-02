@@ -8,7 +8,7 @@ import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
 import { RemovedWorktrees } from "./core/removedWorktrees";
 import { WorktreeWorker } from "./core/worktreeWorker";
-import { mainCheckoutOf } from "./core/worktrees";
+import { mainCheckoutOf, pickGit } from "./core/worktrees";
 import { NotifyGate, type NoticeKind } from "./core/notifyGate";
 import { desktopOf, jumpKeyLabel } from "./core/osNotify";
 import { GROUPINGS, readGroupBy, type GroupBy } from "./core/grouping";
@@ -277,11 +277,13 @@ export function activate(context: vscode.ExtensionContext): void {
       const repos = [...new Set([...uses.cwds, ...folders].map(mainCheckoutOf).filter((repo): repo is string => repo !== undefined))];
       // Unless the settings say where repositories live, they live beside the ones sessions ran in.
       const where = config.worktreeFolders.length ? config.worktreeFolders : [...new Set(repos.map((repo) => path.dirname(repo)))];
-      return { folders: where, repos, inUse: uses.inUse, rebuildable: config.worktreeRebuildable };
+      // The git VS Code's own git runs, when git.path names one that exists; else git from the PATH.
+      const git = pickGit(vscode.workspace.getConfiguration("git").get<unknown>("path"));
+      return { folders: where, repos, inUse: uses.inUse, rebuildable: config.worktreeRebuildable, ...(git ? { git } : {}) };
     },
     confirm: async (message, detail, action) => (await vscode.window.showWarningMessage(message, { modal: true, detail }, action)) === action,
     reveal: (folder) => void vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(folder)),
-    openSettings: () => void vscode.commands.executeCommand("workbench.action.openSettings", "lookout.worktrees"),
+    openSettings: (about) => void vscode.commands.executeCommand("workbench.action.openSettings", about === "git" ? "git.path" : "lookout.worktrees"),
   });
   /** Opens a session's conversation in the conversation tab, at one message or at its newest match. */
   const openHit = (query: string, id: string, index?: number) => {
