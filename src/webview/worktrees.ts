@@ -160,6 +160,8 @@ const removedHost = el("div", "removed-host");
 const body = el("main", "sections");
 
 const foot = el("footer", "foot");
+/** How far the work got, along the bar's top edge, for a page scrolled away from the top. */
+const footBar = el("div", "foot-bar");
 const footText = el("span", "foot-text");
 const removeButton = button(
   "remove",
@@ -171,7 +173,7 @@ const removeButton = button(
   },
   "remove",
 );
-foot.append(footText, removeButton);
+foot.append(footBar, footText, removeButton);
 
 root.append(top, progress, banner, removedHost, controls, body, foot);
 
@@ -192,9 +194,7 @@ function renderProgress(): void {
   const p = state.progress;
   progress.classList.toggle("hidden", !state.busy);
   if (!state.busy) return;
-  const verb = state.busy === "check" ? "Checking" : state.busy === "remove" ? "Removing" : "Putting back";
-  const at = p?.current ? ` · ${p.current.split(/[\\/]/).pop()}` : "";
-  progressText.textContent = stopping ? "Stopping…" : p && p.total ? `${verb} ${Math.min(p.done + 1, p.total)} of ${p.total}${at}` : `${verb}…`;
+  progressText.textContent = stopping ? "Stopping…" : workLine();
   barFill.style.width = p && p.total ? `${Math.round((100 * p.done) / p.total)}%` : "0%";
   stopButton.classList.toggle("hidden", state.busy !== "check");
   stopButton.disabled = stopping;
@@ -411,7 +411,29 @@ function removedView(rows: RemovedRow[], now: number): HTMLElement {
   return box;
 }
 
+/** What runs, in a few words, with how far it got: "Removing 37 of 421 · ops-4741 · 6.1 GB back so far". */
+function workLine(): string {
+  const p = state.progress;
+  const verb = state.busy === "check" ? "Checking" : state.busy === "remove" ? "Removing" : "Putting back";
+  if (!p || !p.total) return `${verb}…`;
+  const at = p.current ? ` · ${p.current.split(/[\\/]/).pop()}` : "";
+  const back = state.busy === "remove" && p.freedBytes ? ` · ${formatBytes(p.freedBytes)} back so far` : "";
+  return `${verb} ${Math.min(p.done + 1, p.total)} of ${p.total}${at}${back}`;
+}
+
 function renderFoot(): void {
+  foot.classList.toggle("busy", state.busy !== undefined);
+  foot.classList.toggle("removing", state.busy === "remove");
+  if (state.busy) {
+    const p = state.progress;
+    footText.textContent = stopping ? "Stopping…" : workLine();
+    footBar.style.width = p && p.total ? `${Math.round((100 * p.done) / p.total)}%` : "0%";
+    removeButton.textContent = state.busy === "remove" ? "Removing…" : "Remove";
+    removeButton.disabled = true;
+    foot.classList.toggle("hidden", state.checkedAt === undefined);
+    return;
+  }
+  footBar.style.width = "0%";
   const picked = state.rows.filter((row) => ticked.has(row.path) && row.tier !== "keep");
   const trees = picked.filter((row) => row.tier !== "gone");
   const review = trees.filter((row) => row.tier === "review").length;
@@ -458,6 +480,13 @@ function render(): void {
 
 window.addEventListener("message", (event: MessageEvent<ToWorktrees>) => {
   const message = event.data;
+  // How far the work got: the bars and the foot, not the rows.
+  if (message?.type === "progress") {
+    state = { ...state, progress: message.progress };
+    renderProgress();
+    renderFoot();
+    return;
+  }
   if (message?.type !== "state") return;
   const before = state;
   state = message.state;

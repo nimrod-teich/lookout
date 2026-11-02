@@ -3,7 +3,7 @@
 // extension host.
 import { parentPort } from "node:worker_threads";
 import type { WorktreeAsk, WorktreeAnswer } from "./core/worktreeWorker";
-import { freeSpace, processFolders, removeWorktree, restoreWorktree, survey, type InUse, type Removal } from "./core/worktrees";
+import { freeSpace, processFolders, removeWorktrees, restoreWorktree, survey, type InUse, type SurveyProgress } from "./core/worktrees";
 
 /** What the extension knows, with the folders this machine's processes run in. */
 async function withProcesses(inUse: readonly InUse[]): Promise<InUse[]> {
@@ -11,22 +11,17 @@ async function withProcesses(inUse: readonly InUse[]): Promise<InUse[]> {
 }
 
 async function answer(ask: WorktreeAsk): Promise<WorktreeAnswer> {
-  const progress = (done: number, total: number, current?: string) => parentPort!.postMessage({ id: ask.id, progress: { done, total, current } } satisfies WorktreeAnswer);
+  const progress = (p: SurveyProgress) => parentPort!.postMessage({ id: ask.id, progress: p } satisfies WorktreeAnswer);
   switch (ask.op) {
     case "survey": {
       const inUse = await withProcesses(ask.input.inUse);
-      return { id: ask.id, survey: await survey({ ...ask.input, inUse }, (p) => progress(p.done, p.total, p.current)) };
+      return { id: ask.id, survey: await survey({ ...ask.input, inUse }, progress) };
     }
     case "remove": {
       const inUse = await withProcesses(ask.input.inUse);
       const dirs = [...new Set(ask.asks.map((one) => one.repo))];
       const before = freeSpace(dirs);
-      const removals: Removal[] = [];
-      for (const [i, one] of ask.asks.entries()) {
-        progress(i, ask.asks.length, one.path);
-        removals.push(await removeWorktree(one, { ...ask.input, inUse }));
-      }
-      progress(ask.asks.length, ask.asks.length);
+      const removals = await removeWorktrees(ask.asks, { ...ask.input, inUse }, progress);
       const after = freeSpace(dirs);
       let grew = 0;
       for (const [dev, free] of after) grew += free - (before.get(dev) ?? free);

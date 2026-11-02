@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RemovedWorktrees } from "../../src/core/removedWorktrees";
-import { REBUILDABLE, removeWorktree, restoreWorktree, survey, type SurveyInput } from "../../src/core/worktrees";
+import { REBUILDABLE, removeWorktrees, restoreWorktree, survey, type SurveyInput } from "../../src/core/worktrees";
 import type { WorktreesState } from "../../src/webview/worktreesProtocol";
 import { WorktreesPage, whereOf, type WorktreeRunner } from "../../src/vscode/worktreesPage";
 import { commitFile, gitFixture, gitIn } from "../core/helpers";
@@ -11,10 +11,8 @@ import { stub } from "./stub-vscode";
 /** The worktree thread's work, done here. */
 const inProcess: WorktreeRunner = {
   survey: (input, onProgress) => survey(input, onProgress),
-  async remove(asks, input) {
-    const removals = [];
-    for (const ask of asks) removals.push(await removeWorktree(ask, input));
-    return { removals };
+  async remove(asks, input, onProgress) {
+    return { removals: await removeWorktrees(asks, input, onProgress) };
   },
   restore: (record) => restoreWorktree(record),
   stop: () => {},
@@ -93,6 +91,10 @@ describe("WorktreesPage", () => {
       "Remove",
     );
     expect(page.current.summary).toMatchObject({ removed: 2, records: 0, branchesDeleted: 1, failed: [] });
+    // How far the removal got went to the page on its own, ending with all of it and what came back.
+    const progress = panel.posted.filter((m): m is { type: "progress"; progress: { done: number; total: number; freedBytes?: number } } => (m as { type?: string }).type === "progress");
+    expect(progress.at(-1)?.progress).toMatchObject({ done: 2, total: 2 });
+    expect(progress.at(-1)?.progress.freedBytes).toBe(page.current.summary?.freedBytes);
     // Rows outside <repo>/.claude/worktrees say where they are.
     expect(shown().rows.map((row) => row.where && path.basename(row.where))).toEqual(["wt"]);
     expect(fs.existsSync(landed)).toBe(false);

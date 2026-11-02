@@ -11,11 +11,14 @@ import {
   measure,
   parseWorktreeList,
   REBUILDABLE,
+  RemovalShared,
   removeWorktree,
+  removeWorktrees,
   restoreWorktree,
   survey,
   type CheckContext,
   type InUse,
+  type SurveyProgress,
   type WorktreeCheck,
 } from "../../src/core/worktrees";
 import { commitFile, gitFixture, gitIn, tempConfigDir } from "./helpers";
@@ -275,5 +278,52 @@ describe("removeWorktree and restoreWorktree", () => {
     fs.rmSync(top, { recursive: true, force: true });
     expect(await removeWorktree({ repo, path: top, shownAs: "gone" }, { inUse: [], rebuildable: REBUILDABLE, quietMs: 0 })).toMatchObject({ ok: true, record: true });
     expect(await listWorktrees(repo)).toEqual([]);
+  });
+});
+
+describe("removeWorktrees", () => {
+  it("removes a batch across repositories, answering in the order asked, with how far it got and what came back so far", async () => {
+    const a = gitFixture();
+    const b = gitFixture();
+    const top = (fixture: ReturnType<typeof gitFixture>, name: string) => {
+      const dir = fixture.tree(name);
+      gitIn(fixture.repo, "worktree", "add", "-q", "--detach", dir, "origin/main");
+      return dir;
+    };
+    const a1 = top(a, "a1");
+    const b1 = top(b, "b1");
+    const a2 = top(a, "a2");
+    const seen: SurveyProgress[] = [];
+    const removals = await removeWorktrees(
+      [
+        { repo: a.repo, path: a1, shownAs: "safe", bytes: 100 },
+        { repo: b.repo, path: b1, shownAs: "safe", bytes: 200 },
+        { repo: a.repo, path: a2, shownAs: "safe", bytes: 300 },
+      ],
+      { inUse: [], rebuildable: REBUILDABLE, quietMs: 0 },
+      (progress) => seen.push(progress),
+    );
+    expect(removals.map((removal) => [removal.path, removal.ok, removal.freedBytes])).toEqual([
+      [a1, true, 100],
+      [b1, true, 200],
+      [a2, true, 300],
+    ]);
+    for (const dir of [a1, b1, a2]) expect(fs.existsSync(dir)).toBe(false);
+    expect(seen[0]).toEqual({ done: 0, total: 3, freedBytes: 0 });
+    expect(seen.at(-1)).toEqual({ done: 3, total: 3, freedBytes: 600 });
+    const finished = seen.filter((progress) => progress.current === undefined).map((progress) => progress.done);
+    expect(finished).toEqual([0, 1, 2, 3]);
+    expect(seen.filter((progress) => progress.current).map((progress) => progress.current).sort()).toEqual([a1, a2, b1].sort());
+  });
+
+  it("reads a repository's default branch and its patch ids once for the whole batch", async () => {
+    const { repo } = gitFixture();
+    const shared = new RemovalShared();
+    const first = shared.of(repo);
+    expect(shared.of(repo)).toBe(first);
+    const { defaultRef, mainIds } = await first;
+    expect(defaultRef).toBe("origin/main");
+    expect(mainIds).toBeInstanceOf(MainPatchIds);
+    expect(await removeWorktrees([], { inUse: [], rebuildable: REBUILDABLE, quietMs: 0 })).toEqual([]);
   });
 });

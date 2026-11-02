@@ -209,11 +209,13 @@ export class WorktreesPage implements vscode.Disposable {
     }
   }
 
+  /** How far the work got, sent on its own: the page redraws its bars, not its rows. */
   private progress(progress: SurveyProgress): void {
     const now = Date.now();
     if (now - this.lastProgress < PROGRESS_MS && progress.done < progress.total) return;
     this.lastProgress = now;
-    this.set({ progress });
+    this.state = { ...this.state, progress };
+    if (this.panel) void this.panel.webview.postMessage({ type: "progress", progress } satisfies ToWorktrees);
   }
 
   private set(change: Partial<WorktreesState>): void {

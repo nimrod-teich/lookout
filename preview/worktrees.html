@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the worktrees page outside VS Code: npm run build, then open this file. ?busy=check for a check under way, ?done=1 for the page after a removal (its summary, the rows that remain, the Removed list), &removed=1 for earlier removals in that list, &empty=1 for no worktrees -->
+<!-- Dev preview of the worktrees page outside VS Code: npm run build, then open this file. ?busy=check for a check under way, ?busy=remove for a removal under way, ?done=1 for the page after a removal (its summary, the rows that remain, the Removed list), &removed=1 for earlier removals in that list, &empty=1 for no worktrees -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -62,9 +62,10 @@
   const freed = went.reduce((s, r) => s + r.ownBytes, 0);
   const summary = done ? { removed: went.length, records: 2, freedBytes: freed, branchesDeleted: went.filter((r) => r.landed).length, freeSpaceGrew: freed - 0.2 * GB, failed: [{ path: refused.path, name: refused.name, error: "changed since the check: 1 commit on no remote, kept in its branch" }], at: now - 40_000 } : undefined;
   const busy = params.get("busy") ?? undefined;
+  const progress = busy === "check" ? { done: 212, total: 610, current: `${home}/infra/.claude/worktrees/ops-4741` } : busy === "remove" ? { done: 36, total: 421, current: `${home}/infra/.claude/worktrees/ops-4753`, freedBytes: 6.1 * GB } : undefined;
   const state = () => ({
     busy,
-    progress: busy === "check" ? { done: 212, total: 610, current: `${home}/infra/.claude/worktrees/ops-4741` } : undefined,
+    progress,
     checkedAt: busy === "check" ? undefined : now - 4 * 60_000,
     repos: busy === "check" ? [] : repos,
     rows: busy === "check" ? [] : rows,
