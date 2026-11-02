@@ -20,6 +20,7 @@ import { Answerer, type AnswerResult } from "./vscode/answer";
 import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
+import { ConfigDiscovery } from "./vscode/discovery";
 import { panelAdapter } from "./vscode/agents";
 import { claudeTabLabel, claudeTabLabels } from "./vscode/agents/claudePanel";
 import { Findings } from "./vscode/findings";
@@ -93,7 +94,28 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   // A click on the status bar opens the board.
   const statusBar = new StatusBar(SHOW_BOARD);
-  let config = readConfig();
+  // Claude Code config directories found in running processes and the home directory: one found starts the watch over with it.
+  const discovery = new ConfigDiscovery(context.globalState, (_dirs, added) => {
+    for (const dir of added) log.info(`Found a Claude Code config directory: ${dir}`);
+    reload();
+    render();
+  }, {}, () => config.claudeDiscoverDirs);
+  let config = readConfig(discovery.dirs);
+  /** Reads the settings again; a different place to read, a directory added, removed or renamed, or an agent switched on or off starts the watch over. */
+  const reload = () => {
+    const next = readConfig(discovery.dirs);
+    const moved =
+      next.claudeEnabled !== config.claudeEnabled ||
+      !sameDirs(next.claudeDirs, config.claudeDirs) ||
+      next.codexEnabled !== config.codexEnabled ||
+      next.codexHome !== config.codexHome ||
+      next.copilotEnabled !== config.copilotEnabled ||
+      next.copilotHome !== config.copilotHome;
+    config = next;
+    gate.setCooldown(config.notifyCooldownMs);
+    if (moved) controller.start(config);
+    else controller.configure(config);
+  };
   const desktop = desktopOf(process.platform, vscode.env.remoteName, process.platform === "linux" && insideWsl());
   const osNotifier = new OsNotifier(desktop, log);
   const gate = new NotifyGate(config.notifyCooldownMs);
@@ -476,19 +498,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeWorkspaceFolders(() => controller.foldersChanged()),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration("lookout") && !event.affectsConfiguration("claudeCode.environmentVariables")) return;
-      const next = readConfig();
-      // A different place to read, a directory added, removed or renamed, or an agent switched on or off: start over.
-      const moved =
-        next.claudeEnabled !== config.claudeEnabled ||
-        !sameDirs(next.claudeDirs, config.claudeDirs) ||
-        next.codexEnabled !== config.codexEnabled ||
-        next.codexHome !== config.codexHome ||
-        next.copilotEnabled !== config.copilotEnabled ||
-        next.copilotHome !== config.copilotHome;
-      config = next;
-      gate.setCooldown(config.notifyCooldownMs);
-      if (moved) controller.start(config);
-      else controller.configure(config);
+      reload();
+      if (event.affectsConfiguration("lookout.claudeDiscoverDirs")) void discovery.scan();
       // The retention is kept after the controller knows the new value.
       if (event.affectsConfiguration("lookout.retention.days")) applyRetention();
       render();
@@ -589,6 +600,8 @@ export function activate(context: vscode.ExtensionContext): void {
   controller.start(config);
   applyRetention();
   render();
+  discovery.start();
+  context.subscriptions.push({ dispose: () => discovery.stop() });
 }
 
 export function deactivate(): void {}

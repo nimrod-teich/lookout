@@ -74,8 +74,8 @@ export const stub = {
   configChange: new EventEmitter<{ affectsConfiguration(section: string): boolean }>(),
   reset(): void {
     this.ops.length = 0;
-    // Agents found by their running processes stay off unless a test turns them on: tests never read the real agent homes.
-    this.config = { "lookout.agents.codex": false, "lookout.agents.copilot": false };
+    // Agents found by their running processes stay off unless a test turns them on, and so does the search for config directories: tests never read the real agent homes.
+    this.config = { "lookout.agents.codex": false, "lookout.agents.copilot": false, "lookout.claudeDiscoverDirs": false };
     this.commands.clear();
     this.groups = [];
     this.activeGroup = undefined;

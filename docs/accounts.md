@@ -12,11 +12,13 @@ This is the setup Anthropic's docs describe. Each account keeps its own config d
 alias claude-personal='CLAUDE_CONFIG_DIR=~/.claude-personal claude'
 ```
 
-Run `claude-personal` once and sign in. Then list the directory in VS Code's user settings:
+Run `claude-personal` once and sign in. Lookout finds the directory by itself, within a minute: a folder in your home directory named `.claude-<name>`, or the directory a running `claude` was given in `CLAUDE_CONFIG_DIR`, wherever it is. To name it, or to watch one that no process runs now and that is outside your home directory, list it in VS Code's user settings:
 
 ```json
 "lookout.claudeConfigDirs": ["personal=~/.claude-personal"]
 ```
+
+- **Finding directories.** `lookout.claudeDiscoverDirs`, on by default, looks every minute at `~/.claude`, the home directory's `.claude-<name>` and `.claude_<name>` folders, and the `CLAUDE_CONFIG_DIR` of each of your own running processes, read from their environments on Linux and macOS (on Windows, the home directory only). Only a directory holding Claude Code's config file, `.claude.json`, counts, so one Claude Code has run in. A directory found stays watched while it holds that file, so an account's sessions stay on the board after its last `claude` exits. A process's directory keeps the process's spelling, which names its stored sign-in; one found in the home directory alone is spelled as its full path, as `$HOME/.claude-personal` in an alias gives it. Lookout's output says each directory it finds. Turn the setting off to watch only the directories you list.
 
 - **Names.** `label=path` names a directory. Without a label, a directory goes by its name less a leading `.claude-`, and `~/.claude` by `default`. Add `"work=~/.claude"` to the list to name the default one.
 - **Spelling.** Claude Code names a directory's stored sign-in after the exact `CLAUDE_CONFIG_DIR` string; on macOS that is its Keychain item's name. Write the path in the setting as the alias writes it. `~` is fine; a trailing slash makes another sign-in.

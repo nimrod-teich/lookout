@@ -94,10 +94,16 @@ describe("the Claude Code directory settings", () => {
     expect(dirs?.order).toBe((settings["lookout.claudeConfigDir"]?.order ?? 0) + 1);
   });
 
+  it("finds directories by default, for the machine, right after the listed ones", () => {
+    const discover = settings["lookout.claudeDiscoverDirs"];
+    expect(discover).toMatchObject({ type: "boolean", default: true, scope: "machine" });
+    expect(discover?.order).toBe((settings["lookout.claudeConfigDirs"]?.order ?? 0) + 1);
+  });
+
   it("names accounts by address, for the machine, right after the directories", () => {
     const names = settings["lookout.claudeAccountNames"] as { type?: string; additionalProperties?: { type?: string }; default?: unknown; scope?: string; order?: number } | undefined;
     expect(names).toMatchObject({ type: "object", additionalProperties: { type: "string" }, default: {}, scope: "machine" });
-    expect(names?.order).toBe((settings["lookout.claudeConfigDirs"]?.order ?? 0) + 1);
+    expect(names?.order).toBe((settings["lookout.claudeDiscoverDirs"]?.order ?? 0) + 1);
   });
 });
 

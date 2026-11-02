@@ -47,8 +47,10 @@ export interface Config {
   claudeEnabled: boolean;
   /** The Claude Code config directory to read sessions and transcripts from: the first of `claudeDirs`, resolved. */
   claudeConfigDir: string;
-  /** Every Claude Code config directory watched, one per account: the primary first, then `lookout.claudeConfigDirs`. */
+  /** Every Claude Code config directory watched, one per account: the primary first, then `lookout.claudeConfigDirs`, then the ones found. */
   claudeDirs: ClaudeDir[];
+  /** Find Claude Code's config directories in running processes and the home directory. */
+  claudeDiscoverDirs: boolean;
   /** `lookout.claudeAccountNames`: the names the user gave Claude accounts, by their e-mail address's `emailKey`. */
   claudeAccountNames: Map<string, string>;
   /** When to tell agents apart by hue and silhouette. */
@@ -93,12 +95,15 @@ function refreshMode(value: string | undefined): RefreshMode {
   return value === "manual" || value === "off" ? value : "auto";
 }
 
-export function readConfig(): Config {
+/** `found`: the config directories found on this machine, watched after the listed ones while `lookout.claudeDiscoverDirs` is on. */
+export function readConfig(found: readonly string[] = []): Config {
   const lookout = vscode.workspace.getConfiguration("lookout");
+  const claudeDiscoverDirs = lookout.get<boolean>("claudeDiscoverDirs", true);
+  const listed = lookout.get<unknown>("claudeConfigDirs");
   const claudeDirs = resolveConfigDirs({
     setting: lookout.get<string>("claudeConfigDir"),
     claudeExtensionEnv: claudeExtensionEnv("CLAUDE_CONFIG_DIR"),
-    extra: lookout.get<unknown>("claudeConfigDirs"),
+    extra: [...(Array.isArray(listed) ? listed : []), ...(claudeDiscoverDirs ? found : [])],
   });
   return {
     statusBarEnabled: lookout.get<boolean>("statusBar.enabled", true),
@@ -124,6 +129,7 @@ export function readConfig(): Config {
     claudeEnabled: lookout.get<boolean>("agents.claude", true),
     claudeConfigDir: claudeDirs[0]!.resolved,
     claudeDirs,
+    claudeDiscoverDirs,
     claudeAccountNames: accountNames(lookout.get<unknown>("claudeAccountNames")),
     agentMarkers: markerSetting(lookout.get<string>("agentMarkers")),
     usageAgent: usageAgent(lookout.get<string>("statusBar.usageAgent")),
