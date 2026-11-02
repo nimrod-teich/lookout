@@ -4,9 +4,10 @@ import type { Log } from "./log";
 
 /**
  * What came of an answer: typed into the session's terminal; refused because
- * the session no longer shows that prompt; or the terminal is gone.
+ * the call was answered from a card before; refused because the session no
+ * longer shows that prompt; or the terminal is gone.
  */
-export type AnswerResult = "sent" | "moved-on" | "no-terminal";
+export type AnswerResult = "sent" | "already" | "moved-on" | "no-terminal";
 
 /** How many answered calls are remembered, so a second click on one is refused. */
 const REMEMBERED = 50;
@@ -33,8 +34,9 @@ export class Answerer {
   constructor(private readonly deps: AnswererDeps) {}
 
   answer(id: string, call: string, choice: Choice): AnswerResult {
+    if (this.answered.includes(call)) return "already";
     const view = this.deps.refresh().find((v) => v.id === id);
-    if (!view || this.answered.includes(call)) return "moved-on";
+    if (!view) return "moved-on";
     const keys = keysFor(view, call, choice);
     if (keys === undefined) return "moved-on";
     if (!this.deps.send(view.terminalPid!, keys)) return "no-terminal";

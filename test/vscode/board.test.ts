@@ -58,6 +58,21 @@ describe("Board", () => {
     expect(answer).not.toHaveBeenCalled();
   });
 
+  it("tells the card whether a key went, so it can offer the answers again when none did", () => {
+    const waiting = view({ state: "waiting", host: "terminal", terminalPid: 500, reason: { kind: "permission", ask: "Bash: npm test", call: "t1", answer: "yesno" } });
+    const results = ["sent", "already", "moved-on", "no-terminal", undefined];
+    const { webviewView } = setup([waiting], undefined, { answer: () => results.shift(), answers: () => true });
+    const replies = () => webviewView.posted.filter((message) => (message as { type?: string }).type === "answered");
+    for (let i = 0; i < 5; i++) webviewView.receive({ type: "answer", id: waiting.id, call: "t1", choice: "yes" });
+    // A key went now or at an earlier click; none went; and no word back while the cards do not answer.
+    expect(replies()).toEqual([
+      { type: "answered", call: "t1", sent: true },
+      { type: "answered", call: "t1", sent: true },
+      { type: "answered", call: "t1", sent: false },
+      { type: "answered", call: "t1", sent: false },
+    ]);
+  });
+
   it("sends the sessions when the page is ready and whenever it refreshes", () => {
     const sessions = [view({ state: "working" })];
     const { board, webviewView } = setup(sessions);

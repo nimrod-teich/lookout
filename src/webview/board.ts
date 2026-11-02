@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import { AGENTS, agentInfo, canJump, canRename, canResume, unreachable } from "../core/agents/catalog";
-import { answersOf, type Answer } from "../core/answers";
+import { answersOf, type Answer, type Choice } from "../core/answers";
 import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import { GROUPINGS, sectionsBy, type GroupBy, type Section } from "../core/grouping";
@@ -56,8 +56,8 @@ let usageBar: string | undefined;
 let markers = false;
 /** The cards answer prompts, as `lookout.answers.enabled` says. */
 let answersOn = false;
-/** The tool calls answered from a card while their prompt shows: one click types one key. */
-const answered = new Set<string>();
+/** The tool calls answered from a card while their prompt shows, with the answer sent: one click types one key. */
+const answered = new Map<string, Choice>();
 /** How many agents Lookout watches; unknown from an extension that does not say. */
 let watching: number | undefined;
 /** The search the user typed, trimmed; empty when the box is empty. */
@@ -992,24 +992,34 @@ function setAnswers(options: HTMLElement, view: SessionView, words: string[]): v
     options.replaceChildren(...(offered.length > 0 && call !== undefined ? offered.map((answer) => answerButton(options, view.id, call, answer)) : words.map((word) => el("span", "option", word))));
   }
   options.classList.toggle("hidden", offered.length === 0 && words.length === 0);
-  options.classList.toggle("answers", offered.length > 0);
-  options.classList.toggle("sent", call !== undefined && answered.has(call));
+  options.dataset.call = offered.length > 0 && call !== undefined ? call : "";
+  markSent(options, offered.length > 0 && call !== undefined ? answered.get(call) : undefined);
 }
 
-/** One answer as a button: a click types its key in the session's terminal, once, and does not jump. */
+/** One answer as a button: a click, or Enter, types its key in the session's terminal, once, and does not jump. */
 function answerButton(options: HTMLElement, id: string, call: string, answer: Answer): HTMLElement {
   const kind = answer.choice === "yes" ? " yes" : answer.choice === "no" ? " no" : "";
-  const button = el("span", `option answer${kind}`, answer.label);
+  const button = el("button", `option answer${kind}`, answer.label);
+  button.type = "button";
   button.title = answer.title;
-  button.setAttribute("role", "button");
+  button.dataset.choice = String(answer.choice);
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     if (answered.has(call)) return;
-    answered.add(call);
-    options.classList.add("sent");
+    answered.set(call, answer.choice);
+    markSent(options, answer.choice);
     vscode.postMessage({ type: "answer", id, call, choice: answer.choice });
   });
   return button;
+}
+
+/** The card's answer went: the one chosen stays, ticked, and the others fade until the prompt goes; undefined offers them all again. */
+function markSent(options: HTMLElement, choice: Choice | undefined): void {
+  options.classList.toggle("sent", choice !== undefined);
+  for (const button of options.querySelectorAll<HTMLButtonElement>(".option.answer")) {
+    button.classList.toggle("chosen", choice !== undefined && button.dataset.choice === String(choice));
+    button.setAttribute("aria-disabled", String(choice !== undefined));
+  }
 }
 
 /** A parking sign: the card goes under Parked. */
@@ -1940,6 +1950,13 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
     receiveSearch(message);
     return;
   }
+  if (message.type === "answered") {
+    // No key went: the prompt can be answered again, from the card or in its terminal.
+    if (!message.sent && answered.delete(message.call)) {
+      for (const options of document.querySelectorAll<HTMLElement>(".options")) if (options.dataset.call === message.call) markSent(options, undefined);
+    }
+    return;
+  }
   if (message.type !== "sessions") return;
   allSessions = keepFinished(message.sessions);
   past = message.past ?? [];
@@ -1958,7 +1975,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   markers = message.markers === true;
   answersOn = message.answers === true;
   // A prompt answered goes away; its call is not asked about again.
-  for (const call of answered) if (!message.sessions.some((view) => view.reason?.call === call)) answered.delete(call);
+  for (const call of answered.keys()) if (!message.sessions.some((view) => view.reason?.call === call)) answered.delete(call);
   watching = message.watching;
   clockOffset = message.now - Date.now();
   applyFilters();

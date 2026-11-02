@@ -14,7 +14,7 @@ export interface OpenTool {
   ask?: string;
   /** The answers a question offers. */
   options?: string[];
-  /** The ask is the whole of what the call works on: its command, path or address, neither clipped nor a summary of other input. */
+  /** The ask is all a Yes allows: the call's command, path or address, not clipped, and nothing else in its input that matters (a file's new content, an edit, other arguments). */
   whole?: boolean;
   /** A question that takes one of its options: AskUserQuestion with a single question, not multi-select. */
   single?: boolean;
@@ -221,6 +221,25 @@ export function summarizeTool(name: string, input: unknown): string | undefined 
 const LITERAL_FIELDS = ["command", "file_path", "notebook_path", "url", "pattern", "query", "skill", "path"];
 /** Fields that describe it in words: shown without their Markdown. */
 const PROSE_FIELDS = ["description", "prompt", "title", "summary", "name"];
+/**
+ * A tool's fields beside the one its ask shows that change nothing a Yes
+ * allows: Bash's description and timeout, the lines of a file Read reads.
+ * Any other field (a file's new content, an edit, an MCP tool's arguments)
+ * is part of what the prompt asks, which the card does not show.
+ */
+const ASIDE: Readonly<Record<string, readonly string[]>> = {
+  Bash: ["description", "timeout", "run_in_background"],
+  Read: ["offset", "limit", "pages"],
+  WebFetch: ["prompt"],
+  WebSearch: ["allowed_domains", "blocked_domains"],
+};
+
+/** Every field of the input but `key` is one a Yes does not depend on. */
+function onlyField(name: string, input: Record<string, unknown>, key: string): boolean {
+  const aside = ASIDE[name] ?? [];
+  // A command run outside the sandbox asks more than its command.
+  return Object.entries(input).every(([field, value]) => field === key || aside.includes(field) || (name === "Bash" && field === "dangerouslyDisableSandbox" && value !== true));
+}
 
 function record(v: unknown): Record<string, unknown> {
   return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
@@ -260,7 +279,7 @@ export function askOf(name: string, input: unknown, cwd?: string): Pick<OpenTool
     if (!value) continue;
     const line = oneLine(key === "file_path" || key === "notebook_path" || key === "path" ? relative(value, cwd) : value);
     const ask = clip(line);
-    return ask === line ? { ask, whole: true } : { ask };
+    return ask === line && onlyField(name, i, key) ? { ask, whole: true } : { ask };
   }
   for (const key of ["plan", ...PROSE_FIELDS]) {
     const value = str(i[key]);

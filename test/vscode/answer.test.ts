@@ -10,7 +10,7 @@ function waiting(overrides: Partial<SessionView> = {}): SessionView {
 }
 
 function setup(sessions: SessionView[], open = true) {
-  const state = { sessions, refreshes: 0 };
+  const state = { sessions, refreshes: 0, open };
   const sent: [number, string][] = [];
   const answerer = new Answerer({
     refresh: () => {
@@ -18,7 +18,7 @@ function setup(sessions: SessionView[], open = true) {
       return state.sessions;
     },
     send: (pid, keys) => {
-      if (!open) return false;
+      if (!state.open) return false;
       sent.push([pid, keys]);
       return true;
     },
@@ -50,18 +50,23 @@ describe("Answerer", () => {
   });
 
   it("answers a call once, however often it is asked", () => {
-    const { answerer, sent } = setup([waiting()]);
+    const { answerer, sent, state } = setup([waiting()]);
     expect(answerer.answer(ID, "t1", "yes")).toBe("sent");
     // The card is still a moment old: the same prompt shows until Claude Code writes its state.
-    expect(answerer.answer(ID, "t1", "yes")).toBe("moved-on");
-    expect(answerer.answer(ID, "t1", "no")).toBe("moved-on");
+    expect(answerer.answer(ID, "t1", "yes")).toBe("already");
+    expect(answerer.answer(ID, "t1", "no")).toBe("already");
     expect(sent).toEqual([[500, "1"]]);
+    // Refused before reading the sessions again.
+    expect(state.refreshes).toBe(1);
   });
 
-  it("says so when the terminal is gone", () => {
-    const { answerer, sent } = setup([waiting()], false);
+  it("says so when the terminal is gone, and answers once it is back", () => {
+    const { answerer, sent, state } = setup([waiting()], false);
     expect(answerer.answer(ID, "t1", "yes")).toBe("no-terminal");
     expect(sent).toEqual([]);
-    // Not counted as answered: the prompt can still be answered once the terminal is found.
+    // Not counted as answered: the card offers the answer again.
+    state.open = true;
+    expect(answerer.answer(ID, "t1", "yes")).toBe("sent");
+    expect(sent).toEqual([[500, "1"]]);
   });
 });

@@ -168,7 +168,24 @@ describe("what the card can answer", () => {
       call: "t1",
       answer: "yesno",
     });
-    expect(reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", "Write", { file_path: "/work/app/out.txt", content: "hello" }]))).toMatchObject({ ask: "Write: out.txt", call: "t1", answer: "yesno" });
+    const yes = (name: string, input: unknown) => reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", name, input])).answer;
+    expect(yes("Bash", { command: "npm test", timeout: 60000, run_in_background: false, dangerouslyDisableSandbox: false })).toBe("yesno");
+    expect(yes("Read", { file_path: "/etc/hosts", offset: 1, limit: 20 })).toBe("yesno");
+    expect(yes("WebFetch", { url: "https://example.com/a", prompt: "Summarise it" })).toBe("yesno");
+    expect(yes("mcp__playwright__browser_navigate", { url: "https://example.com" })).toBe("yesno");
+  });
+
+  it("leaves a permission to its terminal when the input holds more than the card shows", () => {
+    const yes = (name: string, input: unknown) => reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", name, input])).answer;
+    // The terminal shows the file's new content or the edit; the card only names the file.
+    expect(yes("Write", { file_path: "/work/app/out.txt", content: "hello" })).toBeUndefined();
+    expect(yes("Edit", { file_path: "/work/app/out.txt", old_string: "a", new_string: "b" })).toBeUndefined();
+    expect(yes("NotebookEdit", { notebook_path: "/work/app/n.ipynb", new_source: "x = 1" })).toBeUndefined();
+    // Outside the sandbox: more than the command is asked.
+    expect(yes("Bash", { command: "curl https://example.com", dangerouslyDisableSandbox: true })).toBeUndefined();
+    // Where a search looks, or an MCP tool's other arguments.
+    expect(yes("Grep", { pattern: "TODO", path: "/etc" })).toBeUndefined();
+    expect(yes("mcp__db__run", { query: "DELETE FROM users", database: "prod" })).toBeUndefined();
   });
 
   it("leaves a permission to its terminal when the card cannot show what it allows", () => {

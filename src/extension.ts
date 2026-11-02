@@ -16,7 +16,7 @@ import { readSort, SORTS, type SessionSort } from "./core/sorting";
 import type { PastView, SessionView } from "./core/types";
 import { groupKey, pickBar } from "./core/usageGroups";
 import type { Choice } from "./core/answers";
-import { Answerer } from "./vscode/answer";
+import { Answerer, type AnswerResult } from "./vscode/answer";
 import { Board, BOARD_VIEW } from "./vscode/board";
 import { findClaudeBinary } from "./vscode/claudeBinary";
 import { readConfig } from "./vscode/config";
@@ -176,17 +176,18 @@ export function activate(context: vscode.ExtensionContext): void {
     send: (pid, keys) => terminals.send(pid, keys),
     log,
   });
-  const answer = (view: SessionView, call: string, choice: Choice) => {
-    if (!config.answers) return;
-    switch (answerer.answer(view.id, call, choice)) {
-      case "sent":
-        return;
+  const answer = (view: SessionView, call: string, choice: Choice): AnswerResult | undefined => {
+    if (!config.answers) return undefined;
+    const result = answerer.answer(view.id, call, choice);
+    switch (result) {
       case "moved-on":
         void vscode.window.showInformationMessage(`"${view.title}" no longer shows that prompt, so Lookout typed nothing.`);
-        return;
+        break;
       case "no-terminal":
         void vscode.window.showWarningMessage(`Lookout could not find the terminal of "${view.title}".`);
+        break;
     }
+    return result;
   };
   /** Has one account's usage fetched, the first's without a key, and says what came of it unless new numbers came. */
   const refreshAccount = async (key: string | undefined): Promise<void> => {

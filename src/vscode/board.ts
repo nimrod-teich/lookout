@@ -7,6 +7,7 @@ import { isGroupBy, type GroupBy } from "../core/grouping";
 import { isSortKey, type SessionSort } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import type { BoardUsage, EarlierInfo, EarlierScope, Favourites, FromBoard, ToBoard } from "../webview/protocol";
+import type { AnswerResult } from "./answer";
 
 export const BOARD_VIEW = "lookout.board";
 
@@ -68,8 +69,8 @@ export interface BoardActions {
   markAllSeen(): void;
   /** Dismisses the question a session's last message asks. */
   dismiss(id: string): void;
-  /** Answers a session's prompt in its terminal; none when the cards do not answer. */
-  answer?(view: SessionView, call: string, choice: Choice): void;
+  /** Answers a session's prompt in its terminal and says what came of it; undefined when the cards do not answer. */
+  answer?(view: SessionView, call: string, choice: Choice): AnswerResult | undefined;
   /** The cards answer prompts. */
   answers?(): boolean;
   /** A search's results fill in as the conversations are read in the background: they are sent again as they do. */
@@ -181,7 +182,11 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         const { call, choice } = message;
         const valid = choice === "yes" || choice === "no" || (typeof choice === "number" && Number.isInteger(choice) && choice >= 0);
         if (!view || typeof call !== "string" || !valid || !this.actions.answers?.()) return;
-        this.actions.answer?.(view, call, choice);
+        const result = this.actions.answer?.(view, call, choice);
+        if (result === undefined) return;
+        // The card fades its buttons on the click; when no key went, it offers them again.
+        const reply: ToBoard = { type: "answered", call, sent: result === "sent" || result === "already" };
+        void this.view?.webview.postMessage(reply);
         return;
       }
       case "seenAll":
