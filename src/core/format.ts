@@ -115,6 +115,15 @@ export function clockTime(ms: number, now: number = Date.now()): string {
   return `${at.toLocaleString("en", { month: "short" })} ${at.getDate()}, ${time}`;
 }
 
+/** A window's short name, for the tide: "5h", "week", or the model a week of its own belongs to ("Fable"). */
+export function windowTag(meter: UsageMeter): string {
+  if (meter.key.startsWith("weekly_scoped:")) return meter.key.slice("weekly_scoped:".length);
+  if (meter.windowMs === undefined) return meter.label;
+  const hours = meter.windowMs / 3_600_000;
+  if (hours < 24) return `${Math.round(hours)}h`;
+  return hours === 7 * 24 ? "week" : `${Math.round(hours / 24)}d`;
+}
+
 /** "5-hour limit", "weekly limit", "weekly Fable limit". */
 export function windowName(meter: UsageMeter): string {
   if (meter.key === "session") return "5-hour limit";

@@ -42,12 +42,19 @@ export function parsePin(setting: UsageAgentSetting): { agent: string; account?:
   return account ? { agent: agent.id, account } : { agent: agent.id };
 }
 
+/** A limit this full is nearly used up: the status bar's bar shows it, whatever its window, on red. */
+export const NEARLY_USED_UP = 95;
+
 /**
- * An agent's meter for the status bar's bar: its session window (`session`,
- * the 5-hour one), else its shortest window, else its first. The rest stay
- * in the hover.
+ * An agent's meter for the status bar's bar: a limit nearly used up (the
+ * fullest), since that one stops the agent; else its session window
+ * (`session`, the 5-hour one); else its shortest window (Claude's weekly
+ * limit on an account without a 5-hour one, a verified Ultra account); else
+ * its first. The rest stay in the hover.
  */
 export function barMeter(meters: readonly UsageMeter[]): UsageMeter | undefined {
+  const peak = peakMeter(meters);
+  if (peak && peak.percent >= NEARLY_USED_UP) return peak;
   const session = meters.find((meter) => meter.key === "session");
   if (session) return session;
   const timed = meters.filter((meter) => meter.windowMs !== undefined);

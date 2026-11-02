@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockTime, countStates, describeAlert, describeEvidence, describeLocation, describeReason, describeSpan, shortSpan, describeState, formatCountdown, formatElapsed, formatResetIn, formatTokens, formatUntil, formatUsd, noticeBody, quietFor, shortModel, windowName } from "../../src/core/format";
+import { clockTime, countStates, describeAlert, describeEvidence, describeLocation, describeReason, describeSpan, shortSpan, describeState, formatCountdown, formatElapsed, formatResetIn, formatTokens, formatUntil, formatUsd, noticeBody, quietFor, shortModel, windowName, windowTag } from "../../src/core/format";
 import { view } from "../vscode/helpers";
 
 describe("format", () => {
@@ -77,6 +77,16 @@ describe("format", () => {
     expect(windowName({ key: "session", label: "5h", percent: 1 })).toBe("5-hour limit");
     expect(windowName({ key: "weekly_all", label: "Week", percent: 1 })).toBe("weekly limit");
     expect(windowName({ key: "weekly_scoped:Fable", label: "Week · Fable", percent: 1 })).toBe("weekly Fable limit");
+  });
+
+  it("gives the tide a short name for its window", () => {
+    const HOUR = 3_600_000;
+    expect(windowTag({ key: "session", label: "Session (5hr)", percent: 1, windowMs: 5 * HOUR })).toBe("5h");
+    expect(windowTag({ key: "weekly_all", label: "Weekly (7 day)", percent: 1, windowMs: 168 * HOUR })).toBe("week");
+    expect(windowTag({ key: "weekly_scoped:Fable", label: "Weekly Fable", percent: 1, windowMs: 168 * HOUR })).toBe("Fable");
+    expect(windowTag({ key: "primary", label: "5h limit", percent: 1, windowMs: 5 * HOUR })).toBe("5h");
+    expect(windowTag({ key: "monthly", label: "Monthly", percent: 1, windowMs: 720 * HOUR })).toBe("30d");
+    expect(windowTag({ key: "other", label: "Other", percent: 1 })).toBe("Other");
     expect(windowName({ key: "other", label: "other", percent: 1 })).toBe("other limit");
   });
 

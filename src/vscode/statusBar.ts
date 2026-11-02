@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { AGENTS, agentInfo } from "../core/agents/catalog";
 import { formatCountdown, formatResetIn } from "../core/format";
 import type { UsageMeter } from "../core/usage";
-import { groupHeading, pickBar, sortGroups, type UsageGroup } from "../core/usageGroups";
+import { groupHeading, NEARLY_USED_UP, pickBar, sortGroups, type UsageGroup } from "../core/usageGroups";
 import type { Usage } from "./controller";
 import { agentIcon, BRAND_ICON } from "./icons";
 
@@ -10,7 +10,6 @@ import { agentIcon, BRAND_ICON } from "./icons";
 const TOOLTIP_MS = 60_000;
 /** Lands the countdown's rewrite just past the turn of its minute. */
 const COUNTDOWN_SLACK_MS = 50;
-const USAGE_ERROR_AT = 95;
 /** Cells in the usage bar. */
 const BAR_CELLS = 10;
 /** The bar's colour by consumption, like the board's meters: calm below half, amber from half, red from 80%. */
@@ -184,7 +183,7 @@ export class StatusBar implements vscode.Disposable {
       this.item.color = color ? new vscode.ThemeColor(color) : undefined;
       this.shown.color = color;
     }
-    const background = bar && !bar.group.stale && bar.meter.percent >= USAGE_ERROR_AT ? "error" : "";
+    const background = bar && !bar.group.stale && bar.meter.percent >= NEARLY_USED_UP ? "error" : "";
     if (background !== this.shown.background) {
       this.item.backgroundColor = background === "error" ? this.error : undefined;
       this.shown.background = background;

@@ -5,6 +5,7 @@ import type { SearchResult } from "../core/history";
 import { GROUPINGS, sectionsBy, type GroupBy, type Section } from "../core/grouping";
 import { DEFAULT_SORT, dragInto, orderViews, SORTS, type SessionSort, type SortKey } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
+import type { UsageMeter } from "../core/usage";
 import { barMeter, chosenGroup, groupHeading, groupKey, pickBar, sortGroups, tabMeters } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
 import { Harbour } from "./harbour";
@@ -750,7 +751,7 @@ function toggleGroup(key: GroupKey): void {
 
 /** The legend counts every session; a click hides that group from the board. */
 function renderBeam(): void {
-  harbour.update(sessions, tidePercent(), now(), markers);
+  harbour.update(sessions, tideMeter(), now(), markers);
   const counts = { waiting: 0, done: 0, working: 0, idle: 0, parked: 0 };
   for (const group of groupSessions(allSessions)) counts[group.key] = group.views.length;
   legend.textContent = "";
@@ -786,11 +787,11 @@ function renderBeam(): void {
 }
 
 /** The tide rises with the window the status bar shows, among the agents shown: Claude's 5 hours while it is the one agent with usage. */
-function tidePercent(): number | undefined {
+function tideMeter(): UsageMeter | undefined {
   const groups = shownUsage().map((group) => ({ ...group, agent: group.agent ?? AGENTS[0]!.id }));
   const pinned = groups.find((group) => groupKey(group) === usageBar);
-  if (pinned) return barMeter(pinned.meters)?.percent;
-  return pickBar(groups)?.meter.percent;
+  if (pinned) return barMeter(pinned.meters);
+  return pickBar(groups)?.meter;
 }
 
 // Usage, under the beam: a tab per agent, or per account of an agent watched
