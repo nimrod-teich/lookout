@@ -1,12 +1,17 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { UsageMeter } from "./usage";
+import { AMBER_FROM, RED_FROM } from "./usageGroups";
 
-/** The thresholds announced per kind of meter, in percent: a model's own weekly limit (`weekly_scoped:Fable`) as the all-models one. */
+/**
+ * The thresholds announced per kind of meter, in percent, where the bars
+ * change colour: a model's own weekly limit (`weekly_scoped:Fable`) as the
+ * all-models one.
+ */
 export const ALERT_THRESHOLDS: Readonly<Record<string, readonly number[]>> = {
-  session: [70, 90],
-  weekly_all: [90],
-  weekly_scoped: [90],
+  session: [AMBER_FROM, RED_FROM],
+  weekly_all: [RED_FROM],
+  weekly_scoped: [RED_FROM],
 };
 
 export interface UsageAlert {

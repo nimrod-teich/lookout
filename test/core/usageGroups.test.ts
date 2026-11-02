@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UsageMeter } from "../../src/core/usage";
-import { barMeter, chosenGroup, groupHeading, groupKey, parsePin, peakMeter, pickBar, sortGroups, tabMeters, type UsageGroup } from "../../src/core/usageGroups";
+import { barMeter, chosenGroup, groupHeading, groupKey, parsePin, peakMeter, pickBar, sortGroups, tabMeters, usageLevel, type UsageGroup } from "../../src/core/usageGroups";
 
 const HOUR = 3_600_000;
 
@@ -26,6 +26,14 @@ describe("barMeter", () => {
     expect(barMeter([meter("session", 15, 5 * HOUR), meter("weekly_scoped:Fable", 95, 168 * HOUR)])?.key).toBe("weekly_scoped:Fable");
     expect(barMeter([meter("session", 96, 5 * HOUR), meter("weekly_all", 99, 168 * HOUR)])?.key).toBe("weekly_all");
     expect(barMeter([])).toBeUndefined();
+  });
+});
+
+describe("usageLevel", () => {
+  it("is calm below 70%, amber from 70%, red from 90%: where the alerts go out", () => {
+    expect([0, 50, 69, 69.9].map(usageLevel)).toEqual(["low", "low", "low", "low"]);
+    expect([70, 80, 89].map(usageLevel)).toEqual(["mid", "mid", "mid"]);
+    expect([90, 95, 100].map(usageLevel)).toEqual(["high", "high", "high"]);
   });
 });
 

@@ -6,7 +6,7 @@ import { GROUPINGS, sectionsBy, type GroupBy, type Section } from "../core/group
 import { DEFAULT_SORT, dragInto, orderViews, SORTS, type SessionSort, type SortKey } from "../core/sorting";
 import type { PastView, SessionView } from "../core/types";
 import type { UsageMeter } from "../core/usage";
-import { barMeter, chosenGroup, groupHeading, groupKey, pickBar, sortGroups, tabMeters } from "../core/usageGroups";
+import { barMeter, chosenGroup, groupHeading, groupKey, pickBar, sortGroups, tabMeters, usageLevel } from "../core/usageGroups";
 import { agentGlyph } from "./glyph";
 import { Harbour } from "./harbour";
 import { cardLine, contextLevel, contextPercent, groupSessions, hostChip, isFoldKey, isGroupKey, pageOf, pulseBars, scheduleChip, secondLine, type Chip, type FoldKey, type GroupKey } from "./model";
@@ -821,11 +821,6 @@ function resetShort(resetsAt: number | undefined): string {
   return formatResetIn(resetsAt - now()).replace(/^in /, "");
 }
 
-/** Fill colour by consumption: calm below half, amber from half, red from 80%. */
-function meterLevel(percent: number): "low" | "mid" | "high" {
-  return percent >= 80 ? "high" : percent >= 50 ? "mid" : "low";
-}
-
 /** One tab per group of the agents shown, in catalog order; the chosen tab's limits under them. */
 function renderMeters(): void {
   const groups = shownUsage().map((group) => ({ ...group, agent: group.agent ?? AGENTS[0]!.id }));
@@ -855,7 +850,7 @@ function renderMeters(): void {
     const label = group.account ? `${agentInfo(group.agent).label} · ${group.account}` : agentInfo(group.agent).label;
     const shareEl = tab.querySelector<HTMLElement>(".share")!;
     shareEl.textContent = shown ? `${Math.floor(shown.percent)}%` : "—";
-    shareEl.className = `share ${shown ? meterLevel(shown.percent) : ""}`;
+    shareEl.className = `share ${shown ? usageLevel(shown.percent) : ""}`;
     tab.title = shown
       ? `${groupHeading(group)}: ${shown.label} at ${Math.floor(shown.percent)}%${closest ? `; ${closest.label} is the closest to its limit, at ${Math.floor(closest.percent)}%` : ""}`
       : `${label}: no usage reported`;
@@ -889,7 +884,7 @@ function renderMeters(): void {
     }
     const percent = Math.floor(meter.percent);
     const reset = resetShort(meter.resetsAt);
-    line.className = `meter ${meterLevel(meter.percent)}`;
+    line.className = `meter ${usageLevel(meter.percent)}`;
     line.querySelector(".label")!.textContent = meter.label;
     (line.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
     // The share and the time to reset in columns of their own: the shares line up, with a time or without.

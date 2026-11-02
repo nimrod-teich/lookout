@@ -55,7 +55,8 @@ describe("the status bar with more than one agent", () => {
   it("shows the window under the most pressure, with its agent's boat before the bar, and every group in the hover", () => {
     bar.render(input({ usageGroups: [claude, codex] }), 0);
     expect(lastSet("text")).toBe("$(lookout-lighthouse) $(lookout-cutter) ▰▰▰▰▰▰▱▱▱▱ 64%");
-    expect(lastSet("color")).toMatchObject({ id: "charts.yellow" });
+    // 64%: under the 70% where a bar turns amber.
+    expect(lastSet("color")).toMatchObject({ id: "charts.green" });
     const tip = (lastSet("tooltip") as { value: string }).value;
     expect(tip).toContain("$(lookout-sloop)</span> **Claude usage**");
     expect(tip).toContain("$(lookout-cutter)</span> **Codex usage**");

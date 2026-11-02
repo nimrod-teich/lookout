@@ -44,6 +44,15 @@ export function parsePin(setting: UsageAgentSetting): { agent: string; account?:
 
 /** A limit this full is nearly used up: the status bar's bar shows it, whatever its window, on red. */
 export const NEARLY_USED_UP = 95;
+/** A bar turns amber here, where the first 5-hour alert goes out. */
+export const AMBER_FROM = 70;
+/** A bar turns red here, where the last alert of every window goes out, and where a card's context ring turns red. */
+export const RED_FROM = 90;
+
+/** A usage bar's colour by the share of its limit used: calm below 70%, amber from 70%, red from 90%. */
+export function usageLevel(percent: number): "low" | "mid" | "high" {
+  return percent >= RED_FROM ? "high" : percent >= AMBER_FROM ? "mid" : "low";
+}
 
 /**
  * An agent's meter for the status bar's bar: a limit nearly used up (the

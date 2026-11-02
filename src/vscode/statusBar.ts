@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { AGENTS, agentInfo } from "../core/agents/catalog";
 import { formatCountdown, formatResetIn } from "../core/format";
 import type { UsageMeter } from "../core/usage";
-import { groupHeading, NEARLY_USED_UP, pickBar, sortGroups, type UsageGroup } from "../core/usageGroups";
+import { groupHeading, NEARLY_USED_UP, pickBar, sortGroups, usageLevel, type UsageGroup } from "../core/usageGroups";
 import type { Usage } from "./controller";
 import { agentIcon, BRAND_ICON } from "./icons";
 
@@ -12,7 +12,7 @@ const TOOLTIP_MS = 60_000;
 const COUNTDOWN_SLACK_MS = 50;
 /** Cells in the usage bar. */
 const BAR_CELLS = 10;
-/** The bar's colour by consumption, like the board's meters: calm below half, amber from half, red from 80%. */
+/** The bar's colour by consumption (`usageLevel`), like the board's meters: calm below 70%, amber from 70%, red from 90%. */
 const BAR_COLORS = { low: "charts.green", mid: "charts.yellow", high: "charts.red" } as const;
 /** The same colours in the hover, where only an inline style can colour text: VS Code's default chart colours. */
 const HOVER_COLORS = { low: "#89d185", mid: "#cca700", high: "#f14c4c", stale: "#8b8b8b" } as const;
@@ -65,10 +65,6 @@ function barOf(input: StatusBarInput): Bar | undefined {
 export function usageBar(percent: number): string {
   const filled = Math.max(0, Math.min(BAR_CELLS, Math.round(percent / (100 / BAR_CELLS))));
   return `${"▰".repeat(filled)}${"▱".repeat(BAR_CELLS - filled)}`;
-}
-
-function usageLevel(percent: number): keyof typeof BAR_COLORS {
-  return percent >= 80 ? "high" : percent >= 50 ? "mid" : "low";
 }
 
 function usageText(bar: Bar | undefined, showReset: boolean, now: number): string {

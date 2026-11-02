@@ -71,9 +71,9 @@ describe("StatusBar", () => {
     expect(tip).toContain("Session \\(5hr\\): 18% · resets in 1h  \n");
     expect(tip).toContain("Weekly \\(7 day\\): 31% · resets in 2d  \n");
     expect(tip).toContain("Weekly Fable: 84%  \n");
-    // Each limit with a bar coloured as the board's: green, amber from half, red from 80%.
+    // Each limit with a bar coloured as the board's: green, amber from 70%, red from 90%.
     expect(tip).toContain('<span style="color:#89d185;">▰▰▱▱▱▱▱▱▱▱</span> Session');
-    expect(tip).toContain('<span style="color:#f14c4c;">▰▰▰▰▰▰▰▰▱▱</span> Weekly Fable');
+    expect(tip).toContain('<span style="color:#cca700;">▰▰▰▰▰▰▰▰▱▱</span> Weekly Fable');
     expect(tip).not.toContain("As of");
     expect(tip).toContain("Click to open Lookout");
   });
@@ -108,14 +108,17 @@ describe("StatusBar", () => {
 
   it("colours the bar by the 5-hour usage alone and leaves the week to the hover", () => {
     const meters = (session: number, week: number) => usage({ meters: [{ key: "session", label: "5h", percent: session }, { key: "weekly_all", label: "Week", percent: week }] });
-    bar.render(input({ usage: meters(55, 90) }), 0);
-    expect(lastSet("text")).toBe(`${L} ▰▰▰▰▰▰▱▱▱▱ 55%`);
-    expect(lastSet("color")).toMatchObject({ id: "charts.yellow" });
+    bar.render(input({ usage: meters(64, 90) }), 0);
+    expect(lastSet("text")).toBe(`${L} ▰▰▰▰▰▰▱▱▱▱ 64%`);
+    expect(lastSet("color")).toMatchObject({ id: "charts.green" });
     expect(lastSet("backgroundColor")).toBeUndefined();
     expect((lastSet("tooltip") as { value: string }).value).toContain("Week: 90%");
-    bar.render(input({ usage: meters(80, 10) }), 0);
+    bar.render(input({ usage: meters(75, 10) }), 0);
+    expect(lastSet("color")).toMatchObject({ id: "charts.yellow" });
+    expect(lastSet("text")).toBe(`${L} ▰▰▰▰▰▰▰▰▱▱ 75%`);
+    bar.render(input({ usage: meters(90, 10) }), 0);
     expect(lastSet("color")).toMatchObject({ id: "charts.red" });
-    expect(lastSet("text")).toBe(`${L} ▰▰▰▰▰▰▰▰▱▱ 80%`);
+    expect(lastSet("text")).toBe(`${L} ▰▰▰▰▰▰▰▰▰▱ 90%`);
     // No 5-hour meter at all: the first one stands in.
     bar.render(input({ usage: usage({ meters: [{ key: "weekly_all", label: "Week", percent: 4 }] }) }), 0);
     expect(lastSet("text")).toBe(`${L} ▱▱▱▱▱▱▱▱▱▱ 4%`);
