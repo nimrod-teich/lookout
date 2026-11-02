@@ -28,7 +28,7 @@ async function answer(ask: WorktreeAsk): Promise<WorktreeAnswer> {
       return { id: ask.id, removals, freeSpaceGrew: before.size ? grew : undefined };
     }
     case "restore":
-      return { id: ask.id, restored: await restoreWorktree(ask.record) };
+      return { id: ask.id, restored: await restoreWorktree(ask.record, ask.git) };
   }
 }
 

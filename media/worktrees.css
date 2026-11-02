@@ -241,6 +241,35 @@ input[type="checkbox"] {
   color: var(--ink);
 }
 
+/* No git to check with --------------------------------------------------------- */
+
+.git-problem {
+  margin: 8px 0 22px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 176, 0, 0.35);
+  border-left: 3px solid var(--lamp);
+  border-radius: 6px;
+  background: var(--paper-2);
+}
+
+.git-problem-title {
+  margin: 0 0 6px;
+  color: var(--lamp);
+  font-size: calc(var(--vscode-font-size) + 2px);
+  font-weight: 650;
+}
+
+.git-problem-text {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.git-problem-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* The filter and the order ----------------------------------------------------- */
 
 .controls {
