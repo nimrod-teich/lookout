@@ -33,6 +33,25 @@ describe("metersOf", () => {
     expect(metersOf({ limits: [] })).toEqual([]);
   });
 
+  it("reads an account without a 5-hour window, a verified Ultra one, and names a row scoped to a surface", () => {
+    const week = "2026-11-03T23:00:00.140323+00:00";
+    const ultra = {
+      five_hour: null,
+      seven_day: { utilization: 41, resets_at: week },
+      limits: [
+        { kind: "weekly_all", group: "weekly", percent: 41, severity: "normal", resets_at: week, scope: null, is_active: false },
+        { kind: "weekly_scoped", group: "weekly", percent: 51, severity: "normal", resets_at: week, scope: { model: { id: null, display_name: "Fable" }, surface: null }, is_active: true },
+        { kind: "weekly_scoped", group: "weekly", percent: 7, severity: "normal", resets_at: week, scope: { model: null, surface: { display_name: "Cowork" } }, is_active: false },
+      ],
+    };
+    expect(metersOf(ultra).map(({ key, label, percent }) => ({ key, label, percent }))).toEqual([
+      { key: "weekly_all", label: "Weekly (7 day)", percent: 41 },
+      { key: "weekly_scoped:Fable", label: "Weekly Fable", percent: 51 },
+      { key: "weekly_scoped:Cowork", label: "Weekly Cowork", percent: 7 },
+    ]);
+    expect(metersOf({ five_hour: null, seven_day: { utilization: 41, resets_at: week } }).map((meter) => meter.key)).toEqual(["weekly_all"]);
+  });
+
   it("reads the per-model weekly limits the cache carries next to the five-hour and seven-day ones", () => {
     expect(metersOf({ five_hour: { utilization: 5 }, seven_day: { utilization: 9 }, seven_day_opus: { utilization: 40, resets_at: "2026-10-20T23:00:00Z" }, seven_day_sonnet: null, seven_day_oauth_apps: { utilization: 3 } })).toEqual([
       { key: "session", label: "Session (5hr)", percent: 5, resetsAt: undefined, windowMs: 5 * 3_600_000 },

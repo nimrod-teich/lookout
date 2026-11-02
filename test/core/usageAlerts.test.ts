@@ -20,7 +20,10 @@ describe("reachedThresholds", () => {
       ["weekly_all-90-29875620", 90],
     ]);
     expect(reachedThresholds([session(75, RESET + 5 * 3_600_000)]).map((a) => a.id)).toEqual(["session-70-29870050"]);
-    expect(reachedThresholds([{ key: "weekly_scoped:Fable", label: "Week · Fable", percent: 99 }])).toEqual([]);
+    // A model's own weekly limit, as the all-models one: at 90%, an alert of its own.
+    expect(reachedThresholds([{ key: "weekly_scoped:Fable", label: "Weekly Fable", percent: 89, resetsAt: WEEK_RESET }])).toEqual([]);
+    expect(reachedThresholds([week(91), { key: "weekly_scoped:Fable", label: "Weekly Fable", percent: 99, resetsAt: WEEK_RESET }]).map((a) => a.id)).toEqual(["weekly_all-90-29875620", "weekly_scoped:Fable-90-29875620"]);
+    expect(reachedThresholds([{ key: "other", label: "Other", percent: 99 }])).toEqual([]);
   });
 
   it("names where the numbers come from, so two accounts' windows never share an alert", () => {

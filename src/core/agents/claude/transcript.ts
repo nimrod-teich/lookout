@@ -1,6 +1,6 @@
 import { PULSE_BINS, PULSE_WINDOW_MS, pulseBin, pulseBins, pulseLength } from "../../pulse";
 import { clip, quoteAsk } from "../../asks";
-import { costOf, type TokenCounts } from "./pricing";
+import { replyCost, type TokenCounts } from "./pricing";
 import { cronListOf, cronListSaysNone, cronResultOf, cronSchedule, firedBy, pendingSchedules, promptLine, scheduleView, wakeupResultOf, type Schedule } from "./schedule";
 import type { ScheduleView } from "../../types";
 
@@ -73,8 +73,8 @@ export interface TranscriptState {
   compactedAt: number[];
   /** Totals from Claude Code's last cost checkpoint, which includes subagents. */
   checkpoint?: { tokens: TokenCounts; costUsd: number | undefined };
-  /** Usage after the checkpoint, per model, deduplicated by message id. */
-  since: Map<string, TokenCounts>;
+  /** Usage after the checkpoint, per model, deduplicated by message id; each reply priced as it was served, undefined for an unknown model. */
+  since: Map<string, { tokens: TokenCounts; costUsd: number | undefined }>;
   /** Message ids counted in `since`; a message spans several lines with the same usage. */
   countedMessages: Set<string>;
   /** No checkpoint was seen: the state started mid-transcript. */
@@ -165,9 +165,12 @@ function applyUsage(state: TranscriptState, message: { id?: unknown; model?: unk
   const creation = usage.cache_creation as Record<string, unknown> | undefined;
   const write1h = n(creation?.ephemeral_1h_input_tokens);
   const write5m = creation ? n(creation.ephemeral_5m_input_tokens) : n(usage.cache_creation_input_tokens);
-  const tokens = state.since.get(model) ?? zeroTokens();
-  addTokens(tokens, { input: n(usage.input_tokens), output: n(usage.output_tokens), cacheRead: n(usage.cache_read_input_tokens), cacheWrite5m: write5m, cacheWrite1h: write1h });
-  state.since.set(model, tokens);
+  const reply = { input: n(usage.input_tokens), output: n(usage.output_tokens), cacheRead: n(usage.cache_read_input_tokens), cacheWrite5m: write5m, cacheWrite1h: write1h };
+  const cost = replyCost(model, reply, { speed: str(usage.speed), inferenceGeo: str(usage.inference_geo) });
+  const sum = state.since.get(model) ?? { tokens: zeroTokens(), costUsd: 0 };
+  addTokens(sum.tokens, reply);
+  sum.costUsd = sum.costUsd === undefined || cost === undefined ? undefined : sum.costUsd + cost;
+  state.since.set(model, sum);
 }
 
 function firstLine(text: string, max = SUMMARY_MAX): string | undefined {
@@ -618,11 +621,10 @@ export function spendOf(state: TranscriptState): Spend | undefined {
   const total = state.checkpoint ? { ...state.checkpoint.tokens } : zeroTokens();
   let cost: number | undefined = state.checkpoint ? state.checkpoint.costUsd : 0;
   let estimated = false;
-  for (const [model, tokens] of state.since) {
+  for (const { tokens, costUsd } of state.since.values()) {
     addTokens(total, tokens);
     estimated = true;
-    const part = costOf(model, tokens);
-    cost = cost === undefined || part === undefined ? undefined : cost + part;
+    cost = cost === undefined || costUsd === undefined ? undefined : cost + costUsd;
   }
   return {
     input: total.input,
