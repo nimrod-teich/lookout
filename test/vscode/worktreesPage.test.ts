@@ -51,7 +51,8 @@ async function settled(page: WorktreesPage): Promise<void> {
   await vi.waitFor(() => expect(page.current.busy).toBeUndefined(), { timeout: 20_000 });
 }
 
-describe("WorktreesPage", () => {
+// Each test builds real repositories and runs git many times, which takes a Windows runner seconds; the waits inside allow 20.
+describe("WorktreesPage", { timeout: 30_000 }, () => {
   beforeEach(() => stub.reset());
 
   it("checks the worktrees the first time it opens, in their tiers, and not again on the next", async () => {
