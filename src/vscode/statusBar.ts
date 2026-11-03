@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { AGENTS, agentInfo } from "../core/agents/catalog";
-import { formatCountdown, formatResetIn } from "../core/format";
+import { formatCountdown, formatResetIn, formatSpent } from "../core/format";
 import type { UsageMeter } from "../core/usage";
 import { groupHeading, pickBar, sortGroups, type UsageGroup } from "../core/usageGroups";
 import type { Usage } from "./controller";
@@ -126,7 +126,7 @@ function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
         for (const meter of group.meters) {
           const color = HOVER_COLORS[group.stale ? "stale" : usageLevel(meter.percent)];
           md.appendMarkdown(`<span style="color:${color};">${usageBar(meter.percent)}</span> `);
-          md.appendText(`${meter.label}: ${Math.floor(meter.percent)}%${resetText(meter.resetsAt, now)}`);
+          md.appendText(`${meter.label}: ${Math.floor(meter.percent)}%${meter.spent ? ` · ${formatSpent(meter.spent)} spent` : ""}${resetText(meter.resetsAt, now)}`);
           md.appendMarkdown("  \n");
         }
       } else {

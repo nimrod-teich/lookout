@@ -12,6 +12,10 @@ const session = (percent: number, resetsAt = RESET): UsageMeter => ({ key: "sess
 const week = (percent: number): UsageMeter => ({ key: "weekly_all", label: "Week", percent, resetsAt: WEEK_RESET });
 
 describe("reachedThresholds", () => {
+  it("announces nothing for the usage credits, however full", () => {
+    expect(reachedThresholds([{ key: "extra_usage", label: "Usage credits", percent: 100, spent: { used: 100, limit: 100, currency: "USD" } }])).toEqual([]);
+  });
+
   it("names the highest threshold each meter reached, for its window", () => {
     expect(reachedThresholds([session(69), week(89)])).toEqual([]);
     expect(reachedThresholds([session(70)]).map((a) => a.id)).toEqual(["session-70-29869750"]);

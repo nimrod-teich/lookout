@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import { AGENTS, agentInfo, canJump, canRename, canResume, unreachable } from "../core/agents/catalog";
 import { answersOf, type Answer, type Choice } from "../core/answers";
-import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
+import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatSpent, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import { GROUPINGS, sectionsBy, type GroupBy, type Section } from "../core/grouping";
 import { DEFAULT_SORT, dragInto, orderViews, SORTS, type SessionSort, type SortKey } from "../core/sorting";
@@ -888,19 +888,25 @@ function renderMeters(): void {
     if (!line) {
       line = el("div", "meter");
       const bar = el("span", "bar");
-      bar.append(el("span", "fill"));
-      line.append(el("span", "label"), bar, el("span", "value"), el("span", "reset"));
+      bar.append(el("span", "fill"), el("span", "limit"));
+      line.append(el("span", "label"), bar, el("span", "value"), el("span", "reset"), el("span", "spent"));
       meterRows.set(id, line);
     }
     const percent = Math.floor(meter.percent);
     const reset = resetShort(meter.resetsAt);
-    line.className = `meter ${meterLevel(meter.percent)}`;
+    line.className = `meter ${meterLevel(meter.percent)}${meter.spent ? " spend" : ""}`;
     line.querySelector(".label")!.textContent = meter.label;
-    (line.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, meter.percent))}%`;
+    // A spend limit's bar runs to the limit, a tick where it stands; past it, to what was spent, the tick inside.
+    const scale = meter.spent ? Math.max(100, meter.percent) : 100;
+    (line.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, (meter.percent / scale) * 100))}%`;
+    (line.querySelector(".limit") as HTMLElement).style.left = `${(100 / scale) * 100}%`;
     // The share and the time to reset in columns of their own: the shares line up, with a time or without.
     line.querySelector(".value")!.textContent = `${percent}%`;
-    line.querySelector(".reset")!.textContent = reset ? `· ${reset}` : "";
-    line.title = reset ? `${meter.label}: ${percent}% used, resets in ${reset}` : `${meter.label}: ${percent}% used`;
+    // A spend limit's money and its reset, a month off, go under its bar, out of the shared columns: they leave every bar its length.
+    line.querySelector(".reset")!.textContent = reset && !meter.spent ? `· ${reset}` : "";
+    line.querySelector(".spent")!.textContent = meter.spent ? `${formatSpent(meter.spent)}${reset ? ` · ${reset}` : ""}` : "";
+    const spent = meter.spent ? `, ${formatSpent(meter.spent)} spent` : "";
+    line.title = `${meter.label}: ${percent}% used${spent}${reset ? `, resets in ${reset}` : ""}`;
     if (line !== row) usageRows.insertBefore(line, row);
     row = line.nextElementSibling;
   }

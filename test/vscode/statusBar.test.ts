@@ -71,6 +71,7 @@ describe("StatusBar", () => {
     expect(tip).toContain("Session \\(5hr\\): 18% · resets in 1h  \n");
     expect(tip).toContain("Weekly \\(7 day\\): 31% · resets in 2d  \n");
     expect(tip).toContain("Weekly Fable: 84%  \n");
+    expect(tip).not.toContain("spent");
     // Each limit with a bar coloured as the board's: green, amber from half, red from 80%.
     expect(tip).toContain('<span style="color:#89d185;">▰▰▱▱▱▱▱▱▱▱</span> Session');
     expect(tip).toContain('<span style="color:#f14c4c;">▰▰▰▰▰▰▰▰▱▱</span> Weekly Fable');
@@ -104,6 +105,15 @@ describe("StatusBar", () => {
     expect(lastSet("backgroundColor")).toBeUndefined();
     expect(lastSet("accessibilityInformation")).toEqual({ label: "Lookout: usage Session (5hr) 15%" });
     expect((lastSet("tooltip") as { value: string }).value).toContain("Weekly Fable: 97%");
+  });
+
+  it("lists the usage credits in the hover with their money, and keeps the bar on the plan's window", () => {
+    const credits = { key: "extra_usage", label: "Usage credits", percent: 100, resetsAt: 27 * 86_400_000, spent: { used: 100, limit: 100, currency: "USD" } };
+    bar.render(input({ usage: usage({ meters: [{ key: "session", label: "Session (5hr)", percent: 15, resetsAt: 2 * 3_600_000 }, credits] }), showReset: true }), 0);
+    expect(lastSet("text")).toBe(`${L} ▰▰▱▱▱▱▱▱▱▱ 15% · 2h00m`);
+    expect(lastSet("backgroundColor")).toBeUndefined();
+    const tip = (lastSet("tooltip") as { value: string }).value;
+    expect(tip).toContain('<span style="color:#f14c4c;">▰▰▰▰▰▰▰▰▰▰</span> Usage credits: 100% · $100\\.00 / $100 spent · resets in 27d  \n');
   });
 
   it("colours the bar by the 5-hour usage alone and leaves the week to the hover", () => {

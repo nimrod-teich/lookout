@@ -181,7 +181,7 @@ export function parseResponse(line: string, fetchedAt: number): Answer | undefin
   if (response.subtype !== "success") return { kind: "error", message: typeof response.error === "string" ? response.error : "no message" };
   const payload = response.response as Record<string, unknown> | undefined;
   if (payload?.rate_limits_available === false) return { kind: "no plan limits" };
-  const meters = metersOf(payload?.rate_limits);
+  const meters = metersOf(payload?.rate_limits, fetchedAt);
   return meters.length ? { kind: "numbers", snapshot: { fetchedAt, meters } } : { kind: "no numbers" };
 }
 
