@@ -147,8 +147,9 @@ describe("format", () => {
   it("formats money", () => {
     expect([formatUsd(0.004), formatUsd(0.42), formatUsd(9.99), formatUsd(117.47), formatUsd(1234)]).toEqual(["$0.00", "$0.42", "$9.99", "$117", "$1.2k"]);
     // The usage credits' money, as Claude Code's /usage says it, in the account's currency.
-    expect(formatSpent({ used: 12.4, limit: 100, currency: "USD" })).toBe("$12.40 / $100.00 spent");
-    expect(formatSpent({ used: 1200, limit: 5000, currency: "JPY" })).toBe("¥1,200 / ¥5,000 spent");
-    expect(formatSpent({ used: 1, limit: 2, currency: "ZZZZ" })).toBe("1.00 ZZZZ / 2.00 ZZZZ spent");
+    expect(formatSpent({ used: 12.4, limit: 100, currency: "USD" })).toBe("$12.40 / $100");
+    expect(formatSpent({ used: 0, limit: 150.5, currency: "EUR" })).toBe("€0.00 / €150.50");
+    expect(formatSpent({ used: 1200, limit: 5000, currency: "JPY" })).toBe("¥1,200 / ¥5,000");
+    expect(formatSpent({ used: 1, limit: 2, currency: "ZZZZ" })).toBe("1.00 ZZZZ / 2 ZZZZ");
   });
 });

@@ -126,7 +126,7 @@ function tooltip(input: StatusBarInput, now: number): vscode.MarkdownString {
         for (const meter of group.meters) {
           const color = HOVER_COLORS[group.stale ? "stale" : usageLevel(meter.percent)];
           md.appendMarkdown(`<span style="color:${color};">${usageBar(meter.percent)}</span> `);
-          md.appendText(`${meter.label}: ${Math.floor(meter.percent)}%${meter.spent ? ` · ${formatSpent(meter.spent)}` : ""}${resetText(meter.resetsAt, now)}`);
+          md.appendText(`${meter.label}: ${Math.floor(meter.percent)}%${meter.spent ? ` · ${formatSpent(meter.spent)} spent` : ""}${resetText(meter.resetsAt, now)}`);
           md.appendMarkdown("  \n");
         }
       } else {

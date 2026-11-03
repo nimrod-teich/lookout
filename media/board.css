@@ -897,6 +897,26 @@ body.vscode-reduce-motion .hover-card {
   background: var(--vscode-errorForeground, #f14c4c);
 }
 
+/* Where a spend limit stands on its bar: a tick a little taller than the bar, at its end until spending runs past it. */
+.meter .limit {
+  display: none;
+}
+
+.meter.spend .bar {
+  overflow: visible;
+}
+
+.meter.spend .limit {
+  display: block;
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  margin-left: -1px;
+  background: var(--ink);
+  opacity: 0.8;
+}
+
 .meter .value {
   text-align: right;
   white-space: nowrap;

@@ -82,6 +82,8 @@ describe("the usage credits", () => {
     expect(credits({ ...EXTRA, is_enabled: false, used_credits: 10000, spend_limit_reached: true })?.percent).toBe(100);
     expect(credits({ ...EXTRA, is_enabled: false, used_credits: 4000, disabled_reason: "out_of_credits" })?.percent).toBe(100);
     expect(credits({ ...EXTRA, used_credits: 10350, utilization: 103.5 })?.percent).toBe(103.5);
+    // A limit lowered below what was spent: past 100, so the bar can show the limit inside it.
+    expect(credits({ ...EXTRA, used_credits: 13000 })?.percent).toBe(130);
   });
 
   it("is not there when they are off, unlimited, or there are no plan limits", () => {

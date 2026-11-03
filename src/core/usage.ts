@@ -131,7 +131,8 @@ function creditsOf(raw: unknown, fetchedAt: number | undefined): UsageMeter | un
   const limit = num(o.monthly_limit);
   const used = num(o.used_credits);
   if (limit === undefined || used === undefined) return undefined;
-  const share = num(o.utilization) ?? (limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 100);
+  // Over 100 once spending passed the limit, a limit lowered below it.
+  const share = num(o.utilization) ?? (limit > 0 ? Math.max(0, (used / limit) * 100) : 100);
   const currency = typeof o.currency === "string" && /^[A-Za-z]{3}$/.test(o.currency) ? o.currency.toUpperCase() : "USD";
   // The amounts are in the currency's minor units, cents for USD.
   const scale = 10 ** minorDigits(o.decimal_places, currency);

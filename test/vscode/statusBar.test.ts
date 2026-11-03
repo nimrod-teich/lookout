@@ -113,7 +113,7 @@ describe("StatusBar", () => {
     expect(lastSet("text")).toBe(`${L} ▰▰▱▱▱▱▱▱▱▱ 15% · 2h00m`);
     expect(lastSet("backgroundColor")).toBeUndefined();
     const tip = (lastSet("tooltip") as { value: string }).value;
-    expect(tip).toContain('<span style="color:#f14c4c;">▰▰▰▰▰▰▰▰▰▰</span> Usage credits: 100% · $100\\.00 / $100\\.00 spent · resets in 27d  \n');
+    expect(tip).toContain('<span style="color:#f14c4c;">▰▰▰▰▰▰▰▰▰▰</span> Usage credits: 100% · $100\\.00 / $100 spent · resets in 27d  \n');
   });
 
   it("colours the bar by the 5-hour usage alone and leaves the week to the hover", () => {
