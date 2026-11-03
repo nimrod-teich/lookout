@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import { AGENTS, agentInfo, canJump, canRename, canResume, unreachable } from "../core/agents/catalog";
 import { answersOf, type Answer, type Choice } from "../core/answers";
-import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
+import { describeEvidence, describeReason, formatElapsed, formatResetIn, formatSpent, formatTokens, formatUsd, quietFor, shortModel } from "../core/format";
 import type { SearchResult } from "../core/history";
 import { GROUPINGS, sectionsBy, type GroupBy, type Section } from "../core/grouping";
 import { DEFAULT_SORT, dragInto, orderViews, SORTS, type SessionSort, type SortKey } from "../core/sorting";
@@ -900,7 +900,8 @@ function renderMeters(): void {
     // The share and the time to reset in columns of their own: the shares line up, with a time or without.
     line.querySelector(".value")!.textContent = `${percent}%`;
     line.querySelector(".reset")!.textContent = reset ? `· ${reset}` : "";
-    line.title = reset ? `${meter.label}: ${percent}% used, resets in ${reset}` : `${meter.label}: ${percent}% used`;
+    const spent = meter.spent ? `, ${formatSpent(meter.spent)}` : "";
+    line.title = `${meter.label}: ${percent}% used${spent}${reset ? `, resets in ${reset}` : ""}`;
     if (line !== row) usageRows.insertBefore(line, row);
     row = line.nextElementSibling;
   }

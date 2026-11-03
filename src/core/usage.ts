@@ -16,6 +16,15 @@ export interface UsageMeter {
   resetsAt?: number;
   /** Length of the window, for showing how far along it is. */
   windowMs?: number;
+  /** The money a spend limit counts, Claude's usage credits, said in the hover. */
+  spent?: Spent;
+}
+
+/** Money spent against a limit, in the currency's own units: dollars, not cents. */
+export interface Spent {
+  used: number;
+  limit: number;
+  currency: string;
 }
 
 export interface UsageSnapshot {
@@ -42,6 +51,10 @@ const WINDOWS: Record<string, { label: string; windowMs: number }> = {
 export const STALE_MS = 30 * 60_000;
 /** The families whose weekly limit the cache can carry on its own, as `seven_day_<family>`. */
 const MODEL_FAMILIES = ["opus", "sonnet", "haiku", "fable", "mythos"];
+/** Extra usage, named as Claude Code's /usage names it: the spend that covers you once a plan limit is used up. */
+const CREDITS = { key: "extra_usage", label: "Usage credits" };
+/** Why the server calls extra usage off while it is on: its money is used up. */
+const USED_UP = ["out_of_credits", "org_spend_cap_reached"];
 
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
@@ -55,11 +68,21 @@ function when(v: unknown): number | undefined {
 
 /**
  * Normalizes Anthropic's rate-limit object, as Claude Code caches it under
- * `cachedUsageUtilization.utilization` and returns it from `get_usage`.
+ * `cachedUsageUtilization.utilization` and returns it from `get_usage`: the
+ * plan's limits, then the usage credits while they are on. `fetchedAt` dates
+ * the credits' reset.
  */
-export function metersOf(limits: unknown): UsageMeter[] {
+export function metersOf(limits: unknown, fetchedAt?: number): UsageMeter[] {
   if (typeof limits !== "object" || limits === null) return [];
   const o = limits as Record<string, unknown>;
+  const meters = planMetersOf(o);
+  // Credits cover the plan's limits, so they come with them or not at all.
+  const credits = meters.length ? creditsOf(o.extra_usage, fetchedAt) : undefined;
+  return credits ? [...meters, credits] : meters;
+}
+
+/** The plan's limits: the `limits` rows, else the older per-window fields. */
+function planMetersOf(o: Record<string, unknown>): UsageMeter[] {
   const meters: UsageMeter[] = [];
   if (Array.isArray(o.limits)) {
     for (const raw of o.limits) {
@@ -93,6 +116,46 @@ export function metersOf(limits: unknown): UsageMeter[] {
   return meters;
 }
 
+/**
+ * The usage credits as a limit, while they are on: the share of the monthly
+ * spend limit used, and the money. On means switched on, or used up, which
+ * the server reports as off too (`spend_limit_reached`, out of credits): those
+ * read 100%. None once you turn them off, or with no limit to fill. They
+ * reset on the first of the next month, as Claude Code dates them.
+ */
+function creditsOf(raw: unknown, fetchedAt: number | undefined): UsageMeter | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const usedUp = o.user_disabled !== true && (o.spend_limit_reached === true || (typeof o.disabled_reason === "string" && USED_UP.includes(o.disabled_reason)));
+  if (o.is_enabled !== true && !usedUp) return undefined;
+  const limit = num(o.monthly_limit);
+  const used = num(o.used_credits);
+  if (limit === undefined || used === undefined) return undefined;
+  const share = num(o.utilization) ?? (limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 100);
+  const currency = typeof o.currency === "string" && /^[A-Za-z]{3}$/.test(o.currency) ? o.currency.toUpperCase() : "USD";
+  // The amounts are in the currency's minor units, cents for USD.
+  const scale = 10 ** minorDigits(o.decimal_places, currency);
+  const month = fetchedAt === undefined ? undefined : new Date(fetchedAt);
+  return {
+    key: CREDITS.key,
+    label: CREDITS.label,
+    percent: usedUp ? Math.max(100, share) : share,
+    resetsAt: month && new Date(month.getFullYear(), month.getMonth() + 1, 1).getTime(),
+    spent: { used: used / scale, limit: limit / scale, currency },
+  };
+}
+
+/** The digits of a currency's minor unit: as the server says, else the currency's own (2 for USD, 0 for JPY). */
+function minorDigits(given: unknown, currency: string): number {
+  const digits = num(given);
+  if (digits !== undefined && Number.isInteger(digits) && digits >= 0 && digits <= 4) return digits;
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? 2;
+  } catch {
+    return 2;
+  }
+}
+
 /** The usage Claude Code last cached in its config file, if it belongs to the signed-in account. */
 export function parseUsageCache(config: unknown): UsageSnapshot | undefined {
   const read = readUsageCache(config);
@@ -109,7 +172,7 @@ export function readUsageCache(config: unknown): UsageRead {
   if (fetchedAt === undefined) return { snapshot: undefined, why: "unreadable" };
   const account = (o.oauthAccount as { accountUuid?: unknown } | undefined)?.accountUuid;
   if (typeof account === "string" && typeof cached.accountUuid === "string" && account !== cached.accountUuid) return { snapshot: undefined, why: "other account" };
-  const meters = metersOf(cached.utilization);
+  const meters = metersOf(cached.utilization, fetchedAt);
   return meters.length ? { snapshot: { fetchedAt, meters } } : { snapshot: undefined, why: "unreadable" };
 }
 

@@ -28,6 +28,12 @@ describe("barMeter", () => {
     expect(barMeter([meter("weekly_scoped:Fable", 97, 168 * HOUR), meter("weekly_all", 41, 168 * HOUR)])?.key).toBe("weekly_all");
     expect(barMeter([])).toBeUndefined();
   });
+
+  it("never takes the usage credits, which have no window", () => {
+    expect(barMeter([meter("session", 10, 5 * HOUR), meter("extra_usage", 100)])?.key).toBe("session");
+    expect(barMeter([meter("weekly_all", 41, 168 * HOUR), meter("weekly_scoped:Fable", 100, 168 * HOUR), meter("extra_usage", 100)])?.key).toBe("weekly_all");
+    expect(pickBar([group("claude-code", [meter("session", 10, 5 * HOUR), meter("extra_usage", 100)])])?.meter.key).toBe("session");
+  });
 });
 
 describe("pickBar", () => {

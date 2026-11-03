@@ -35,6 +35,9 @@ describe("parseResponse", () => {
     expect(parseResponse(JSON.stringify(RESPONSE), 5)).toMatchObject({ kind: "numbers", snapshot: { fetchedAt: 5, meters: [{ key: "session", percent: 18 }, { key: "weekly_all", percent: 31 }] } });
     expect(parseResponse(JSON.stringify({ ...RESPONSE, response: { ...RESPONSE.response, request_id: "other" } }), 5)).toBeUndefined();
     expect(parseResponse(JSON.stringify({ type: "system", subtype: "init" }), 5)).toBeUndefined();
+    // get_usage passes the endpoint's extra usage through with the limits.
+    const extra = { is_enabled: true, monthly_limit: 5000, used_credits: 1000, utilization: 20, currency: "USD" };
+    expect(parseResponse(answering({ ...RESPONSE.response.response, rate_limits: { ...RESPONSE.response.response.rate_limits, extra_usage: extra } }), 5)).toMatchObject({ kind: "numbers", snapshot: { meters: [{ key: "session" }, { key: "weekly_all" }, { key: "extra_usage", percent: 20, spent: { used: 10, limit: 50 } }] } });
     expect(parseResponse("{garbage", 5)).toBeUndefined();
   });
 

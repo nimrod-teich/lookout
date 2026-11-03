@@ -1,5 +1,5 @@
 import type { Evidence, Reason, ReasonKind, SessionView, State } from "./types";
-import type { UsageMeter } from "./usage";
+import type { Spent, UsageMeter } from "./usage";
 import { AGENTS, agentInfo } from "./agents/catalog";
 
 /** A working session whose transcript has not changed for this long is quiet. */
@@ -179,6 +179,20 @@ export function shortModel(id: string): string {
   if (!match) return id;
   const family = match[1]!;
   return `${family[0]!.toUpperCase()}${family.slice(1)} ${match[2]}.${match[3]}`;
+}
+
+/** "$12.40 / $100.00 spent", as Claude Code's /usage says what the usage credits spent. */
+export function formatSpent(spent: Spent): string {
+  return `${formatMoney(spent.used, spent.currency)} / ${formatMoney(spent.limit, spent.currency)} spent`;
+}
+
+/** "$12.40", "€9.00", "¥1,200": an amount in its currency. */
+function formatMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`;
+  }
 }
 
 /** "$0.42", "$118", "$1.2k". */

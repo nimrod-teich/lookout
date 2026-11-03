@@ -50,6 +50,17 @@
           "percent": 97,
           "resetsAt": 400000000,
           "windowMs": 604800000
+        },
+        {
+          "key": "extra_usage",
+          "label": "Usage credits",
+          "percent": 12.4,
+          "resetsAt": 2332800000,
+          "spent": {
+            "used": 12.4,
+            "limit": 100,
+            "currency": "USD"
+          }
         }
       ],
       "key": "claude-code:personal",

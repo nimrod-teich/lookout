@@ -61,6 +61,46 @@ describe("metersOf", () => {
   });
 });
 
+describe("the usage credits", () => {
+  /** Extra usage as the cache carries it: on, $100.00 a month, nothing spent yet. */
+  const EXTRA = { is_enabled: true, monthly_limit: 10000, used_credits: 0, utilization: null, currency: "USD", decimal_places: 2, disabled_reason: null, user_disabled: false, spend_limit_reached: false };
+  const FETCHED = new Date(2026, 10, 3, 11, 12).getTime();
+  const credits = (extra: unknown, fetchedAt: number | undefined = FETCHED) => metersOf({ ...LIMITS, extra_usage: extra }, fetchedAt).find((meter) => meter.key === "extra_usage");
+
+  it("follows the plan's limits while they are on, with the money, resetting on the first of the next month", () => {
+    expect(metersOf({ ...LIMITS, extra_usage: EXTRA }, FETCHED).map((meter) => meter.key)).toEqual(["session", "weekly_all", "weekly_scoped:Fable", "extra_usage"]);
+    expect(credits(EXTRA)).toEqual({ key: "extra_usage", label: "Usage credits", percent: 0, resetsAt: new Date(2026, 11, 1).getTime(), spent: { used: 0, limit: 100, currency: "USD" } });
+    expect(credits({ ...EXTRA, used_credits: 1240 })).toMatchObject({ percent: 12.4, spent: { used: 12.4, limit: 100 } });
+    // The server's own share wins over the one Lookout works out.
+    expect(credits({ ...EXTRA, used_credits: 1240, utilization: 13 })?.percent).toBe(13);
+    expect(credits(EXTRA, new Date(2026, 11, 31, 23, 59).getTime())?.resetsAt).toBe(new Date(2027, 0, 1).getTime());
+    expect(metersOf({ ...LIMITS, extra_usage: EXTRA }).at(-1)).toMatchObject({ key: "extra_usage", resetsAt: undefined });
+    expect(credits({ ...EXTRA, currency: "jpy", decimal_places: undefined, monthly_limit: 5000, used_credits: 1200 })?.spent).toEqual({ used: 1200, limit: 5000, currency: "JPY" });
+  });
+
+  it("reads full once used up, which the server reports as off", () => {
+    expect(credits({ ...EXTRA, is_enabled: false, used_credits: 10000, spend_limit_reached: true })?.percent).toBe(100);
+    expect(credits({ ...EXTRA, is_enabled: false, used_credits: 4000, disabled_reason: "out_of_credits" })?.percent).toBe(100);
+    expect(credits({ ...EXTRA, used_credits: 10350, utilization: 103.5 })?.percent).toBe(103.5);
+  });
+
+  it("is not there when they are off, unlimited, or there are no plan limits", () => {
+    // Turned off by you: the server keeps their last numbers, and says so.
+    expect(credits({ ...EXTRA, is_enabled: false, user_disabled: true, spend_limit_reached: true })).toBeUndefined();
+    expect(credits({ is_enabled: false, monthly_limit: null, used_credits: null, utilization: null, currency: null, user_disabled: true })).toBeUndefined();
+    expect(credits({ ...EXTRA, is_enabled: false })).toBeUndefined();
+    expect(credits({ ...EXTRA, monthly_limit: null })).toBeUndefined();
+    expect(credits(null)).toBeUndefined();
+    expect(credits("on")).toBeUndefined();
+    expect(metersOf({ five_hour: null, limits: [], extra_usage: EXTRA }, FETCHED)).toEqual([]);
+  });
+
+  it("comes from the cache, dated by its fetch", () => {
+    const config = { cachedUsageUtilization: { fetchedAtMs: FETCHED, utilization: { ...LIMITS, extra_usage: { ...EXTRA, used_credits: 2500 } } } };
+    expect(parseUsageCache(config)?.meters.at(-1)).toMatchObject({ key: "extra_usage", percent: 25, resetsAt: new Date(2026, 11, 1).getTime() });
+  });
+});
+
 describe("parseUsageCache", () => {
   it("reads Claude Code's cached usage when it belongs to the signed-in account", () => {
     const config = { oauthAccount: { accountUuid: "acc-1" }, cachedUsageUtilization: { fetchedAtMs: 1_000, accountUuid: "acc-1", utilization: LIMITS } };
