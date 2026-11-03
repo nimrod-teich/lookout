@@ -889,7 +889,7 @@ function renderMeters(): void {
       line = el("div", "meter");
       const bar = el("span", "bar");
       bar.append(el("span", "fill"), el("span", "limit"));
-      line.append(el("span", "label"), bar, el("span", "value"), el("span", "reset"));
+      line.append(el("span", "label"), bar, el("span", "value"), el("span", "reset"), el("span", "spent"));
       meterRows.set(id, line);
     }
     const percent = Math.floor(meter.percent);
@@ -900,9 +900,11 @@ function renderMeters(): void {
     const scale = meter.spent ? Math.max(100, meter.percent) : 100;
     (line.querySelector(".fill") as HTMLElement).style.width = `${Math.min(100, Math.max(0, (meter.percent / scale) * 100))}%`;
     (line.querySelector(".limit") as HTMLElement).style.left = `${(100 / scale) * 100}%`;
-    // The share, or the money spent, and the time to reset in columns of their own: they line up, with a time or without.
-    line.querySelector(".value")!.textContent = meter.spent ? formatSpent(meter.spent) : `${percent}%`;
-    line.querySelector(".reset")!.textContent = reset ? `· ${reset}` : "";
+    // The share and the time to reset in columns of their own: the shares line up, with a time or without.
+    line.querySelector(".value")!.textContent = `${percent}%`;
+    // A spend limit's money and its reset, a month off, go under its bar, out of the shared columns: they leave every bar its length.
+    line.querySelector(".reset")!.textContent = reset && !meter.spent ? `· ${reset}` : "";
+    line.querySelector(".spent")!.textContent = meter.spent ? `${formatSpent(meter.spent)}${reset ? ` · ${reset}` : ""}` : "";
     const spent = meter.spent ? `, ${formatSpent(meter.spent)} spent` : "";
     line.title = `${meter.label}: ${percent}% used${spent}${reset ? `, resets in ${reset}` : ""}`;
     if (line !== row) usageRows.insertBefore(line, row);
