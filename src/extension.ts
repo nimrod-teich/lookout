@@ -491,6 +491,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (await notifyFinished(view)) await jump(view);
     }),
     terminals.onDidChange(() => controller.poll()),
+    terminals.onDidMove(() => controller.refocus()),
     vscode.window.tabGroups.onDidChangeTabs(noticeFocus),
     vscode.window.tabGroups.onDidChangeTabGroups(noticeFocus),
     vscode.window.onDidChangeActiveTerminal(noticeFocus),

@@ -87,6 +87,18 @@ const STAR_ICON =
 const NOTE_ICON =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5.5L13 6v7a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 2.5V6H13M6 8.6h4M6 11h2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
 
+/** An eye: the session is in front, where the user is or on screen beside it. */
+const EYE_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8S4 3.6 8 3.6 14.4 8 14.4 8 12 12.4 8 12.4 1.6 8 1.6 8z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.1" fill="currentColor"/></svg>';
+
+/** What the eye on a card says: where the user is, or where the session shows while they are elsewhere. */
+function focusText(view: SessionView): string | undefined {
+  const where = view.host === "terminal" ? "terminal" : "tab";
+  if (view.focus === "focused") return `You are in this session's ${where}.`;
+  if (view.focus === "visible") return view.host === "terminal" ? "Its terminal is the active one; you are elsewhere." : "Its tab is in front of its editor group; you are elsewhere.";
+  return undefined;
+}
+
 /** The star that marks a favourite; a click stars the session or takes its star away. */
 function starButton(id: string): HTMLElement {
   const star = el("span", "star");
@@ -950,7 +962,9 @@ function createCard(view: SessionView): HTMLElement {
       vscode.postMessage({ type: "rename", id: view.id });
     });
   }
-  row.append(title, el("span", "elapsed"));
+  const eye = el("span", "eye");
+  eye.innerHTML = EYE_ICON;
+  row.append(eye, title, el("span", "elapsed"));
   const line = el("span", "line");
   line.append(el("span", "mark"), el("span", "kind"), el("span", "text"));
   const options = el("span", "options hidden");
@@ -1181,6 +1195,8 @@ const MARKS = { waiting: "?", working: "›", done: "✓", idle: "", unknown: ""
 /** The card's hover: state, what it asks, and where the state comes from. */
 function cardTitle(view: SessionView): string {
   const lines = [`${agentPrefix(view.agent)}${stateTitle(view)} · ${view.title}`];
+  const focus = focusText(view);
+  if (focus) lines.push(focus);
   if (view.state === "waiting") lines.push(describeReason(view.reason));
   const quiet = quietFor(view, now());
   if (quiet !== undefined) lines.push(`Nothing written to its transcript for ${formatElapsed(quiet)}.`);
@@ -1220,6 +1236,9 @@ function updateCard(card: HTMLElement, view: SessionView): void {
   const prose = view.state === "waiting" && view.reason !== undefined && view.reason.kind !== "permission";
   card.className = `card state-${view.state} host-${view.host}${typed ? " typed" : ""}${quiet ? " quiet" : ""}${prose ? " prose" : ""}${markers ? " marked" : ""}${canJump(view) ? "" : " nojump"}`;
   card.classList.toggle("seen", (view as { seen?: boolean }).seen === true);
+  card.classList.toggle("in-focus", view.focus === "focused");
+  card.classList.toggle("on-screen", view.focus === "visible");
+  (card.querySelector(".eye") as HTMLElement).title = focusText(view) ?? "";
   card.title = cardTitle(view);
   setPark(card, view);
   setMenu(card, view);

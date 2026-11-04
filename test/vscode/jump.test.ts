@@ -3,7 +3,7 @@ import { cancelNewest, claudeTabLabel } from "../../src/vscode/agents/claudePane
 import { jumpToSession, renameSession, revealed } from "../../src/vscode/jump";
 import { notifyFinished, notifyWaiting } from "../../src/vscode/notifications";
 import { Terminals } from "../../src/vscode/terminals";
-import { isWatched } from "../../src/vscode/watch";
+import { focusOf, isWatched } from "../../src/vscode/watch";
 import { fakeLog, settle, view } from "./helpers";
 import { stub, TabInputTerminal } from "./stub-vscode";
 
@@ -317,6 +317,103 @@ describe("isWatched", () => {
     stub.activate(group.tabs[2]!);
     stub.focusChange.fire();
     expect(isWatched(v, t)).toBe(true);
+  });
+});
+
+describe("focusOf", () => {
+  it("marks a panel session focused while its tab is in front of the active group, visible in front of another, and neither behind", async () => {
+    const left = stub.addClaudeGroup(["Wire the cache", "Other"]);
+    const right = stub.addClaudeGroup(["Fix the login", "Third"]);
+    stub.activate(right.tabs[0]!);
+    stub.activate(left.tabs[1]!);
+    const t = await terminals();
+    expect(focusOf(view(), t)).toBeUndefined();
+    expect(focusOf(view({ title: "Other" }), t)).toBe("focused");
+    expect(focusOf(view({ title: "Fix the login" }), t)).toBe("visible");
+    expect(focusOf(view({ title: "Third" }), t)).toBeUndefined();
+
+    // The window losing the focus changes nothing: the board shows where the user left it.
+    stub.focused = false;
+    expect(focusOf(view({ title: "Other" }), t)).toBe("focused");
+    // The other group comes forward.
+    stub.activate(right.tabs[0]!);
+    expect(focusOf(view({ title: "Fix the login" }), t)).toBe("focused");
+    expect(focusOf(view({ title: "Other" }), t)).toBe("visible");
+  });
+
+  it("marks no tab it cannot tell from another of the same label, and nothing outside this window", async () => {
+    const group = stub.addClaudeGroup(["Wire the cache", "Wire the cache"]);
+    stub.activate(group.tabs[0]!);
+    const t = await terminals();
+    expect(focusOf(view(), t)).toBeUndefined();
+    for (const host of ["window", "editor", "elsewhere"] as const) expect(focusOf(view({ host, title: "Wire the cache" }), t)).toBeUndefined();
+  });
+
+  it("gives the focus to the terminal the user is in, and leaves the tab in front visible", async () => {
+    const terminal = stub.addTerminal("claude", 71);
+    const other = stub.addTerminal("bash", 72);
+    const group = stub.addClaudeGroup(["Wire the cache"]);
+    stub.activate(group.tabs[0]!);
+    const t = await terminals();
+    const inTerminal = view({ id: "00000000-0000-4000-8000-000000000002", title: "Fix the login", host: "terminal", terminalPid: 71 });
+
+    // Nothing known yet: the tab has the focus; the active terminal is in front, the user not in it.
+    stub.activeTerminal = terminal;
+    expect(focusOf(view(), t)).toBe("focused");
+    expect(focusOf(inTerminal, t)).toBe("visible");
+
+    // The user goes into the session's terminal.
+    stub.activeTerminalChange.fire(terminal);
+    expect(focusOf(inTerminal, t)).toBe("focused");
+    expect(focusOf(view(), t)).toBe("visible");
+
+    // Typing in an editor takes them out of it.
+    stub.selectionChange.fire({ kind: 1 });
+    expect(focusOf(inTerminal, t)).toBe("visible");
+    expect(focusOf(view(), t)).toBe("focused");
+
+    // In another terminal: the session's is no longer in front, and the tab is not where the user is.
+    stub.activeTerminal = other;
+    stub.activeTerminalChange.fire(other);
+    expect(focusOf(inTerminal, t)).toBeUndefined();
+    expect(focusOf(view(), t)).toBe("visible");
+  });
+
+  it("follows the user into a terminal and out of it, without firing for a prompt the controller notes", async () => {
+    const terminal = stub.addTerminal("claude", 71);
+    const t = await terminals();
+    let moves = 0;
+    t.onDidMove(() => moves++);
+    stub.activeTerminal = terminal;
+    stub.activeTerminalChange.fire(terminal);
+    expect([moves, t.userTerminal()]).toEqual([1, 71]);
+    // The same place again is no move.
+    stub.activeTerminalChange.fire(terminal);
+    expect(moves).toBe(1);
+    t.wentElsewhere();
+    expect([moves, t.userTerminal()]).toEqual([2, undefined]);
+    t.sawPrompt(71, Date.now());
+    expect([moves, t.userTerminal()]).toEqual([2, 71]);
+    expect(t.show(71)).toBe(true);
+    expect(moves).toBe(2);
+    stub.selectionChange.fire({ kind: 2 });
+    expect(moves).toBe(3);
+    expect(t.show(71)).toBe(true);
+    expect([moves, t.userTerminal()]).toEqual([4, 71]);
+  });
+
+  it("takes the user out of the terminals with a jump to a tab, though the tab was in front already", async () => {
+    const terminal = stub.addTerminal("claude", 71);
+    const group = stub.addClaudeGroup(["Wire the cache"]);
+    stub.activate(group.tabs[0]!);
+    stub.commands.set(CLAUDE_OPEN, () => undefined);
+    const t = await terminals();
+    stub.activeTerminal = terminal;
+    stub.activeTerminalChange.fire(terminal);
+    expect(focusOf(view(), t)).toBe("visible");
+    expect(revealed(await jumpToSession(view(), t, fakeLog()))).toBe(true);
+    expect(focusOf(view(), t)).toBe("focused");
+    cancelNewest();
   });
 });
 

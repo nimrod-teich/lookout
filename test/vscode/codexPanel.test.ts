@@ -67,4 +67,14 @@ describe("the Codex extension's threads", () => {
     expect(codexPanel.isActive(view({ id: THREAD, agent: "codex" }))).toBe(true);
     expect(codexPanel.isActive(view({ id: OTHER, agent: "codex" }))).toBe(false);
   });
+
+  it("finds the tab that shows a thread by its address, or a thread of VS Code's Chat by its title", () => {
+    const group = codexGroup(1, [OTHER, THREAD]);
+    expect(codexPanel.tab(view({ id: THREAD, agent: "codex" }))).toBe(group.tabs[1]);
+    expect(codexPanel.tab(view({ id: "01a14f9b-ad80-7b82-adf4-000000000000", agent: "codex" }))).toBeUndefined();
+    const chat = { viewColumn: 2, tabs: [] as unknown[] };
+    chat.tabs = [{ label: "Fix the login", input: undefined, group: chat }];
+    stub.groups.push(chat as never);
+    expect(codexPanel.tab(view({ id: THREAD, agent: "codex", title: "Fix the login", vscodeSession: "openai-codex:/1" }))).toBe(chat.tabs[0]);
+  });
 });

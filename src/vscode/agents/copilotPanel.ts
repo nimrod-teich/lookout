@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import type { PastView, SessionView } from "../../core/types";
 import type { Log } from "../log";
 import type { PanelAdapter } from "./panel";
-import { openChatSession } from "./vscodeChat";
+import { findChatTab, openChatSession } from "./vscodeChat";
 
 /** Copilot's sessions in VS Code's Chat: each opens in an editor, with any approval it waits on. */
 export const copilotPanel: PanelAdapter = {
@@ -13,6 +13,8 @@ export const copilotPanel: PanelAdapter = {
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
     return tab !== undefined && !(tab.input instanceof vscode.TabInputTerminal) && tab.label === view.title;
   },
+
+  tab: (view: SessionView) => findChatTab(view.title),
 
   /** VS Code names the session; Lookout offers no rename. */
   rename: () => Promise.resolve(false),

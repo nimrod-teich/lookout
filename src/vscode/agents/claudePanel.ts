@@ -168,4 +168,4 @@ async function resume(id: string, log: Log): Promise<boolean> {
   }
 }
 
-export const claudePanel: PanelAdapter = { reveal: jump, isActive, rename, resume };
+export const claudePanel: PanelAdapter = { reveal: jump, isActive, tab: (view) => findClaudeTab(view.title), rename, resume };

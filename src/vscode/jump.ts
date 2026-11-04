@@ -34,6 +34,8 @@ function whereItRuns(view: SessionView): string {
 /** Brings the session's tab or terminal to the front. Returns whether it got there. */
 export async function jumpToSession(view: SessionView, terminals: Terminals, log: Log): Promise<JumpResult> {
   const result = await reveal(view, terminals, log);
+  // The tab may have been in front already, the user in a terminal: the jump takes them to it all the same.
+  if (view.host === "panel" && revealed(result)) terminals.wentElsewhere();
   if (result === "refused-not-here") {
     void vscode.window.showInformationMessage(`"${view.title}" runs ${whereItRuns(view)}. Lookout jumps to sessions in the VS Code windows on this machine.`);
   } else if (result === "failed") {

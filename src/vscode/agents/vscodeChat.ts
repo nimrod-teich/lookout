@@ -25,6 +25,12 @@ function isChatTab(tab: vscode.Tab, title: string): boolean {
   );
 }
 
+/** The editor tab that carries a chat session's title; two tabs of one name cannot be told apart. */
+export function findChatTab(title: string): vscode.Tab | undefined {
+  const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => isChatTab(tab, title));
+  return tabs.length === 1 ? tabs[0] : undefined;
+}
+
 /**
  * Opens a session VS Code runs in its Chat: the editor tab that shows it,
  * when one carries its title; else, by its address, in an editor of the
@@ -32,11 +38,8 @@ function isChatTab(tab: vscode.Tab, title: string): boolean {
  * keeps its approval prompt in that tab, so the tab goes first.
  */
 export async function openChatSession(address: string | undefined, log: Log, title?: string): Promise<PanelReveal> {
-  if (title) {
-    const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => isChatTab(tab, title));
-    // Two tabs of one name cannot be told apart.
-    if (tabs.length === 1 && (await activateTab(tabs[0]!))) return "revealed-by-tab";
-  }
+  const tab = title ? findChatTab(title) : undefined;
+  if (tab && (await activateTab(tab))) return "revealed-by-tab";
   if (!address) return "failed";
   try {
     await vscode.commands.executeCommand(OPEN_IN_EDITOR, { resource: vscode.Uri.parse(address) });

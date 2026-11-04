@@ -1,3 +1,4 @@
+import type * as vscode from "vscode";
 import type { PastView, SessionView } from "../../core/types";
 import type { Log } from "../log";
 
@@ -9,6 +10,8 @@ export interface PanelAdapter {
   reveal(view: SessionView, log: Log): Promise<PanelReveal>;
   /** The session's tab is the one in front. */
   isActive(view: SessionView): boolean;
+  /** The editor tab that shows the session, when one does and it can be told from the others. */
+  tab(view: SessionView): vscode.Tab | undefined;
   /**
    * Lets the user rename the session through the agent's own rename, which
    * writes the new title where the agent keeps it. Called only for sessions
