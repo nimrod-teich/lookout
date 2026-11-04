@@ -18,4 +18,13 @@ describe("Presence", () => {
     presence.saw(71, 2_000);
     expect(presence.inTerminal(71)).toBe(true);
   });
+
+  it("says where the user was last seen, and nothing before any sighting", () => {
+    const presence = new Presence();
+    expect(presence.where()).toBeUndefined();
+    presence.saw(71, 1_000);
+    expect(presence.where()).toBe(71);
+    presence.saw("elsewhere", 2_000);
+    expect(presence.where()).toBe("elsewhere");
+  });
 });

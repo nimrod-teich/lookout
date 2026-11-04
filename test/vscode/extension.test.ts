@@ -259,6 +259,36 @@ describe("the extension", () => {
     }
   }, 90_000);
 
+  it("marks the session whose tab is in front, and moves the mark as the user goes into a terminal and back to an editor", async () => {
+    const dir = path.join(configDir, "projects", "-work-app");
+    fs.mkdirSync(dir, { recursive: true });
+    const lines = [{ type: "user", cwd: "/work/app", message: { content: "run the tests" } }, { type: "custom-title", customTitle: "Wire the cache" }];
+    fs.writeFileSync(path.join(dir, `${SESSION}.jsonl`), lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
+    writeSession({ status: "busy", statusUpdatedAt: Date.now() });
+    const group = stub.addClaudeGroup(["Other", "Wire the cache"]);
+    stub.activate(group.tabs[0]!);
+    const terminal = stub.addTerminal("bash", 4242);
+    activate(context());
+    boardStates();
+    const shown = () => (statesBoard!.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions: { host: string; title: string; focus?: string }[] } | undefined)?.sessions[0];
+    await vi.waitFor(() => expect(shown()).toMatchObject({ host: "panel", title: "Wire the cache" }), WAIT);
+    expect(shown()?.focus).toBeUndefined();
+
+    // Its tab comes to the front: the user is in it.
+    stub.activate(group.tabs[1]!);
+    stub.focusChange.fire();
+    await vi.waitFor(() => expect(shown()?.focus).toBe("focused"), WAIT);
+
+    // Into a terminal: the tab is still in front, the user elsewhere.
+    stub.activeTerminal = terminal;
+    stub.activeTerminalChange.fire(terminal);
+    await vi.waitFor(() => expect(shown()?.focus).toBe("visible"), WAIT);
+
+    // Typing in an editor changes no tab: the mark follows at once all the same, with no read of the sessions.
+    stub.selectionChange.fire({ kind: 1 });
+    expect(shown()?.focus).toBe("focused");
+  }, 60_000);
+
   it("names what a prompt asks even when the transcript lags, and announces a question typed at the end of a turn", async () => {
     const transcript = path.join(configDir, "projects", "-work-app", `${SESSION}.jsonl`);
     const append = (...entries: unknown[]) => fs.appendFileSync(transcript, entries.map((e) => `${JSON.stringify(e)}\n`).join(""));

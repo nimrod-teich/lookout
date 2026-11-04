@@ -10,8 +10,11 @@ export class Terminals implements vscode.Disposable {
   private readonly pidOf = new Map<vscode.Terminal, number>();
   private readonly known = new Set<number>();
   private readonly changed = new vscode.EventEmitter<void>();
+  private readonly moved = new vscode.EventEmitter<void>();
   private readonly subscriptions: vscode.Disposable[];
   readonly onDidChange = this.changed.event;
+  /** The user went into a terminal or out of the terminals, as far as known. A prompt the controller notes, while it reads the sessions, does not fire it. */
+  readonly onDidMove = this.moved.event;
 
   constructor() {
     this.subscriptions = [
@@ -22,7 +25,7 @@ export class Terminals implements vscode.Disposable {
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.tabsChanged()),
       vscode.window.onDidChangeTextEditorSelection((event) => {
         // Typing or clicking in an editor; a selection an extension sets has no such kind.
-        if (event.kind === vscode.TextEditorSelectionChangeKind.Keyboard || event.kind === vscode.TextEditorSelectionChangeKind.Mouse) this.presence.saw("elsewhere", Date.now());
+        if (event.kind === vscode.TextEditorSelectionChangeKind.Keyboard || event.kind === vscode.TextEditorSelectionChangeKind.Mouse) this.see("elsewhere", Date.now());
       }),
     ];
     this.frontTab = vscode.window.tabGroups.activeTabGroup?.activeTab;
@@ -49,6 +52,21 @@ export class Terminals implements vscode.Disposable {
     return this.presence.inTerminal(pid);
   }
 
+  /**
+   * Shell pid of the terminal the user is in: the active one, which they
+   * brought forward or sent a prompt in and did not leave since. Undefined
+   * while they are in a tab, an editor or another panel, or nothing is known yet.
+   */
+  userTerminal(): number | undefined {
+    const place = this.presence.where();
+    return typeof place === "number" && place === this.activePid() ? place : undefined;
+  }
+
+  /** The user went to a tab or an editor, as a jump to a session's tab takes them, though no tab may have changed. */
+  wentElsewhere(): void {
+    this.see("elsewhere", Date.now());
+  }
+
   /** A session was sent a prompt at `at`, in the terminal with this shell pid or, for "elsewhere", outside the terminals. */
   sawPrompt(place: Place, at: number): void {
     this.presence.saw(place, at);
@@ -59,7 +77,7 @@ export class Terminals implements vscode.Disposable {
     const terminal = this.byPid.get(pid);
     if (!terminal) return false;
     terminal.show(false);
-    this.presence.saw(pid, Date.now());
+    this.see(pid, Date.now());
     return true;
   }
 
@@ -78,8 +96,15 @@ export class Terminals implements vscode.Disposable {
     if (!terminal) return;
     const at = Date.now();
     const pid = this.pidOf.get(terminal);
-    if (pid !== undefined) this.presence.saw(pid, at);
-    else void terminal.processId.then((id) => id !== undefined && this.presence.saw(id, at));
+    if (pid !== undefined) this.see(pid, at);
+    else void terminal.processId.then((id) => id !== undefined && this.see(id, at));
+  }
+
+  /** The user was at `place`: fires `onDidMove` when that is somewhere new. */
+  private see(place: Place, at: number): void {
+    const before = this.presence.where();
+    this.presence.saw(place, at);
+    if (this.presence.where() !== before) this.moved.fire();
   }
 
   /** Another tab came to the front: the user went to it, unless it holds a terminal. */
@@ -90,10 +115,10 @@ export class Terminals implements vscode.Disposable {
     if (!tab) return;
     if (tab.input instanceof vscode.TabInputTerminal) {
       const pid = this.activePid();
-      if (pid !== undefined) this.presence.saw(pid, Date.now());
+      if (pid !== undefined) this.see(pid, Date.now());
       return;
     }
-    this.presence.saw("elsewhere", Date.now());
+    this.see("elsewhere", Date.now());
   }
 
   private async track(terminal: vscode.Terminal): Promise<void> {
@@ -117,5 +142,6 @@ export class Terminals implements vscode.Disposable {
   dispose(): void {
     for (const subscription of this.subscriptions) subscription.dispose();
     this.changed.dispose();
+    this.moved.dispose();
   }
 }

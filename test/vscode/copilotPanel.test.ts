@@ -45,4 +45,17 @@ describe("Copilot's sessions in VS Code's Chat", () => {
       ["workbench.action.openEditorAtIndex", [1]],
     ]);
   });
+
+  it("finds the chat tab that carries the session's title, unless two do", () => {
+    const group = { viewColumn: 1, tabs: [] as unknown[] };
+    group.tabs = [
+      { label: "Run terminal command touch", input: new TabInputText({}), group },
+      { label: "Run terminal command touch", input: undefined, group },
+      { label: "Twice", input: undefined, group },
+      { label: "Twice", input: undefined, group },
+    ];
+    stub.groups.push(group as never);
+    expect(copilotPanel.tab(view({ agent: "copilot", title: "Run terminal command touch" }))).toBe(group.tabs[1]);
+    expect(copilotPanel.tab(view({ agent: "copilot", title: "Twice" }))).toBeUndefined();
+  });
 });

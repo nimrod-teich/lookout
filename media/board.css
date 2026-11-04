@@ -1193,6 +1193,41 @@ body.vscode-reduce-motion .hover-card {
   color: var(--muted);
 }
 
+/* An eye before the title: the session is in front, bright where the user is, grey where they are not. */
+.card .row .eye {
+  display: none;
+  flex: none;
+  align-self: center;
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.card .row .eye svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
+.card.in-focus .row .eye,
+.card.on-screen .row .eye {
+  display: block;
+}
+
+.card.in-focus .row .eye {
+  color: var(--ink);
+  opacity: 1;
+}
+
+/* The card of the session the user is in, as VS Code marks the file open in the editor in the Explorer. A waiting card keeps its own colour. */
+.card.in-focus:not(.state-waiting) {
+  background: var(--vscode-list-inactiveSelectionBackground, color-mix(in srgb, var(--ink) 12%, transparent));
+}
+
+/* The title gives the eye less room than the gap between the others. */
+.card:is(.in-focus, .on-screen) .row .eye + .title {
+  margin-left: -3px;
+}
+
 .elapsed {
   flex: none;
   font-variant-numeric: tabular-nums;

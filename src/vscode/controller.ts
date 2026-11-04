@@ -40,7 +40,7 @@ import type { InUse } from "../core/worktrees";
 import type { Config } from "./config";
 import type { Log } from "./log";
 import type { Terminals } from "./terminals";
-import { isWatched } from "./watch";
+import { focusOf, isWatched } from "./watch";
 
 /** How applying `lookout.retention.days` went: a write, or why not. */
 export type RetentionOutcome =
@@ -691,6 +691,20 @@ export class Controller implements vscode.Disposable {
     if (changed) this.readKept();
   }
 
+  /** Marks the sessions whose tab or terminal is in front in this window. */
+  private markFocus(views: readonly SessionView[]): SessionView[] {
+    return views.map((view) => {
+      const focus = focusOf(view, this.terminals);
+      return focus === view.focus ? view : { ...view, focus };
+    });
+  }
+
+  /** Marks again which sessions are in front, without reading them: the user moved, and no tab or terminal may have changed. */
+  refocus(): void {
+    if (this.disposed || this.current.length === 0) return;
+    this.publish(this.markFocus(this.current), this.pastViews, this.favouritePast, this.archivePast, this.notedPast, this.purgedPast);
+  }
+
   /** The views marked with what is kept of them. */
   private markKept<T extends { id: string; kept?: boolean }>(views: T[]): T[] {
     if (this.keptIds.size === 0) return views;
@@ -1227,7 +1241,7 @@ export class Controller implements vscode.Disposable {
     this.earlierNotes = notes;
     // An idle tab or terminal with nothing sent is not worth a card.
     const shown = update.views.filter((view) => !(view.empty && view.state === "idle"));
-    const live = this.markKept(this.annotate(sortViews(this.parkViews([...shown, ...restored], Date.now()))));
+    const live = this.markFocus(this.markKept(this.annotate(sortViews(this.parkViews([...shown, ...restored], Date.now())))));
     this.rememberSessions(live, [...past, ...also]);
     this.noticeVanished(update.views, past);
     this.keepStarred(stars, live);

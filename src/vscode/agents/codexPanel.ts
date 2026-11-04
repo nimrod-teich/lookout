@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import type { PastView, SessionView } from "../../core/types";
 import type { Log } from "../log";
 import type { PanelAdapter, PanelReveal } from "./panel";
-import { openChatSession } from "./vscodeChat";
+import { findChatTab, openChatSession } from "./vscodeChat";
 
 /** The OpenAI extension that hosts Codex threads in VS Code. */
 const CODEX_EXTENSION = "openai.chatgpt";
@@ -56,6 +56,9 @@ export const codexPanel: PanelAdapter = {
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
     return tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === CODEX_EDITOR && tab.input.uri.toString() === threadUri(view.id).toString();
   },
+
+  /** A thread of VS Code's own Chat is in its chat editor; the OpenAI extension's in its own. */
+  tab: (view: SessionView) => (view.vscodeSession ? findChatTab(view.title) : tabOf(view.id)),
 
   /** Codex names its threads itself; the extension offers no rename from outside. */
   rename: () => Promise.resolve(false),

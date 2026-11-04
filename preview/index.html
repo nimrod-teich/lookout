@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked; &sort=name|project|recent|custom orders the groups; &group=project|branch|model|agent|window makes the sections; &tools=1 adds a tool match to the search's answers; &answers=0 as with lookout.answers.enabled off; &typed=0 has a card's answer come back untyped. -->
+<!-- Dev preview of the board outside VS Code: npm run build, then open this file. ?fixture=agents shows three agents; ?markers=auto|always|never as the setting; &fold=favourites,done folds those groups; &park=<ids>&parkedOpen=1 parks sessions and opens Parked; &sort=name|project|recent|custom orders the groups; &group=project|branch|model|agent|window makes the sections; &tools=1 adds a tool match to the search's answers; &answers=0 as with lookout.answers.enabled off; &focus=<id>&visible=<ids> puts the user in one session and shows others in front; &typed=0 has a card's answer come back untyped. -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -108,6 +108,12 @@
     const now = Date.now();
     // Times below 1e9 are "this many ms ago".
     const ago = (t) => (typeof t === "number" && t < 1e9 ? now - t : t);
+    // &focus=a&visible=b,c: the user is in a's tab or terminal, and b's and c's are in front elsewhere.
+    const visibleIds = (params.get("visible") ?? "").split(",").filter(Boolean);
+    for (const s of fixture.sessions) {
+      if (s.id === params.get("focus")) s.focus = "focused";
+      else if (visibleIds.includes(s.id)) s.focus = "visible";
+    }
     // &park=a,b: those sessions are parked, as the extension marks them.
     const parkIds = (params.get("park") ?? "").split(",").filter(Boolean);
     for (const s of fixture.sessions) {

@@ -23,4 +23,9 @@ export class Presence {
   inTerminal(pid: number): boolean {
     return this.place === undefined || this.place === pid;
   }
+
+  /** Where the user was last seen; undefined before any sighting. */
+  where(): Place | undefined {
+    return this.place;
+  }
 }

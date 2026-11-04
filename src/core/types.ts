@@ -70,6 +70,14 @@ export interface ScheduleView {
   expiresAt?: number;
 }
 
+/**
+ * How a session of this window is in front. "focused": the one the user is
+ * in, its terminal or its tab in front of the active editor group. "visible":
+ * in front but the user is elsewhere, its tab in front of another group, or
+ * its terminal the active one; one session at most is focused.
+ */
+export type Focus = "focused" | "visible";
+
 /** What the UI shows for one session. */
 export interface SessionView {
   id: string;
@@ -115,6 +123,8 @@ export interface SessionView {
   empty?: boolean;
   /** Its agent tab is open but the session is not started: restored after a window reload. */
   restored?: boolean;
+  /** Its tab or terminal is in front in this window: where the user is, or in front while they are elsewhere. */
+  focus?: Focus;
   /** Out of the way under Parked: the user parked it, or it rested longer than `lookout.parkAfterHours`. */
   parked?: boolean;
   /** The reasoning effort the model last answered with. */
