@@ -1001,7 +1001,7 @@ function createCard(view: SessionView): HTMLElement {
 
 /**
  * The answers under a card's ask: the options a question offers, as words, or,
- * when the card can answer the prompt in the session's terminal, as buttons:
+ * when the card can answer the prompt where the session runs, as buttons:
  * Yes and No to a permission, or each option of a question.
  */
 function setAnswers(options: HTMLElement, view: SessionView, words: string[]): void {
@@ -1017,7 +1017,7 @@ function setAnswers(options: HTMLElement, view: SessionView, words: string[]): v
   markSent(options, offered.length > 0 && call !== undefined ? answered.get(call) : undefined);
 }
 
-/** One answer as a button: a click, or Enter, types its key in the session's terminal, once, and does not jump. */
+/** One answer as a button: a click, or Enter, gives it to the session, once, and does not jump. */
 function answerButton(options: HTMLElement, id: string, call: string, answer: Answer): HTMLElement {
   const kind = answer.choice === "yes" ? " yes" : answer.choice === "no" ? " no" : "";
   const button = el("button", `option answer${kind}`, answer.label);

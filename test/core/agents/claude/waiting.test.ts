@@ -37,12 +37,12 @@ describe("why a recorded session waits", () => {
   it("names the tool and its whole command for a permission prompt", () => {
     const session = pollOne(recorded("permission", "permission").provider);
     expect(session.status).toBe("waiting");
-    expect(session.reason).toEqual({ kind: "permission", ask: "Bash: ls -la /tmp", raw: "permission prompt", call: "toolu_01PFM91fpEuH9PGVq8vXRwBj", answer: "yesno" });
+    expect(session.reason).toEqual({ kind: "permission", ask: "Bash: ls -la /tmp", raw: "permission prompt", call: "toolu_01PFM91fpEuH9PGVq8vXRwBj", answer: "yesno", tool: "Bash" });
   });
 
   it("quotes the question and its answers while AskUserQuestion is open", () => {
     const session = pollOne(recorded("question", "question").provider);
-    expect(session.reason).toEqual({ kind: "question", ask: "Which color do you prefer?", options: ["Red", "Blue"], raw: "input needed", call: "toolu_01AerPTm6BqVUvGyqAjGfvuF", answer: "options" });
+    expect(session.reason).toEqual({ kind: "question", ask: "Which color do you prefer?", options: ["Red", "Blue"], raw: "input needed", call: "toolu_01AerPTm6BqVUvGyqAjGfvuF", answer: "options", tool: "AskUserQuestion" });
   });
 
   it("names the plan to approve, from the plan in the tool call", () => {
@@ -167,6 +167,7 @@ describe("what the card can answer", () => {
       raw: "permission prompt",
       call: "t1",
       answer: "yesno",
+      tool: "Bash",
     });
     const yes = (name: string, input: unknown) => reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", name, input])).answer;
     expect(yes("Bash", { command: "npm test", timeout: 60000, run_in_background: false, dangerouslyDisableSandbox: false })).toBe("yesno");
@@ -224,7 +225,7 @@ describe("what the card can answer", () => {
 
   it("picks an option of a single question, and leaves several questions or several answers to the terminal", () => {
     const one = reasonOf({ waitingFor: "input needed" }, waitingOn(["q1", "AskUserQuestion", { questions: [question("Which colour?", ["Red", "Blue", "Green"])] }]));
-    expect(one).toEqual({ kind: "question", ask: "Which colour?", options: ["Red", "Blue", "Green"], raw: "input needed", call: "q1", answer: "options" });
+    expect(one).toEqual({ kind: "question", ask: "Which colour?", options: ["Red", "Blue", "Green"], raw: "input needed", call: "q1", answer: "options", tool: "AskUserQuestion" });
     // A number moves on to the next question; with several answers it ticks one.
     const two = reasonOf({ waitingFor: "input needed" }, waitingOn(["q1", "AskUserQuestion", { questions: [question("Which colour?", ["Red", "Blue"]), question("Which size?", ["S", "L"])] }]));
     expect(two).toMatchObject({ ask: "Which colour? (+1 more)", options: ["Red", "Blue"] });
