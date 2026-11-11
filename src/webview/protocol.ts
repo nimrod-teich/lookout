@@ -74,7 +74,7 @@ export type ToBoard =
     }
   /** `pending` sessions were not read yet: the board asks again, unless `follows`, when the extension sends the results again as they are read. */
   | { type: "search"; query: string; results: SearchResult[]; pending: number; follows?: boolean }
-  /** What came of a card's answer to tool call `call`: `sent` when its key went to the terminal, now or at an earlier click; otherwise the card offers its answers again. */
+  /** What came of a card's answer to tool call `call`: `sent` when it went to the session, now or at an earlier click; otherwise the card offers its answers again. */
   | { type: "answered"; call: string; sent: boolean };
 
 /** Webview → extension. */

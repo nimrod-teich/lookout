@@ -37,6 +37,8 @@ export interface Reason {
    * or one of a single question's options.
    */
   answer?: "yesno" | "options";
+  /** The tool of that call, as the agent names it: "Bash", "AskUserQuestion". */
+  tool?: string;
 }
 
 /** Where a session's state comes from, and how old that is. */
@@ -104,6 +106,13 @@ export interface SessionView {
   host: Host;
   /** VS Code's address for the session, when VS Code runs it in its Chat view. */
   vscodeSession?: string;
+  /**
+   * For a session in this window's agent panel, waiting on a prompt the card
+   * can answer: "live" while Lookout's hook waits on that prompt, so the
+   * card's answer goes to it; "off" while the user has not turned the hook
+   * on, so a click on an answer asks to. None: the card does not answer it.
+   */
+  promptHook?: "live" | "off";
   /** Shell pid of the integrated terminal the session runs in, when `host` is "terminal". */
   terminalPid?: number;
   /** Name of the other VS Code window the session runs in, when `host` is "window". */

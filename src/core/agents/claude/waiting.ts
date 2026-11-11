@@ -58,7 +58,7 @@ export function reasonOf(
   if ((word === PERMISSION_PROMPT || word === INPUT_NEEDED) && question?.ask) {
     const options = question.options;
     const pickable = alone && question.single === true && options !== undefined && options.length > 0 && options.length <= MAX_PICKED;
-    return { kind: "question", ask: question.ask, options, raw, ...(pickable && { call: question.id, answer: "options" as const }) };
+    return { kind: "question", ask: question.ask, options, raw, ...(pickable && { call: question.id, answer: "options" as const, tool: question.name }) };
   }
   if (file.needs) return { kind, ask: quoteAsk(file.needs), raw };
   if (word === PERMISSION_PROMPT) {
@@ -77,7 +77,7 @@ export function reasonOf(
       const ask = toolAsk(tool);
       // Yes or no from the card only to a prompt whose whole ask it shows.
       const answerable = alone && tool.whole === true && clip(ask) === ask;
-      return { kind, ask: clip(ask), raw, ...(answerable && { call: tool.id, answer: "yesno" as const }) };
+      return { kind, ask: clip(ask), raw, ...(answerable && { call: tool.id, answer: "yesno" as const, tool: tool.name }) };
     }
     if (tool) return { kind, ask: clip(`${toolAsk(tool)} · network access`), raw };
   }

@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { asksFolder, hookScriptFile, promptHookInstalled } from "../../src/core/agents/claude/promptHook";
 import { remoteSettingsFile } from "../../src/core/agents/claude/retention";
 import { JumpMailbox } from "../../src/core/jumpMailbox";
 import { NOTE_MAX, SessionRecords } from "../../src/core/sessionRecords";
@@ -886,6 +887,72 @@ describe("the extension", () => {
       await vi.waitFor(() => expect(warnings().at(-1)).toMatch(/did not write cleanupPeriodDays 3651: managed settings at .* set it/), WAIT);
       expect(JSON.parse(fs.readFileSync(settings(), "utf8"))).toEqual({ model: "opus" });
     }, 60_000);
+  });
+
+  describe("answering a panel session's prompt from its card", () => {
+    const settings = () => path.join(configDir, "settings.json");
+    const changed = () => stub.configChange.fire({ affectsConfiguration: (section: string) => section === "lookout" || section.startsWith("lookout.answers") });
+    /** The session's card, as the board last showed it. */
+    const card = () => {
+      boardStates();
+      const last = statesBoard!.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { sessions: { promptHook?: string; reason?: { call?: string } }[] } | undefined;
+      return last?.sessions[0];
+    };
+    /** The session waits on a Bash call whose whole command the card shows. */
+    const waitOnBash = () => {
+      const dir = path.join(configDir, "projects", "-work-app");
+      fs.mkdirSync(dir, { recursive: true });
+      const call = { type: "assistant", cwd: "/work/app", timestamp: new Date().toISOString(), message: { id: "m-1", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "npm test" } }] } };
+      fs.writeFileSync(path.join(dir, `${SESSION}.jsonl`), [JSON.stringify({ type: "user", cwd: "/work/app", message: { content: "run the tests" } }), JSON.stringify(call)].join("\n") + "\n");
+      writeSession({ status: "waiting", waitingFor: "permission prompt", statusUpdatedAt: Date.now() });
+    };
+
+    it("asks on the first click; turned on, adds the hook, answers through it, and takes it out when turned off", async () => {
+      fs.writeFileSync(settings(), JSON.stringify({ model: "opus" }));
+      waitOnBash();
+      activate(context());
+      await placed();
+      // Nothing written before the user says so: the card offers the answers, and a click asks.
+      await vi.waitFor(() => expect(card()).toMatchObject({ promptHook: "off", reason: { call: "toolu_1" } }), WAIT);
+      expect(JSON.parse(fs.readFileSync(settings(), "utf8"))).toEqual({ model: "opus" });
+      stub.notificationAnswer = "Turn On";
+      statesBoard!.receive({ type: "answer", id: SESSION, call: "toolu_1", choice: "yes" });
+      await vi.waitFor(() => expect(stub.config["lookout.answers.panelSessions"]).toBe("on"), WAIT);
+      expect(statesBoard!.posted).toContainEqual({ type: "answered", call: "toolu_1", sent: false });
+      changed();
+      await vi.waitFor(() => expect(promptHookInstalled(configDir)).toBe(true), WAIT);
+      expect(JSON.parse(fs.readFileSync(settings(), "utf8")).model).toBe("opus");
+      expect(infoMessages().some((m) => /added its hook to .*settings\.json, with the file as it was at /.test(m))).toBe(true);
+      // The prompt came before the hook: no hook waits on it, so the card offers nothing.
+      await vi.waitFor(() => expect(card()?.promptHook).toBeUndefined(), WAIT);
+      // A hook waits on the next prompt: the card's answer goes to it.
+      fs.writeFileSync(path.join(asksFolder(configDir), "4242.json"), JSON.stringify({ session_id: SESSION, hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "npm test" } }));
+      await vi.waitFor(() => expect(card()?.promptHook).toBe("live"), WAIT);
+      statesBoard!.receive({ type: "answer", id: SESSION, call: "toolu_1", choice: "yes" });
+      const reply = path.join(asksFolder(configDir), "4242.reply.json");
+      await vi.waitFor(() => expect(fs.existsSync(reply)).toBe(true), WAIT);
+      expect(JSON.parse(fs.readFileSync(reply, "utf8"))).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
+      expect(statesBoard!.posted.at(-1)).toEqual({ type: "answered", call: "toolu_1", sent: true });
+      // Turned off: the hook goes, every other key stays.
+      stub.config["lookout.answers.panelSessions"] = "off";
+      changed();
+      await vi.waitFor(() => expect(JSON.parse(fs.readFileSync(settings(), "utf8"))).toEqual({ model: "opus" }), WAIT);
+      expect(fs.existsSync(hookScriptFile(configDir))).toBe(false);
+      await vi.waitFor(() => expect(card()?.promptHook).toBeUndefined(), WAIT);
+    }, 90_000);
+
+    it("never offers the answers, nor asks, once the user says not for panel sessions", async () => {
+      waitOnBash();
+      activate(context());
+      await placed();
+      await vi.waitFor(() => expect(card()?.promptHook).toBe("off"), WAIT);
+      stub.notificationAnswer = "Not for Panel Sessions";
+      statesBoard!.receive({ type: "answer", id: SESSION, call: "toolu_1", choice: "yes" });
+      await vi.waitFor(() => expect(stub.config["lookout.answers.panelSessions"]).toBe("off"), WAIT);
+      changed();
+      await vi.waitFor(() => expect(card()?.promptHook).toBeUndefined(), WAIT);
+      expect(fs.existsSync(settings())).toBe(false);
+    }, 90_000);
   });
 
   describe("earlier sessions", () => {

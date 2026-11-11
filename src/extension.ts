@@ -196,8 +196,31 @@ export function activate(context: vscode.ExtensionContext): void {
       return controller.sessions;
     },
     send: (pid, keys) => terminals.send(pid, keys),
+    reply: (view, choice) => controller.replyToPrompt(view, choice),
     log,
   });
+  /**
+   * A card of a panel session was answered before Lookout's hook was turned
+   * on: asks to turn it on. The prompt the panel shows was asked without the
+   * hook, so it is answered in the panel, which is brought forward.
+   */
+  const askToTurnOnPanelAnswers = async (view: SessionView) => {
+    const turnOn = "Turn On";
+    const never = "Not for Panel Sessions";
+    const pick = await vscode.window.showInformationMessage(
+      "Answer the prompts of Claude Code panel sessions from their cards?",
+      {
+        modal: true,
+        detail:
+          "The panel takes no keys from outside, so Lookout needs a Claude Code hook for this. It adds one to Claude Code's settings file (settings.json in its config directory), with a copy of the file as it was beside it. The hook runs only for sessions in the panel and only while a Lookout window is open; the panel still takes answers as always. Turn it off with the setting lookout.answers.panelSessions.\n\nThe prompt shown now came before the hook: answer it in the panel.",
+      },
+      turnOn,
+      never,
+    );
+    if (pick === undefined) return;
+    await vscode.workspace.getConfiguration("lookout").update("answers.panelSessions", pick === turnOn ? "on" : "off", vscode.ConfigurationTarget.Global);
+    if (pick === turnOn) await jump(view);
+  };
   const answer = (view: SessionView, call: string, choice: Choice): AnswerResult | undefined => {
     if (!config.answers) return undefined;
     const result = answerer.answer(view.id, call, choice);
@@ -207,6 +230,9 @@ export function activate(context: vscode.ExtensionContext): void {
         break;
       case "no-terminal":
         void vscode.window.showWarningMessage(`Lookout could not find the terminal of "${view.title}".`);
+        break;
+      case "hook-off":
+        void askToTurnOnPanelAnswers(view);
         break;
     }
     return result;
@@ -272,6 +298,26 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       case "failed":
         void vscode.window.showWarningMessage(`Lookout did not write cleanupPeriodDays ${outcome.days}: ${outcome.file} ${outcome.why}. Add it to the file yourself.`);
+        return;
+    }
+  }
+  /** Keeps Lookout's prompt hook as `lookout.answers.panelSessions` says, and says what was written, or why not. */
+  function applyPromptHook(): void {
+    const outcome = controller.applyPromptHook();
+    switch (outcome.kind) {
+      case "written":
+        void vscode.window.showInformationMessage(
+          outcome.on
+            ? `Lookout added its hook to ${outcome.file}${outcome.backup ? `, with the file as it was at ${outcome.backup}` : ""}. The cards answer the prompts panel sessions show from now on.`
+            : `Lookout took its hook out of ${outcome.file}${outcome.backup ? `, with the file as it was at ${outcome.backup}` : ""}.`,
+        );
+        return;
+      case "failed":
+        void vscode.window.showWarningMessage(
+          outcome.on
+            ? `Lookout did not add its hook: ${outcome.file} ${outcome.why}. The cards of panel sessions offer no answers.`
+            : `Lookout did not take its hook out: ${outcome.file} ${outcome.why}. Its script is gone, so the entry left there does nothing.`,
+        );
         return;
     }
   }
@@ -503,6 +549,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (event.affectsConfiguration("lookout.claudeDiscoverDirs")) void discovery.scan();
       // The retention is kept after the controller knows the new value.
       if (event.affectsConfiguration("lookout.retention.days")) applyRetention();
+      if (["lookout.answers", "lookout.agents.claude", "lookout.claudeConfigDir", "claudeCode.environmentVariables"].some((key) => event.affectsConfiguration(key))) applyPromptHook();
       render();
     }),
     vscode.commands.registerCommand(JUMP, async () => {
@@ -600,6 +647,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   controller.start(config);
   applyRetention();
+  applyPromptHook();
   render();
   discovery.start();
   context.subscriptions.push({ dispose: () => discovery.stop() });

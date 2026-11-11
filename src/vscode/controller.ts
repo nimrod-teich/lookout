@@ -10,6 +10,8 @@ import { accountFile, describeDirs, emailKey, type AccountFile } from "../core/a
 import { ArchivedSessions, stateDbCandidates } from "../core/agents/claude/archived";
 import { closeStores, runScan } from "../core/agents/lineReaders";
 import { managedRetention, readRetention, retentionIn, userSettingsFile, writeRetention } from "../core/agents/claude/retention";
+import { ALIVE_EVERY_MS, asksFolder, decisionFor, installPromptHook, markAlive, promptHookInstalled, readAsks, removePromptHook, replyToAsk, type PanelAsk, type PanelChoice } from "../core/agents/claude/promptHook";
+import type { Choice } from "../core/answers";
 import { signInEnv, type ClaudeDir } from "../core/agents/claude/paths";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
@@ -43,6 +45,9 @@ import type { Terminals } from "./terminals";
 import { focusOf, isWatched } from "./watch";
 
 /** How applying `lookout.retention.days` went: a write, or why not. */
+/** What turning Lookout's prompt hook on or off did: nothing to do, done (with the copy of the settings file kept), or why not. */
+export type PromptHookOutcome = { kind: "unchanged" } | { kind: "written"; on: boolean; file: string; backup?: string } | { kind: "failed"; on: boolean; file: string; why: string };
+
 export type RetentionOutcome =
   | { kind: "written"; days: number; file: string; backup?: string; overriddenBy?: string }
   | { kind: "managed"; days: number; file: string }
@@ -292,6 +297,14 @@ export class Controller implements vscode.Disposable {
   private claudeConfigDir = "";
   /** Keep Claude Code's transcripts this many days, written into its user settings file; 0 leaves Claude Code's own. */
   private retentionDays = 0;
+  /** `lookout.answers.panelSessions`: answer panel sessions' prompts from the cards through Lookout's hook; ask first; or never. */
+  private panelAnswers: "ask" | "on" | "off" = "ask";
+  /** The cards answer prompts at all: `lookout.answers.enabled`. */
+  private answersOn = true;
+  /** Marks, while the hook is on, that a Lookout window runs. */
+  private aliveTimer: ReturnType<typeof setInterval> | undefined;
+  /** Watches the folder the hook leaves prompts in: a prompt shows on its card as it arrives. */
+  private asksWatch: fs.FSWatcher | undefined;
   private usageMode: RefreshMode = "manual";
   private usageAlerts = true;
   /** Refresh is switched off for Claude Code in VS Code's environment or the Claude Code extension's settings. */
@@ -418,6 +431,73 @@ export class Controller implements vscode.Disposable {
     const effective = readRetention(this.claudeConfigDir, this.host.workspaceFolders());
     const overriddenBy = effective.level === "project" || effective.level === "local" ? effective.file : undefined;
     return { kind: "written", days, file: outcome.file, ...(outcome.backup ? { backup: outcome.backup } : {}), ...(overriddenBy ? { overriddenBy } : {}) };
+  }
+
+  /**
+   * Keeps Lookout's prompt hook as `lookout.answers.panelSessions` says: in
+   * Claude Code's user settings file of the directory the panel runs on
+   * while it is "on", out of it otherwise. While on, marks that a window
+   * runs and watches for the prompts the hook leaves.
+   */
+  applyPromptHook(): PromptHookOutcome {
+    const dir = this.claudeConfigDir;
+    const on = this.claudeOn && dir !== "" && this.panelAnswers === "on";
+    this.stopPromptHookWatch();
+    if (dir === "") return { kind: "unchanged" };
+    if (!on && !promptHookInstalled(dir) && !fs.existsSync(asksFolder(dir))) return { kind: "unchanged" };
+    const outcome = on ? installPromptHook(dir) : removePromptHook(dir);
+    if (on && outcome.ok) this.startPromptHookWatch(dir);
+    if (!outcome.ok) return { kind: "failed", on, file: outcome.file, why: outcome.why };
+    if (outcome.unchanged) return { kind: "unchanged" };
+    return { kind: "written", on, file: outcome.file, ...(outcome.backup ? { backup: outcome.backup } : {}) };
+  }
+
+  private startPromptHookWatch(dir: string): void {
+    this.aliveTimer = setInterval(() => markAlive(dir), ALIVE_EVERY_MS);
+    try {
+      this.asksWatch = fs.watch(asksFolder(dir), () => this.schedulePoll());
+      this.asksWatch.on("error", () => this.stopPromptHookWatch(false));
+    } catch {
+      // The poll's backstop still finds the prompts, a few seconds later.
+    }
+  }
+
+  private stopPromptHookWatch(alive = true): void {
+    if (alive && this.aliveTimer) clearInterval(this.aliveTimer);
+    if (alive) this.aliveTimer = undefined;
+    this.asksWatch?.close();
+    this.asksWatch = undefined;
+  }
+
+  /** The prompt Lookout's hook waits on for this session: the one its card shows, by session and tool, and only one. */
+  private askFor(view: SessionView, asks: readonly PanelAsk[]): PanelAsk | undefined {
+    const mine = asks.filter((ask) => ask.sessionId === view.id && ask.tool === view.reason?.tool);
+    return mine.length === 1 ? mine[0] : undefined;
+  }
+
+  /**
+   * Says on each card of a panel session waiting on a prompt the card can
+   * answer whether Lookout's hook waits on it, or would once turned on.
+   */
+  private markPromptHooks(views: SessionView[]): void {
+    if (!this.answersOn || this.panelAnswers === "off" || this.claudeConfigDir === "") return;
+    const answerable = views.filter((view) => view.host === "panel" && view.agent === CLAUDE_CODE && view.state === "waiting" && view.reason?.answer && view.reason.call !== undefined && !view.reason.tentative);
+    if (answerable.length === 0) return;
+    if (this.panelAnswers === "ask") {
+      for (const view of answerable) view.promptHook = "off";
+      return;
+    }
+    const asks = readAsks(this.claudeConfigDir);
+    for (const view of answerable) if (this.askFor(view, asks)) view.promptHook = "live";
+  }
+
+  /** Hands a card's answer to the hook waiting on the session's prompt; false when none waits on it. */
+  replyToPrompt(view: SessionView, choice: Choice): boolean {
+    const ask = this.askFor(view, readAsks(this.claudeConfigDir));
+    if (!ask) return false;
+    const panelChoice: PanelChoice = typeof choice === "number" ? { kind: "option", index: choice, count: view.reason?.options?.length ?? 0 } : { kind: choice };
+    const output = decisionFor(ask, panelChoice);
+    return output !== undefined && replyToAsk(ask, output);
   }
 
   /** How to resume a session that is not running in a terminal, for an agent whose sessions resume there. */
@@ -1088,6 +1168,8 @@ export class Controller implements vscode.Disposable {
     this.remembered.clear();
     this.claudeConfigDir = config.claudeConfigDir;
     this.retentionDays = config.retentionDays;
+    this.panelAnswers = config.panelAnswers;
+    this.answersOn = config.answers;
     // One provider per Claude Code directory, each its own account. The first is the one the Claude Code panel runs;
     // another's sessions resume in a terminal on that directory's sign-in. Their labels show once there are several.
     const accounts = config.claudeDirs.length > 1;
@@ -1164,6 +1246,8 @@ export class Controller implements vscode.Disposable {
     this.keepFavourites = config.keepFavourites;
     this.setToolOutput(config.searchToolOutput);
     this.retentionDays = config.retentionDays;
+    this.panelAnswers = config.panelAnswers;
+    this.answersOn = config.answers;
     this.poll();
     if (keep !== this.historyKeep) this.sweepStore();
   }
@@ -1196,6 +1280,7 @@ export class Controller implements vscode.Disposable {
       return;
     }
     this.notePrompts(views);
+    this.markPromptHooks(views);
     const update = this.attention.update(views, (view) => isWatched(view, this.terminals), {
       typedQuestions: this.typedQuestions,
       doneElsewhere: (view) => view.windowPid !== undefined && (windows.get(view.windowPid)?.done?.includes(view.id) ?? false),
@@ -1643,6 +1728,7 @@ export class Controller implements vscode.Disposable {
     if (this.pruneTimer) clearTimeout(this.pruneTimer);
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     if (this.sweepSoon) clearTimeout(this.sweepSoon);
+    this.stopPromptHookWatch();
     this.recordsWatch?.dispose();
     this.background?.dispose();
     readThroughStore(undefined);

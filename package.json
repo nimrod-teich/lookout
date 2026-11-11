@@ -549,6 +549,22 @@
             "default": true,
             "markdownDescription": "Answer a Claude Code session's prompt from its card while the session runs in a terminal of this window: **Yes** or **No** to a permission when the card shows all the call would do (a whole command, address or file to read; not a file to write or edit), or one of a single question's options. Lookout reads the sessions again first and types the answer's key into the terminal only while the session still shows that prompt (Yes is `1`, No is Esc, an option is its number), without bringing the terminal forward."
           },
+          "lookout.answers.panelSessions": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "on",
+              "off"
+            ],
+            "enumDescriptions": [
+              "The cards of panel sessions offer the answers; the first click asks whether to turn this on.",
+              "Lookout keeps its hook in Claude Code's user settings file, and the cards answer panel sessions' prompts.",
+              "The cards of panel sessions offer no answers, and Lookout keeps no hook."
+            ],
+            "default": "ask",
+            "scope": "application",
+            "markdownDescription": "Answer the prompts of sessions in the Claude Code panel from their cards, as `lookout.answers.enabled` does for sessions in a terminal. The panel takes no keys from outside, so this needs a Claude Code hook: when `on`, Lookout adds a `PermissionRequest` hook to Claude Code's user settings file (`~/.claude/settings.json`), every other key kept and a copy of the file as it was beside it, and keeps its script in `~/.claude/lookout/`. The hook runs beside each prompt the panel shows; whichever answers first, the panel or the card, is the answer. It does nothing for sessions outside the panel, nor while no Lookout window is open. `ask` (the default) or `off` takes the hook out again; an uninstall cannot, but the hook it leaves ends at once, since no Lookout window runs to answer. A prompt shown before the hook was on is answered in the panel."
+          },
           "lookout.parkAfterHours": {
             "type": "number",
             "default": 24,

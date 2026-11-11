@@ -29,6 +29,8 @@ export interface Config {
   typedQuestions: boolean;
   /** The cards answer prompts of sessions in this window's terminals. */
   answers: boolean;
+  /** `lookout.answers.panelSessions`: answer the prompts of sessions in the Claude Code panel through Lookout's hook; ask on the first click; or never. */
+  panelAnswers: "ask" | "on" | "off";
   /** A session idle or finished this long goes under Parked; 0: never on its own. */
   parkAfterMs: number;
   /** Keep what was said in a conversation after the agent deletes its transcript, under Purged. */
@@ -119,6 +121,7 @@ export function readConfig(found: readonly string[] = []): Config {
     notifyCooldownMs: Math.max(0, lookout.get<number>("notifications.cooldownSeconds", 30)) * 1000,
     typedQuestions: lookout.get<boolean>("state.typedQuestions", true),
     answers: lookout.get<boolean>("answers.enabled", true),
+    panelAnswers: panelAnswersOf(lookout.get<string>("answers.panelSessions")),
     parkAfterMs: Math.max(0, lookout.get<number>("parkAfterHours", 24)) * 3_600_000,
     historyKeep: lookout.get<boolean>("history.keep", true),
     searchToolOutput: lookout.get<boolean>("search.toolOutput", false),
@@ -143,6 +146,10 @@ export function readConfig(found: readonly string[] = []): Config {
 /** A setting's list of strings, blanks and anything else left out; undefined when it is not a list. */
 function strings(value: unknown): string[] | undefined {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "").map((item) => item.trim()) : undefined;
+}
+
+function panelAnswersOf(value: string | undefined): "ask" | "on" | "off" {
+  return value === "on" || value === "off" ? value : "ask";
 }
 
 /** The retention setting as a whole number of days, 0 to a hundred years; anything else counts as 0, which leaves Claude Code's own. */
