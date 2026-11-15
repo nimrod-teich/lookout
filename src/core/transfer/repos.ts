@@ -26,6 +26,8 @@ export interface LocalRepo {
   root: string;
   linked: boolean;
   remotes: string[];
+  /** A linked worktree's main checkout: the folder that holds the `.git` folder its repository is kept in. None for a worktree of a bare repository. */
+  main?: string;
 }
 
 /** A repository of the source machine that has more than one clone here, none of them the obvious one. */
@@ -127,8 +129,8 @@ function readText(file: string): string | undefined {
  * The repository `dir` is in: the nearest folder up from it that holds
  * `.git`, read from its files without running git. A `.git` file names
  * the repository's folder (`gitdir:`); one with a `commondir` is a linked
- * worktree's, whose remotes are its main checkout's. None outside a
- * repository.
+ * worktree's, whose remotes are its main checkout's, and whose main
+ * checkout is named with it. None outside a repository.
  */
 export function repoAt(dir: string): LocalRepo | undefined {
   let at = path.resolve(dir);
@@ -154,7 +156,8 @@ export function repoAt(dir: string): LocalRepo | undefined {
         const key = remoteKey(url);
         if (key && key.length <= MAX_REMOTE_LENGTH && keys.size < MAX_REMOTES) keys.add(key);
       }
-      return { root: at, linked: common !== undefined, remotes: [...keys].sort() };
+      const main = common !== undefined && path.basename(commonDir) === ".git" ? path.dirname(commonDir) : undefined;
+      return { root: at, linked: common !== undefined, remotes: [...keys].sort(), ...(main === undefined ? {} : { main }) };
     }
     const up = path.dirname(at);
     if (up === at) return undefined;
@@ -163,17 +166,27 @@ export function repoAt(dir: string): LocalRepo | undefined {
   return undefined;
 }
 
-/** The repositories `folders` are in, each once, with a remote: what a backup records. */
+/**
+ * The repositories `folders` are in, each once, with a remote: what a
+ * backup records. A linked worktree's main checkout is recorded with it,
+ * since a restore maps main checkouts, and a repository worked in only
+ * through its worktrees has no other record.
+ */
 export function describeRepos(folders: Iterable<string>): RepoRecord[] {
   const byRoot = new Map<string, RepoRecord>();
   const seen = new Set<string>();
+  const record = (repo: LocalRepo | undefined) => {
+    if (repo && repo.remotes.length > 0 && !byRoot.has(repo.root) && byRoot.size < MAX_REPOS) byRoot.set(repo.root, { root: repo.root, linked: repo.linked, remotes: repo.remotes });
+  };
   for (const folder of folders) {
+    if (byRoot.size >= MAX_REPOS) break;
     if (typeof folder !== "string" || folder === "" || seen.has(folder)) continue;
     seen.add(folder);
     const repo = repoAt(folder);
-    if (!repo || repo.remotes.length === 0 || byRoot.has(repo.root)) continue;
-    byRoot.set(repo.root, { root: repo.root, linked: repo.linked, remotes: repo.remotes });
-    if (byRoot.size >= MAX_REPOS) break;
+    record(repo);
+    if (repo?.main === undefined || byRoot.has(repo.main)) continue;
+    const main = repoAt(repo.main);
+    if (main && !main.linked && main.root === repo.main) record(main);
   }
   return [...byRoot.values()].sort((a, b) => a.root.localeCompare(b.root));
 }
@@ -196,7 +209,9 @@ export function readRepoRecords(value: unknown): RepoRecord[] {
  * The clones on this machine of any of the `wanted` remotes: the
  * repositories of the folders `starts` names (and the ones they are in),
  * and those up to three folders deep under `home`, hidden folders and
- * system, media and build folders left out. Each repository once.
+ * system, media and build folders left out. A repository's own folders
+ * are not searched, except the home folder's: one kept in git, for its
+ * dotfiles, holds every other clone. Each repository once.
  */
 export function findLocalRepos(starts: readonly string[], home: string, wanted: ReadonlySet<string>, limits: { depth?: number; maxDirs?: number } = {}): LocalRepo[] {
   const found = new Map<string, LocalRepo>();
@@ -217,7 +232,7 @@ export function findLocalRepos(starts: readonly string[], home: string, wanted: 
     }
     if (entries.some((entry) => entry.name === ".git")) {
       consider(repoAt(dir));
-      return;
+      if (level > 0) return;
     }
     if (level >= depth) return;
     for (const entry of entries) {

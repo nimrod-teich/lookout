@@ -59,8 +59,21 @@ describe("repoAt", () => {
     expect(repoAt(path.join(repo, "src", "deep"))).toEqual({ root: repo, linked: false, remotes: ["o/app", "up/app"] });
     const wt = path.join(dir, "app-wt");
     linkWorktree(repo, wt);
-    expect(repoAt(wt)).toEqual({ root: wt, linked: true, remotes: ["o/app", "up/app"] });
+    expect(repoAt(wt)).toEqual({ root: wt, linked: true, remotes: ["o/app", "up/app"], main: repo });
     expect(repoAt(path.join(dir, "nowhere"))).toBeUndefined();
+  });
+
+  it("names no main checkout for a worktree of a bare repository", () => {
+    const dir = root();
+    const bare = path.join(dir, "app.git");
+    const own = path.join(bare, "worktrees", "wt");
+    fs.mkdirSync(own, { recursive: true });
+    fs.writeFileSync(path.join(bare, "config"), '[core]\n\tbare = true\n[remote "origin"]\n\turl = git@h:o/app.git\n');
+    fs.writeFileSync(path.join(own, "commondir"), "../..\n");
+    const wt = path.join(dir, "wt");
+    fs.mkdirSync(wt);
+    fs.writeFileSync(path.join(wt, ".git"), `gitdir: ${own}\n`);
+    expect(repoAt(wt)).toEqual({ root: wt, linked: true, remotes: ["o/app"] });
   });
 
   it("reads a .git file that names its folder without a commondir as the repository's own", () => {
@@ -82,6 +95,18 @@ describe("describeRepos", () => {
     const records = describeRepos([repo, path.join(repo, "web"), path.join(dir, "plain"), local, "", repo]);
     expect(records).toEqual([{ root: repo, linked: false, remotes: ["o/app"] }]);
     expect(JSON.stringify(records)).not.toContain("secret");
+  });
+
+  it("records a linked worktree's main checkout with it, though no session worked in the main checkout", () => {
+    const dir = root();
+    const repo = clone(path.join(dir, "app"), "git@github.com:o/app.git");
+    const inside = path.join(repo, ".claude", "worktrees", "feat");
+    const beside = path.join(dir, "app-fix");
+    linkWorktree(repo, inside);
+    linkWorktree(repo, beside);
+    const records = describeRepos([inside, beside]);
+    expect(records.filter((record) => !record.linked)).toEqual([{ root: repo, linked: false, remotes: ["o/app"] }]);
+    expect(records.filter((record) => record.linked).map((record) => record.root).sort()).toEqual([inside, beside].sort());
   });
 });
 
@@ -118,6 +143,16 @@ describe("findLocalRepos", () => {
     expect(roots(findLocalRepos([], home, wanted))).toEqual([sri]);
     expect(roots(findLocalRepos([path.join(elsewhere, "src")], home, wanted))).toEqual([elsewhere, sri].sort());
     expect(findLocalRepos([elsewhere], home, new Set())).toEqual([]);
+  });
+
+  it("looks past a home folder kept in git, and never inside another repository", () => {
+    const home = root();
+    clone(home, "git@github.com:me/dotfiles.git");
+    const app = clone(path.join(home, "projects", "app"), "git@github.com:o/app.git");
+    clone(path.join(app, "vendor", "app"), "git@github.com:o/app.git");
+    const roots = (wanted: string[]) => findLocalRepos([], home, new Set(wanted)).map((repo) => repo.root).sort();
+    expect(roots(["o/app"])).toEqual([app]);
+    expect(roots(["me/dotfiles", "o/app"])).toEqual([home, app].sort());
   });
 
   it("stops after as many folders as it may read", () => {
@@ -194,6 +229,23 @@ describe("suggestMapping", () => {
     expect(suggestMapping(manifest("/home/old", [repos[1]!]), home, [])).toEqual({ mapping: [{ from: "/home/old", to: home }], ambiguous: [] });
     // A backup of 0.1.6 records no repositories: the home folder's mapping alone.
     expect(suggestMapping(manifest("/home/old", undefined as unknown as RepoRecord[]), home, [])).toEqual({ mapping: [{ from: "/home/old", to: home }], ambiguous: [] });
+  });
+
+  it("finds a moved repository whose sessions all worked in its linked worktrees", () => {
+    const old = root();
+    const main = clone(path.join(old, "projects", "app"), "git@github.com:o/app.git");
+    const worktree = path.join(main, ".claude", "worktrees", "feat");
+    linkWorktree(main, worktree);
+    const home = root();
+    const renamed = clone(path.join(home, "code", "app-renamed"), "git@github.com:o/app.git");
+    const source = { ...manifest(old, describeRepos([worktree])), source: { host: "old", platform: process.platform, home: old, wsl: false } } as unknown as BundleManifest;
+    expect(suggestMapping(source, home, [])).toEqual({
+      mapping: [
+        { from: old, to: home },
+        { from: main, to: renamed, by: "repo" },
+      ],
+      ambiguous: [],
+    });
   });
 
   it("maps no repository outside the old home folder, nor the home folder itself, whatever the backup says", () => {
