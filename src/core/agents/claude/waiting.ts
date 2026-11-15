@@ -3,7 +3,7 @@ import { clip, questionIn, quoteAsk } from "../../asks";
 import { parseMarkdown, blockText } from "../../markdown";
 import type { Reason, ReasonKind, TypedQuestion } from "../../types";
 import type { SessionFile } from "./sessionFile";
-import type { OpenTool, Reply, TranscriptState } from "./transcript";
+import { askOf, type OpenTool, type Reply, type TranscriptState } from "./transcript";
 
 /** Claude Code's `waitingFor` for a tool permission, and for any prompt that names nothing more specific. */
 export const PERMISSION_PROMPT = "permission prompt";
@@ -31,8 +31,24 @@ export function toolLabel(name: string): string {
   return mcp ? `${mcp[2]} (${mcp[1]})` : name;
 }
 
-function toolAsk(tool: OpenTool): string {
+function toolAsk(tool: Pick<OpenTool, "name" | "ask">): string {
   return tool.ask ? `${toolLabel(tool.name)}: ${tool.ask}` : toolLabel(tool.name);
+}
+
+/**
+ * Whether a call of `name` with `input` is the one `reason` lets a card
+ * answer: it reads as the same ask, whole, or as the same single question
+ * with the same options. So an answer given for what the card shows goes to
+ * no other call of the session, a subagent's or a later one. `cwd` is the
+ * session's directory, which the card shows a file relative to.
+ */
+export function sameCall(reason: Reason, name: string, input: unknown, cwd?: string): boolean {
+  if (reason.call === undefined || reason.tool !== name) return false;
+  const theirs = askOf(name, input, cwd);
+  if (reason.answer === "yesno") return theirs.whole === true && toolAsk({ name, ask: theirs.ask }) === reason.ask;
+  if (reason.answer !== "options" || theirs.single !== true || theirs.ask !== reason.ask) return false;
+  const [mine, others] = [reason.options ?? [], theirs.options ?? []];
+  return mine.length === others.length && mine.every((option, i) => option === others[i]);
 }
 
 /**

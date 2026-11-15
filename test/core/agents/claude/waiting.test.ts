@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ClaudeProvider } from "../../../../src/core/agents/claude/provider";
 import { applyLine, emptyTranscript } from "../../../../src/core/agents/claude/transcript";
-import { planFileTitle, questionOf, reasonOf, toolLabel } from "../../../../src/core/agents/claude/waiting";
+import { planFileTitle, questionOf, reasonOf, sameCall, toolLabel } from "../../../../src/core/agents/claude/waiting";
 import { FakeProc, sessionId, tempConfigDir, transcriptPath, writeSession } from "../../helpers";
 
 // Session files and transcript slices recorded from Claude Code 2.1.301 while
@@ -234,6 +234,38 @@ describe("what the card can answer", () => {
     expect(many.answer).toBeUndefined();
     const none = reasonOf({ waitingFor: "input needed" }, waitingOn(["q1", "AskUserQuestion", { questions: [question("Anything else?", [])] }]));
     expect(none.answer).toBeUndefined();
+  });
+
+  it("knows the call its card shows from another of the same tool, by what the call would do", () => {
+    const bash = reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", "Bash", { command: "npm test", description: "Run the tests" }]));
+    expect(sameCall(bash, "Bash", { command: "npm test" })).toBe(true);
+    // What a Yes does not depend on may differ: the description, the timeout.
+    expect(sameCall(bash, "Bash", { command: "npm test", description: "Tests", timeout: 60000 })).toBe(true);
+    // Another command, a subagent's or the session's next: not the one the card shows.
+    expect(sameCall(bash, "Bash", { command: "rm -rf build" })).toBe(false);
+    expect(sameCall(bash, "Bash", { command: "npm test", dangerouslyDisableSandbox: true })).toBe(false);
+    expect(sameCall(bash, "Read", { file_path: "npm test" })).toBe(false);
+    // A file shows relative to the session's directory, as the card shows it.
+    const read = reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", "Read", { file_path: "/work/app/src/a.ts" }]));
+    expect(read.ask).toBe("Read: src/a.ts");
+    expect(sameCall(read, "Read", { file_path: "/work/app/src/a.ts" }, "/work/app")).toBe(true);
+    expect(sameCall(read, "Read", { file_path: "/work/other/src/a.ts" }, "/work/app")).toBe(false);
+    expect(sameCall(read, "Read", { file_path: "src/a.ts" }, "/work/other")).toBe(true);
+    expect(sameCall(read, "Read", { file_path: "/work/app/src/a.ts" })).toBe(false);
+    // A prompt the card does not answer names no call.
+    const edit = reasonOf({ waitingFor: "permission prompt" }, waitingOn(["t1", "Write", { file_path: "/work/app/a.ts", content: "x" }]));
+    expect(sameCall(edit, "Write", { file_path: "/work/app/a.ts", content: "x" }, "/work/app")).toBe(false);
+  });
+
+  it("knows the question its card shows by its words and its options", () => {
+    const asked = { questions: [question("Which colour?", ["Red", "Blue"])] };
+    const one = reasonOf({ waitingFor: "input needed" }, waitingOn(["q1", "AskUserQuestion", asked]));
+    expect(sameCall(one, "AskUserQuestion", asked)).toBe(true);
+    expect(sameCall(one, "AskUserQuestion", { questions: [question("Which colour?", ["Red", "Green"])] })).toBe(false);
+    expect(sameCall(one, "AskUserQuestion", { questions: [question("Which colour?", ["Red", "Blue", "Green"])] })).toBe(false);
+    expect(sameCall(one, "AskUserQuestion", { questions: [question("Which size?", ["Red", "Blue"])] })).toBe(false);
+    expect(sameCall(one, "AskUserQuestion", { questions: [question("Which colour?", ["Red", "Blue"], true)] })).toBe(false);
+    expect(sameCall(one, "Bash", { command: "Which colour?" })).toBe(false);
   });
 });
 

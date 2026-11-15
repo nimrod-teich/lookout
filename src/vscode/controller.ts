@@ -13,6 +13,7 @@ import { managedRetention, readRetention, retentionIn, userSettingsFile, writeRe
 import { ALIVE_EVERY_MS, asksFolder, decisionFor, installPromptHook, markAlive, promptHookInstalled, readAsks, removePromptHook, replyToAsk, type PanelAsk, type PanelChoice } from "../core/agents/claude/promptHook";
 import type { Choice } from "../core/answers";
 import { signInEnv, type ClaudeDir } from "../core/agents/claude/paths";
+import { sameCall } from "../core/agents/claude/waiting";
 import { CLAUDE_CODE, ClaudeProvider } from "../core/agents/claude/provider";
 import { CodexProvider } from "../core/agents/codex/provider";
 import { chatStorageRoots, LocalChats } from "../core/agents/copilot/localChats";
@@ -436,14 +437,17 @@ export class Controller implements vscode.Disposable {
   /**
    * Keeps Lookout's prompt hook as `lookout.answers.panelSessions` says: in
    * Claude Code's user settings file of the directory the panel runs on
-   * while it is "on", out of it otherwise. While on, marks that a window
-   * runs and watches for the prompts the hook leaves.
+   * while it is "on", out of it otherwise. While on, a window whose cards
+   * answer marks that it runs and watches for the prompts the hook leaves.
    */
   applyPromptHook(): PromptHookOutcome {
     const dir = this.claudeConfigDir;
-    const on = this.claudeOn && dir !== "" && this.panelAnswers === "on";
     this.stopPromptHookWatch();
     if (dir === "") return { kind: "unchanged" };
+    const on = this.panelAnswers === "on";
+    // A window with Claude Code or the cards' answers turned off, as a folder's settings can, answers nothing:
+    // it leaves the hook to the windows that do, and does not mark that it runs.
+    if (on && !(this.claudeOn && this.answersOn)) return { kind: "unchanged" };
     if (!on && !promptHookInstalled(dir) && !fs.existsSync(asksFolder(dir))) return { kind: "unchanged" };
     const outcome = on ? installPromptHook(dir) : removePromptHook(dir);
     if (on && outcome.ok) this.startPromptHookWatch(dir);
@@ -469,9 +473,15 @@ export class Controller implements vscode.Disposable {
     this.asksWatch = undefined;
   }
 
-  /** The prompt Lookout's hook waits on for this session: the one its card shows, by session and tool, and only one. */
+  /**
+   * The prompt Lookout's hook waits on for this session: the very call its
+   * card shows, by session, tool and input (the hook gets no call id), and
+   * only one.
+   */
   private askFor(view: SessionView, asks: readonly PanelAsk[]): PanelAsk | undefined {
-    const mine = asks.filter((ask) => ask.sessionId === view.id && ask.tool === view.reason?.tool);
+    const reason = view.reason;
+    if (!reason) return undefined;
+    const mine = asks.filter((ask) => ask.sessionId === view.id && sameCall(reason, ask.tool, ask.input, view.cwd));
     return mine.length === 1 ? mine[0] : undefined;
   }
 

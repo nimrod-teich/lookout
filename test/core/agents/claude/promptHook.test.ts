@@ -65,6 +65,23 @@ describe("installPromptHook", () => {
     expect((settings().hooks as Record<string, unknown[]>).PermissionRequest).toEqual([theirs, { matcher: "*", hooks: [{ type: "command", command: hookCommand(configDir), timeout: 86400 }] }]);
   });
 
+  it.runIf(posix)("keeps the prompts' folder to the user alone, as Claude Code keeps its transcripts", () => {
+    installPromptHook(configDir);
+    expect(fs.statSync(path.join(configDir, "lookout")).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(asksFolder(configDir)).mode & 0o777).toBe(0o700);
+  });
+
+  it("moves a changed script into place whole, so a hook waiting goes on reading the one it started from", () => {
+    installPromptHook(configDir);
+    const script = hookScriptFile(configDir);
+    fs.writeFileSync(script, "#!/bin/sh\n# an older Lookout's\n");
+    const before = fs.statSync(script).ino;
+    installPromptHook(configDir);
+    expect(fs.readFileSync(script, "utf8")).toBe(HOOK_SCRIPT);
+    expect(fs.statSync(script).ino).not.toBe(before);
+    expect(fs.readdirSync(path.join(configDir, "lookout")).sort()).toEqual(["alive", "answer-prompt.sh", "asks"]);
+  });
+
   it("creates the settings file when there is none", () => {
     expect(installPromptHook(configDir)).toMatchObject({ ok: true });
     expect(promptHookInstalled(configDir)).toBe(true);
@@ -190,23 +207,28 @@ describe("decisionFor", () => {
   });
 });
 
-describe.runIf(posix)("the hook script, run as Claude Code runs it", () => {
+/** Git for Windows' `sh`, which Claude Code runs hooks in there: started by a Windows program, it names no parent. */
+const gitSh = "C:\\Program Files\\Git\\bin\\sh.exe";
+const sh = posix ? "sh" : gitSh;
+
+describe.runIf(posix || fs.existsSync(gitSh))("the hook script, run as Claude Code runs it", () => {
   const run = (env: Record<string, string>, input: string) => {
-    const child = spawn("sh", ["-c", hookCommand(configDir)], { env: { ...process.env, ...env } });
+    const child = spawn(sh, ["-c", hookCommand(configDir)], { env: { ...process.env, ...env } });
     let out = "";
     child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
     child.stdin.end(input);
     const done = new Promise<{ code: number | null; out: string }>((resolve) => child.on("close", (code) => resolve({ code, out })));
     return { child, done };
   };
-  const waitFor = async (test: () => boolean) => {
-    for (let i = 0; i < 100 && !test(); i++) await new Promise((r) => setTimeout(r, 50));
+  const waitFor = async (test: () => boolean, tries = 100) => {
+    for (let i = 0; i < tries && !test(); i++) await new Promise((r) => setTimeout(r, 50));
     expect(test()).toBe(true);
   };
+  const panel = { CLAUDE_CODE_ENTRYPOINT: "claude-vscode" };
 
   it("hands the prompt to Lookout and prints Lookout's answer", async () => {
     installPromptHook(configDir);
-    const { done } = run({ CLAUDE_CODE_ENTRYPOINT: "claude-vscode" }, JSON.stringify(ask()));
+    const { done } = run(panel, JSON.stringify(ask()));
     await waitFor(() => readAsks(configDir).length === 1);
     const [waiting] = readAsks(configDir);
     expect(waiting!.sessionId).toBe("s1");
@@ -216,31 +238,78 @@ describe.runIf(posix)("the hook script, run as Claude Code runs it", () => {
     expect(JSON.parse(out).hookSpecificOutput.decision.updatedInput.answers).toEqual({ "Pick a colour?": "Red" });
     // It clears its files as it ends.
     expect(fs.readdirSync(asksFolder(configDir))).toEqual([]);
-  });
+  }, 30_000);
+
+  it("goes on waiting past its first look for Claude Code, in a shell that names no parent too", async () => {
+    installPromptHook(configDir);
+    const { done } = run(panel, JSON.stringify(ask()));
+    await waitFor(() => readAsks(configDir).length === 1);
+    const [waiting] = readAsks(configDir);
+    // It marks its prompt right after that look: a prompt marked again is of a hook that went on.
+    const written = fs.statSync(waiting!.file).mtimeMs;
+    await waitFor(() => fs.existsSync(waiting!.file) && fs.statSync(waiting!.file).mtimeMs > written, 400);
+    expect(replyToAsk(waiting!, decisionFor(waiting!, { kind: "option", index: 1, count: 2 })!)).toBe(true);
+    const { code, out } = await done;
+    expect(code).toBe(0);
+    expect(JSON.parse(out).hookSpecificOutput.decision.updatedInput.answers).toEqual({ "Pick a colour?": "Blue" });
+  }, 60_000);
+
+  it.runIf(posix)("keeps its prompt to the user alone", async () => {
+    installPromptHook(configDir);
+    const { child, done } = run(panel, JSON.stringify(ask()));
+    await waitFor(() => readAsks(configDir).length === 1);
+    expect(fs.statSync(readAsks(configDir)[0]!.file).mode & 0o777).toBe(0o600);
+    child.kill("SIGTERM");
+    await done;
+  }, 30_000);
+
+  it.runIf(posix)("does not take an answer left for an earlier hook that had its process id", async () => {
+    installPromptHook(configDir);
+    // Every process id the hook can get holds an answer nobody read.
+    const child = spawn(sh, ["-c", `for f in $(seq 1 99999); do :; done; ${hookCommand(configDir)}`], { env: { ...process.env, ...panel } });
+    fs.writeFileSync(path.join(asksFolder(configDir), `${child.pid}.reply.json`), `${decisionFor({ file: "", sessionId: "s0", tool: "Bash", input: {} }, { kind: "yes" })}\n`);
+    let out = "";
+    child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
+    child.stdin.end(JSON.stringify(ask()));
+    await waitFor(() => readAsks(configDir).length === 1, 400);
+    expect(fs.existsSync(path.join(asksFolder(configDir), `${child.pid}.reply.json`))).toBe(false);
+    expect(out).toBe("");
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.on("close", resolve));
+  }, 30_000);
 
   it("ends at once, answering nothing, outside the panel or with no Lookout window open", async () => {
     installPromptHook(configDir);
     expect(await run({ CLAUDE_CODE_ENTRYPOINT: "cli" }, JSON.stringify(ask())).done).toEqual({ code: 0, out: "" });
     markAlive(configDir, Date.now() - 5 * 60_000);
-    expect(await run({ CLAUDE_CODE_ENTRYPOINT: "claude-vscode" }, JSON.stringify(ask())).done).toEqual({ code: 0, out: "" });
+    expect(await run(panel, JSON.stringify(ask())).done).toEqual({ code: 0, out: "" });
     expect(fs.readdirSync(asksFolder(configDir))).toEqual([]);
-  });
+  }, 30_000);
 
-  it("clears its prompt when Claude Code ends it because the panel answered first", async () => {
+  it.runIf(posix)("clears its prompt when Claude Code ends it because the panel answered first", async () => {
     installPromptHook(configDir);
-    const { child, done } = run({ CLAUDE_CODE_ENTRYPOINT: "claude-vscode" }, JSON.stringify(ask()));
+    const { child, done } = run(panel, JSON.stringify(ask()));
     await waitFor(() => readAsks(configDir).length === 1);
     // The command became the script: ending the hook's process ends it.
     child.kill("SIGTERM");
     await done;
     await waitFor(() => fs.readdirSync(asksFolder(configDir)).length === 0);
-  });
+  }, 30_000);
 
   it("ends when Lookout turns the hook off while it waits", async () => {
     installPromptHook(configDir);
-    const { done } = run({ CLAUDE_CODE_ENTRYPOINT: "claude-vscode" }, JSON.stringify(ask()));
+    const { done } = run(panel, JSON.stringify(ask()));
     await waitFor(() => readAsks(configDir).length === 1);
     removePromptHook(configDir);
     expect(await done).toEqual({ code: 0, out: "" });
-  });
+  }, 30_000);
+
+  it("ends when the last Lookout window has gone while it waits", async () => {
+    installPromptHook(configDir);
+    const { done } = run(panel, JSON.stringify(ask()));
+    await waitFor(() => readAsks(configDir).length === 1);
+    markAlive(configDir, Date.now() - 5 * 60_000);
+    expect(await done).toEqual({ code: 0, out: "" });
+    expect(fs.readdirSync(asksFolder(configDir))).toEqual([]);
+  }, 90_000);
 });

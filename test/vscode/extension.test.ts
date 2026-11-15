@@ -925,12 +925,20 @@ describe("the extension", () => {
       expect(infoMessages().some((m) => /added its hook to .*settings\.json, with the file as it was at /.test(m))).toBe(true);
       // The prompt came before the hook: no hook waits on it, so the card offers nothing.
       await vi.waitFor(() => expect(card()?.promptHook).toBeUndefined(), WAIT);
-      // A hook waits on the next prompt: the card's answer goes to it.
+      // A hook waits on another call of the session, a subagent's: not the one the card shows, so the card answers nothing.
+      const other = path.join(asksFolder(configDir), "4241.json");
+      fs.writeFileSync(other, JSON.stringify({ session_id: SESSION, hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "rm -rf build" } }));
+      statesBoard!.receive({ type: "answer", id: SESSION, call: "toolu_1", choice: "yes" });
+      await vi.waitFor(() => expect(statesBoard!.posted.filter((m) => (m as { type: string }).type === "answered")).toHaveLength(2), WAIT);
+      expect(card()?.promptHook).toBeUndefined();
+      expect(fs.readdirSync(asksFolder(configDir))).toEqual(["4241.json"]);
+      // A hook waits on the call the card shows: the card's answer goes to it, and to no other.
       fs.writeFileSync(path.join(asksFolder(configDir), "4242.json"), JSON.stringify({ session_id: SESSION, hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "npm test" } }));
       await vi.waitFor(() => expect(card()?.promptHook).toBe("live"), WAIT);
       statesBoard!.receive({ type: "answer", id: SESSION, call: "toolu_1", choice: "yes" });
       const reply = path.join(asksFolder(configDir), "4242.reply.json");
       await vi.waitFor(() => expect(fs.existsSync(reply)).toBe(true), WAIT);
+      expect(fs.existsSync(path.join(asksFolder(configDir), "4241.reply.json"))).toBe(false);
       expect(JSON.parse(fs.readFileSync(reply, "utf8"))).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
       expect(statesBoard!.posted.at(-1)).toEqual({ type: "answered", call: "toolu_1", sent: true });
       // Turned off: the hook goes, every other key stays.
@@ -939,6 +947,32 @@ describe("the extension", () => {
       await vi.waitFor(() => expect(JSON.parse(fs.readFileSync(settings(), "utf8"))).toEqual({ model: "opus" }), WAIT);
       expect(fs.existsSync(hookScriptFile(configDir))).toBe(false);
       await vi.waitFor(() => expect(card()?.promptHook).toBeUndefined(), WAIT);
+    }, 90_000);
+
+    it("leaves the hook where it is in a window whose cards answer nothing, and does not mark that it runs", async () => {
+      stub.config["lookout.answers.panelSessions"] = "on";
+      waitOnBash();
+      activate(context());
+      await placed();
+      await vi.waitFor(() => expect(promptHookInstalled(configDir)).toBe(true), WAIT);
+      const mark = path.join(configDir, "lookout", "alive");
+      const old = new Date(Date.now() - 10 * 60_000);
+      const marked = () => Date.now() - fs.statSync(mark).mtimeMs < 60_000;
+      // A folder's settings turn the cards' answers off in this window, or Claude Code: another window's cards
+      // still answer through the hook, so it stays, and this window no longer says a window runs to answer.
+      for (const key of ["lookout.answers.enabled", "lookout.agents.claude"]) {
+        fs.utimesSync(mark, old, old);
+        stub.config[key] = false;
+        stub.configChange.fire({ affectsConfiguration: (section: string) => section === "lookout" || key.startsWith(section) });
+        expect(promptHookInstalled(configDir)).toBe(true);
+        expect(fs.existsSync(hookScriptFile(configDir))).toBe(true);
+        expect(marked()).toBe(false);
+        // Back on, the window marks that it runs again.
+        stub.config[key] = true;
+        stub.configChange.fire({ affectsConfiguration: (section: string) => section === "lookout" || key.startsWith(section) });
+        expect(marked()).toBe(true);
+      }
+      expect(infoMessages().some((m) => /took its hook out/.test(m))).toBe(false);
     }, 90_000);
 
     it("never offers the answers, nor asks, once the user says not for panel sessions", async () => {

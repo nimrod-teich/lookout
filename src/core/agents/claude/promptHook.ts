@@ -21,8 +21,12 @@ export const HOOK_EVENT = "PermissionRequest";
 export const HOOK_TIMEOUT_S = 86_400;
 /** A Lookout window marks that it runs this often; the hook waits only while the mark is under two minutes old. */
 export const ALIVE_EVERY_MS = 30_000;
-/** A waiting hook marks its prompt this often; one unmarked for longer has ended without clearing it. */
+/** A prompt file unmarked for this long is of a hook that ended without clearing it. */
 const ASK_STALE_MS = 15_000;
+/** A waiting hook marks its prompt every so many turns of its loop, of 0.2 s and what the shell takes to start `sleep`: 2 s, near 4 s in Git Bash. */
+const MARK_EVERY = 10;
+/** And looks every so many turns whether a Lookout window still runs. */
+const ALIVE_CHECK_EVERY = 25;
 
 /**
  * The hook script. It runs for the VS Code panel only, and only while a
@@ -30,14 +34,19 @@ const ASK_STALE_MS = 15_000;
  * Claude Code takes as no answer. It writes the prompt Claude Code sends
  * it, waits for Lookout's answer beside it, prints the answer and ends.
  * Claude Code ends it when the panel answers first; it clears its files
- * then, and Lookout clears those of a hook ended harder.
+ * then, and Lookout clears those of a hook ended harder. It ends by itself
+ * when Claude Code is gone, where the shell can tell, and when no Lookout
+ * window is left to answer. Its files are the user's alone, as Claude
+ * Code's transcripts are: a prompt holds the call's whole input.
  */
 export const HOOK_SCRIPT = `#!/bin/sh
 # Lookout (a VS Code extension) answers a Claude Code prompt from the session's card on its board.
 # Runs for sessions in the Claude Code panel only, while a Lookout window is open; otherwise it ends at once
 # and Claude Code shows its prompt as always. Turned off and removed by the setting lookout.answers.panelSessions.
+umask 077
 here=$(dirname "$0")
-if [ "$CLAUDE_CODE_ENTRYPOINT" != "claude-vscode" ] || [ -z "$(find "$here/${ALIVE}" -mmin -2 2>/dev/null)" ]; then
+alive() { [ -n "$(find "$here/${ALIVE}" -mmin -2 2>/dev/null)" ]; }
+if [ "$CLAUDE_CODE_ENTRYPOINT" != "claude-vscode" ] || ! alive; then
   cat >/dev/null
   exit 0
 fi
@@ -45,21 +54,30 @@ ask="$here/${ASKS}/$$.json"
 reply="$here/${ASKS}/$$.reply.json"
 trap 'rm -f "$ask" "$ask.part" "$reply"' EXIT
 trap 'exit 0' HUP INT TERM
+# An answer left for an earlier hook that had this process id is not this prompt's.
+rm -f "$reply"
 cat >"$ask.part" && mv "$ask.part" "$ask" || exit 0
 i=0
+gone=0
 while [ -f "$ask" ]; do
   if [ -f "$reply" ]; then
     cat "$reply"
     exit 0
   fi
   i=$((i + 1))
-  if [ $((i % 25)) -eq 0 ]; then
-    # Claude Code went without ending the hook: nobody waits for the answer.
-    kill -0 "$PPID" 2>/dev/null || exit 0
-    touch "$ask"
+  if [ $((i % ${MARK_EVERY})) -eq 0 ]; then
+    # Claude Code went without ending the hook: nobody waits for the answer. Git Bash names no parent (1), and has none to ask after.
+    [ "$PPID" -le 1 ] || kill -0 "$PPID" 2>/dev/null || exit 0
+    touch -c "$ask"
+  fi
+  if [ $((i % ${ALIVE_CHECK_EVERY})) -eq 0 ]; then
+    # No Lookout window is left to answer. Twice running: a machine that slept wakes with an old mark.
+    if alive; then gone=0; else gone=$((gone + 1)); fi
+    [ "$gone" -lt 2 ] || exit 0
   fi
   sleep 0.2
 done
+exit 0
 `;
 
 export function hookFolder(configDir: string): string {
@@ -149,7 +167,7 @@ export function promptHookInstalled(configDir: string): boolean {
  */
 export function installPromptHook(configDir: string, now: number = Date.now()): RetentionWrite {
   try {
-    fs.mkdirSync(path.join(hookFolder(configDir), ASKS), { recursive: true });
+    fs.mkdirSync(path.join(hookFolder(configDir), ASKS), { recursive: true, mode: 0o700 });
     const script = hookScriptFile(configDir);
     let held: string | undefined;
     try {
@@ -157,7 +175,12 @@ export function installPromptHook(configDir: string, now: number = Date.now()): 
     } catch {
       held = undefined;
     }
-    if (held !== HOOK_SCRIPT) fs.writeFileSync(script, HOOK_SCRIPT, { mode: 0o755 });
+    if (held !== HOOK_SCRIPT) {
+      // Moved into place whole: a hook waiting now goes on reading the script it started from.
+      const part = `${script}.${process.pid}.part`;
+      fs.writeFileSync(part, HOOK_SCRIPT, { mode: 0o755 });
+      fs.renameSync(part, script);
+    }
     markAlive(configDir, now);
   } catch {
     return { ok: false, file: hookFolder(configDir), why: "could not be written" };
