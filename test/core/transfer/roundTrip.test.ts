@@ -34,7 +34,8 @@ function options(passphrase?: string, home = "/home/old"): BackUpOptions {
     host: "old-machine",
     createdAt: NOW,
     lookoutVersion: "0.0.0-test",
-    source: { host: "old-machine", platform: "linux", home, wsl: false },
+    // The machine the test runs on is the source: its paths are this platform's.
+    source: { host: "old-machine", platform: process.platform, home, wsl: false },
     ...(passphrase !== undefined ? { passphrase } : {}),
   };
 }
