@@ -466,7 +466,7 @@ describe("Settings Sync between two machines", () => {
     converge(cloud, [a, b]);
     expect(b.sync.status()).toMatchObject({ enabled: true, mergedAt: clock, stars: 1, notes: 1, sessions: 1 });
     stub.config[SETTING] = true;
-    open.push(registerSettingsSync({ globalState: b.memento } as never, { recordsDir: b.recordsDir, now: () => clock, host: "b", elsewhere: () => ({ sessions: 2, stars: 1, notes: 1 }) }));
+    open.push(registerSettingsSync({ globalState: b.memento } as never, { recordsDir: b.recordsDir, now: () => clock, host: "b", elsewhere: () => ({ sessions: 2, stars: 1, notes: 1 }), version: "0.1.7" }));
     stub.commands.set("workbench.userDataSync.actions.showLog", () => undefined);
     stub.notificationAnswer = "Show Settings Sync Log";
     stub.notices.length = 0;
@@ -476,6 +476,8 @@ describe("Settings Sync between two machines", () => {
     expect(notice.detail).toContain("came from a on");
     expect(notice.detail).toContain("This machine syncs 1 star, 0 archived sessions, 0 parked sessions and 1 note on 1 session.");
     expect(notice.detail).toContain("2 starred or noted sessions (1 star, 1 note) are of conversations that are not on this machine");
+    // Machines on different versions of Lookout exchange nothing: the status says which this one runs.
+    expect(notice.detail).toContain("only on a machine that runs the same version of Lookout as the one that sent it: this one runs 0.1.7.");
     await settle();
     expect(stub.ops).toContainEqual(["commands", "workbench.userDataSync.actions.showLog", []]);
     // In a remote window: says that Settings Sync carries Lookout's data only where it is installed in VS Code itself.
@@ -490,6 +492,7 @@ describe("Settings Sync between two machines", () => {
     await stub.commands.get(SYNC_STATUS_COMMAND)!();
     expect(stub.notices.at(-1)).toMatchObject({ actions: ["Restore from Backup…"] });
     expect(stub.notices.at(-1)!.detail).toContain("lookout.settingsSync.enabled is off");
+    expect(stub.notices.at(-1)!.detail).not.toContain("same version");
   });
 });
 

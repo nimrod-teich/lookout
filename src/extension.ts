@@ -713,6 +713,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // What the stars and notes carry of the sessions on this machine, for a machine that does not have them.
       describe: (id) => controller.sessionHere(id),
       elsewhere: () => controller.elsewhereCounts(),
+      version: versionOf(context),
     }),
   );
 
@@ -725,3 +726,9 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {}
+
+/** This Lookout's version, as its package says it; none when the package names none. */
+function versionOf(context: vscode.ExtensionContext): string | undefined {
+  const version = (context.extension?.packageJSON as { version?: unknown } | undefined)?.version;
+  return typeof version === "string" && version !== "" ? version : undefined;
+}

@@ -136,6 +136,8 @@ export interface SettingsSyncDeps {
   host?: string;
   /** The starred and noted sessions whose conversations are not on this machine, for the status. */
   elsewhere?(): { sessions: number; stars: number; notes: number };
+  /** This Lookout's version, for the status: VS Code applies an extension's synced data only where the same version is installed. */
+  version?: string;
 }
 
 /** Whether the user turned Settings Sync on for Lookout. */
@@ -435,7 +437,7 @@ export function registerSettingsSyncStatus(sync: SettingsSync, deps: SettingsSyn
 }
 
 /** Lookout: Settings Sync Status: what this machine syncs, what came from another, and what is not here. */
-export async function showStatus(sync: SettingsSync, deps: Pick<SettingsSyncDeps, "elsewhere">): Promise<void> {
+export async function showStatus(sync: SettingsSync, deps: Pick<SettingsSyncDeps, "elsewhere" | "version">): Promise<void> {
   const status = sync.status();
   const lines: string[] = [];
   const remote = vscode.env.remoteName;
@@ -443,6 +445,7 @@ export async function showStatus(sync: SettingsSync, deps: Pick<SettingsSyncDeps
   else lines.push("Lookout syncs your stars, lists and notes through VS Code's Settings Sync, in its Extensions category.");
   if (remote) lines.push(`This window's Lookout runs in ${plainText(remote, 40)}. Settings Sync carries Lookout's data only where Lookout is also installed in VS Code itself, with Settings Sync on and its Extensions category ticked.`);
   if (status.enabled) {
+    lines.push(`VS Code applies Lookout's synced data only on a machine that runs the same version of Lookout as the one that sent it${deps.version ? `: this one runs ${plainText(deps.version, 40)}` : ""}. Machines on different versions exchange nothing until both run the same one.`);
     lines.push(status.mergedAt ? `This window last merged at ${clock(status.mergedAt)}.` : "This window has not merged yet.");
     const arrived = [status.arrived.state, status.arrived.notes].filter((a): a is Arrival => a !== undefined);
     if (arrived.length === 0) lines.push("No copy another machine wrote has arrived on this machine yet.");
