@@ -89,8 +89,8 @@ export class TranscriptVault {
     const held = statOf(target);
     if (before && held) {
       // A link still to the same file: nothing to do; a copy: brought up to the file.
-      if (sameFile(held, st)) return this.write({ ...before, file, size: st.size });
-      if (!before.linked && before.file === file && held.size <= st.size && held.ino !== st.ino) {
+      if (sameFile(target, file)) return this.write({ ...before, file, size: st.size });
+      if (!before.linked && before.file === file && held.size <= st.size) {
         try {
           fs.copyFileSync(file, target);
           return this.write({ ...before, file, size: st.size });
@@ -204,9 +204,21 @@ function statOf(file: string): fs.Stats | undefined {
   }
 }
 
-/** The two names are the same file: the same inode on the same device. */
-function sameFile(a: fs.Stats, b: fs.Stats): boolean {
-  return a.ino === b.ino && a.dev === b.dev && a.ino !== 0;
+/** The two names are the same file. */
+function sameFile(a: string, b: string): boolean {
+  try {
+    return sameNumbers(fs.statSync(a, { bigint: true }), fs.statSync(b, { bigint: true }));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The same inode on the same device, the numbers read whole: Windows numbers
+ * a file past what a double holds, where two files' numbers can read the same.
+ */
+export function sameNumbers(a: Pick<fs.BigIntStats, "ino" | "dev">, b: Pick<fs.BigIntStats, "ino" | "dev">): boolean {
+  return a.ino === b.ino && a.dev === b.dev && a.ino !== 0n;
 }
 
 function readRecord(file: string): KeptTranscript | undefined {

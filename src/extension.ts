@@ -3,6 +3,8 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { agentInfo, boardAgents, canJump, canRename, canResume, markersShown, unreachable } from "./core/agents/catalog";
 import { sameDirs } from "./core/agents/claude/paths";
+import { CODEX, sessionsDir as codexSessionsDir } from "./core/agents/codex/paths";
+import { COPILOT, sessionStateDir } from "./core/agents/copilot/paths";
 import { clockTime, describeAlert, noticeBody } from "./core/format";
 import { PAGE_SNIPPET } from "./core/history";
 import { nextAttention } from "./core/model";
@@ -26,6 +28,10 @@ import { claudeTabLabel, claudeTabLabels } from "./vscode/agents/claudePanel";
 import { Findings } from "./vscode/findings";
 import { NotePage } from "./vscode/notePage";
 import { WorktreesPage } from "./vscode/worktreesPage";
+import { registerBackUp } from "./vscode/backupPage";
+import { registerPendingTabs } from "./vscode/pendingTabs";
+import { registerRestore } from "./vscode/restore";
+import { registerSettingsSync } from "./vscode/settingsSync";
 import { Controller } from "./vscode/controller";
 import { CrossWindowJumps, raiseWindow } from "./vscode/crossWindow";
 import { jumpToSession, renameSession, revealed } from "./vscode/jump";
@@ -88,6 +94,8 @@ export function activate(context: vscode.ExtensionContext): void {
       recordsDir: path.join(context.globalStorageUri.fsPath, "sessions"),
       storeFile: path.join(context.globalStorageUri.fsPath, "history.sqlite"),
       vaultDir: path.join(context.globalStorageUri.fsPath, "vault"),
+      // VS Code names a workspace's storage folder after the workspace; the open-tabs capture finds the window's Claude tabs under it.
+      workspaceStorageId: context.storageUri ? path.basename(path.dirname(context.storageUri.fsPath)) : undefined,
     },
     terminals,
     log,
@@ -643,6 +651,32 @@ export function activate(context: vscode.ExtensionContext): void {
       // One after the other: one fetch runs at a time.
       for (const one of keys) await refreshAccount(one);
     }),
+  );
+
+  const storage = context.globalStorageUri.fsPath;
+  const transferPaths = {
+    storeFile: path.join(storage, "history.sqlite"),
+    recordsDir: path.join(storage, "sessions"),
+    vaultDir: path.join(storage, "vault"),
+    usageDir: path.join(storage, "usage"),
+    removedWorktreesFile: path.join(storage, "worktrees", "removed.json"),
+  };
+  context.subscriptions.push(
+    registerBackUp(context, { ...transferPaths, claudeDirs: () => config.claudeDirs, tabs: () => controller.openTabs() }),
+    registerRestore(context, {
+      ...transferPaths,
+      claudeDirs: () => config.claudeDirs,
+      // Kept transcripts of other agents go back under their own folders.
+      agentRoots: () => ({ [CODEX]: codexSessionsDir(config.codexHome), [COPILOT]: sessionStateDir(config.copilotHome) }),
+      restored: () => controller.poll(),
+      // The setting a restore just raised is read again first: the controller writes what its configuration says.
+      applyRetention: () => {
+        reload();
+        return controller.applyRetention();
+      },
+    }),
+    registerPendingTabs(context, { log, claudeDirs: () => config.claudeDirs }),
+    registerSettingsSync(context, { recordsDir: transferPaths.recordsDir, changed: () => controller.poll(), log }),
   );
 
   controller.start(config);

@@ -32,14 +32,15 @@ const board = {
   logLevel: "info",
 };
 
-// The findings tab, the search page, the note page and the worktrees page are webviews too, bundled the same way.
+// The findings tab, the search page, the note page, the worktrees page and the backup page are webviews too, bundled the same way.
 const findings = { ...board, entryPoints: ["src/webview/findings.ts"], outfile: "dist/findings.js" };
 const search = { ...board, entryPoints: ["src/webview/search.ts"], outfile: "dist/search.js" };
 const note = { ...board, entryPoints: ["src/webview/note.ts"], outfile: "dist/note.js" };
 const worktrees = { ...board, entryPoints: ["src/webview/worktrees.ts"], outfile: "dist/worktrees.js" };
+const backup = { ...board, entryPoints: ["src/webview/backup.ts"], outfile: "dist/backup.js" };
 
 if (watch) {
-  for (const options of [extension, reader, worktreeThread, board, findings, search, note, worktrees]) await (await esbuild.context(options)).watch();
+  for (const options of [extension, reader, worktreeThread, board, findings, search, note, worktrees, backup]) await (await esbuild.context(options)).watch();
 } else {
-  await Promise.all([esbuild.build(extension), esbuild.build(reader), esbuild.build(worktreeThread), esbuild.build(board), esbuild.build(findings), esbuild.build(search), esbuild.build(note), esbuild.build(worktrees)]);
+  await Promise.all([esbuild.build(extension), esbuild.build(reader), esbuild.build(worktreeThread), esbuild.build(board), esbuild.build(findings), esbuild.build(search), esbuild.build(note), esbuild.build(worktrees), esbuild.build(backup)]);
 }

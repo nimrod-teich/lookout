@@ -7,12 +7,14 @@
 !dist/search.js
 !dist/note.js
 !dist/worktrees.js
+!dist/backup.js
 !media/icon.png
 !media/board.css
 !media/findings.css
 !media/search.css
 !media/note.css
 !media/worktrees.css
+!media/backup.css
 !media/activity.svg
 !media/lookout-icons.woff
 !package.json

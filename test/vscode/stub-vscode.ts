@@ -53,6 +53,8 @@ export const stub = {
   quickPick: undefined as ((items: readonly unknown[]) => unknown) | undefined,
   /** Answers the input box with the text typed; undefined dismisses it. */
   inputBox: undefined as ((options: unknown) => string | undefined) | undefined,
+  /** Answers the save dialog with the file picked; undefined dismisses it. */
+  saveDialog: undefined as ((options: unknown) => { scheme: string; fsPath: string } | undefined) | undefined,
   /** The quick pick that is open, if any. */
   openPicker: undefined as StubQuickPick | undefined,
   webviewProviders: new Map<string, unknown>(),
@@ -62,6 +64,12 @@ export const stub = {
   extension: undefined as { extensionPath: string } | undefined,
   /** What the user presses on the next notification. */
   notificationAnswer: undefined as string | undefined,
+  /** Every notification shown, with its detail and buttons. */
+  notices: [] as StubNotice[],
+  /** Answers a notification from what it says; `notificationAnswer` when not set. */
+  answerNotice: undefined as ((notice: StubNotice) => string | undefined) | undefined,
+  /** Answers the open dialog with the paths picked; undefined dismisses it. */
+  openDialog: undefined as ((options: unknown) => string[] | undefined) | undefined,
   openTerminal: new EventEmitter<StubTerminal>(),
   closeTerminal: new EventEmitter<StubTerminal>(),
   /** Fired for any change of the front tab, or window focus. */
@@ -72,6 +80,10 @@ export const stub = {
   selectionChange: new EventEmitter<{ kind: number | undefined }>(),
   /** Fired by tests after they change `config`. */
   configChange: new EventEmitter<{ affectsConfiguration(section: string): boolean }>(),
+  /** Fired by tests: Cancel pressed on the progress shown. */
+  cancelProgress: new EventEmitter<void>(),
+  /** Fired by tests after they change `workspace.workspaceFolders`. */
+  foldersChange: new EventEmitter<void>(),
   reset(): void {
     this.ops.length = 0;
     // Agents found by their running processes stay off unless a test turns them on, and so does the search for config directories: tests never read the real agent homes.
@@ -85,17 +97,23 @@ export const stub = {
     this.focused = true;
     this.quickPick = undefined;
     this.inputBox = undefined;
+    this.saveDialog = undefined;
     this.openPicker = undefined;
     this.webviewProviders.clear();
     this.panels = [];
     this.extension = undefined;
     this.notificationAnswer = undefined;
+    this.notices = [];
+    this.answerNotice = undefined;
+    this.openDialog = undefined;
     this.openTerminal.dispose();
     this.closeTerminal.dispose();
     this.focusChange.dispose();
     this.activeTerminalChange.dispose();
     this.selectionChange.dispose();
     this.configChange.dispose();
+    this.cancelProgress.dispose();
+    this.foldersChange.dispose();
   },
   /** Adds an editor group whose tabs are Claude Code panels with these labels. */
   addClaudeGroup(labels: string[]): StubGroup {
@@ -213,6 +231,8 @@ export const StatusBarAlignment = { Left: 1, Right: 2 };
 
 export const ViewColumn = { Active: -1, Beside: -2, One: 1 };
 
+export const ProgressLocation = { SourceControl: 1, Window: 10, Notification: 15 };
+
 export interface StubWebviewPanel {
   viewType: string;
   title: string;
@@ -324,10 +344,22 @@ function recorded<T extends object>(target: string, props: string[], methods: st
   return obj as T;
 }
 
+export interface StubNotice {
+  kind: string;
+  message: string;
+  modal: boolean;
+  detail?: string;
+  actions: string[];
+}
+
 function notify(kind: string) {
-  return (message: string, ...actions: string[]) => {
+  return (message: string, ...rest: unknown[]) => {
     stub.ops.push(["window", kind, message]);
-    const answer = stub.notificationAnswer;
+    const options = typeof rest[0] === "object" && rest[0] !== null ? (rest[0] as { modal?: boolean; detail?: string }) : undefined;
+    const actions = rest.filter((item): item is string => typeof item === "string");
+    const notice: StubNotice = { kind, message, modal: options?.modal === true, detail: options?.detail, actions };
+    stub.notices.push(notice);
+    const answer = stub.answerNotice ? stub.answerNotice(notice) : stub.notificationAnswer;
     return Promise.resolve(answer !== undefined && actions.includes(answer) ? answer : undefined);
   };
 }
@@ -351,6 +383,12 @@ export const window = {
   }),
   showInformationMessage: notify("info"),
   showWarningMessage: notify("warning"),
+  showErrorMessage: notify("error"),
+  /** An open dialog: answered by `stub.openDialog`, or dismissed without one; what it was asked is an op. */
+  showOpenDialog: async (options: unknown) => {
+    stub.ops.push(["window", "showOpenDialog", options]);
+    return stub.openDialog?.(options)?.map((p) => ({ scheme: "file", fsPath: p, path: p }));
+  },
   createQuickPick,
   /** A menu: answered by `stub.quickPick`, or dismissed without one. */
   showQuickPick: async (items: readonly unknown[] | Promise<readonly unknown[]>) => {
@@ -361,6 +399,28 @@ export const window = {
   showInputBox: async (options: unknown) => {
     stub.ops.push(["inputBox", "show", options]);
     return stub.inputBox?.(options);
+  },
+  /** A save dialog: answered by `stub.saveDialog`, or dismissed without one; what it was asked is an op. */
+  showSaveDialog: async (options: unknown) => {
+    stub.ops.push(["window", "showSaveDialog", options]);
+    return stub.saveDialog?.(options);
+  },
+  /** Progress: each report is an op; `stub.cancelProgress` presses its Cancel. */
+  withProgress: async <R>(options: unknown, task: (progress: { report(value: unknown): void }, token: { isCancellationRequested: boolean; onCancellationRequested: EventEmitter<void>["event"] }) => Promise<R>): Promise<R> => {
+    stub.ops.push(["window", "withProgress", options]);
+    let cancelled = false;
+    const listening = stub.cancelProgress.event(() => (cancelled = true));
+    const token = {
+      get isCancellationRequested() {
+        return cancelled;
+      },
+      onCancellationRequested: stub.cancelProgress.event,
+    };
+    try {
+      return await task({ report: (value) => void stub.ops.push(["progress", "report", value]) }, token);
+    } finally {
+      listening.dispose();
+    }
   },
   /** An editor on a document: an op naming its file. */
   showTextDocument: async (document: { uri?: { fsPath?: string } }) => {
@@ -429,8 +489,8 @@ export const extensions = {
 
 export const workspace = {
   name: "stub-workspace",
-  workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
-  onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
+  workspaceFolders: undefined as { uri: { fsPath: string; scheme?: string; with?(change: { path: string }): unknown } }[] | undefined,
+  onDidChangeWorkspaceFolders: stub.foldersChange.event,
   /** A document for a file: an op naming it; a file that does not exist is refused, as VS Code refuses it. */
   openTextDocument: async (uri: { fsPath: string }) => {
     stub.ops.push(["workspace", "openTextDocument", uri.fsPath]);
@@ -449,3 +509,34 @@ export const workspace = {
 };
 
 export const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 } as const;
+
+/**
+ * A globalState: values kept as VS Code keeps them (JSON, undefined
+ * removes), each write and each `setKeysForSync` an op on `globalState`.
+ */
+export class StubMemento {
+  readonly values = new Map<string, unknown>();
+  /** What the last `setKeysForSync` was given. */
+  keysForSync: readonly string[] | undefined;
+  get<T>(key: string, fallback?: T): T | undefined {
+    return this.values.has(key) ? (this.values.get(key) as T) : fallback;
+  }
+  keys(): readonly string[] {
+    return [...this.values.keys()];
+  }
+  update(key: string, value: unknown): Promise<void> {
+    stub.ops.push(["globalState", "update", key]);
+    if (value === undefined) this.values.delete(key);
+    else this.values.set(key, JSON.parse(JSON.stringify(value)));
+    return Promise.resolve();
+  }
+  setKeysForSync(keys: readonly string[]): void {
+    stub.ops.push(["globalState", "setKeysForSync", [...keys]]);
+    this.keysForSync = [...keys];
+  }
+  /** Test helper: a value Settings Sync brings from another machine, which nothing announces. */
+  pull(key: string, value: unknown): void {
+    if (value === undefined) this.values.delete(key);
+    else this.values.set(key, value);
+  }
+}

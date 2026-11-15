@@ -42,10 +42,12 @@ function context(extension = "/ext") {
     },
     globalState: {
       get: (key: string, fallback: unknown) => savedGlobal[key] ?? fallback,
+      keys: () => Object.keys(savedGlobal),
       update: (key: string, value: unknown) => {
         savedGlobal[key] = value;
         return Promise.resolve();
       },
+      setKeysForSync: () => {},
     },
   } as never;
 }

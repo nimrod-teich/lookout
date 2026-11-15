@@ -52,6 +52,22 @@ describe("WindowRegistry", () => {
     expect(registry.read(100, 20_000).get(200)).toEqual({ label: "api", terminals: [], done: ["s1"] });
   });
 
+  it("publishes each window's workspace storage folder, where its open tabs are recorded", () => {
+    const { dir, proc, registry } = setup();
+    proc.procs.set(200, {}).set(300, {});
+    const other = new WindowRegistry(dir, proc);
+    other.register(200, "api", [], ["/work/api"], [], "1f3a9c0de4b5a6978877665544332211-1");
+    expect(registry.read(100, 0).get(200)).toEqual({ label: "api", terminals: [], folders: ["/work/api"], storageId: "1f3a9c0de4b5a6978877665544332211-1" });
+    expect(JSON.parse(fs.readFileSync(path.join(dir, "200.json"), "utf8")).storageId).toBe("1f3a9c0de4b5a6978877665544332211-1");
+    // A window with no workspace has none; a name that could leave the storage folder is not taken.
+    other.register(200, "untitled window");
+    other.register(300, "odd", [], [], [], "../elsewhere");
+    expect(registry.read(100, 10_000).get(200)).toEqual({ label: "untitled window", terminals: [] });
+    expect(registry.read(100, 10_000).get(300)).toEqual({ label: "odd", terminals: [] });
+    fs.writeFileSync(path.join(dir, "300.json"), '{"pid":300,"label":"odd","storageId":"a/../../b"}');
+    expect(registry.read(100, 20_000).get(300)).toEqual({ label: "odd", terminals: [] });
+  });
+
   it("publishes each window's terminals, and their changes", () => {
     const { dir, proc, registry } = setup();
     proc.procs.set(200, {});
