@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- **Answers in the panel too.** A Claude Code session in this window's panel is answered from its card like one in a terminal: Yes or No to a permission, or a question's option. The panel takes no keys from outside, so this needs a Claude Code hook, which Lookout adds only once you say so: the first click on a panel session's answer asks, and `lookout.answers.panelSessions` turns it on or off. On, Lookout adds one `PermissionRequest` hook to Claude Code's user settings file, every other key kept and a copy of the file as it was beside it; the hook waits beside each prompt the panel shows, and whichever answers first, the panel or the card, is the answer. It ends at once for sessions outside the panel and while no Lookout window is open. Off takes it out again.
+
 ## 0.1.5
 
 The session you are in marked on the board, Claude accounts found without a setting, and usage credits beside the plan's limits.

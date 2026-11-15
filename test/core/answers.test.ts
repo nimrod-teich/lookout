@@ -23,6 +23,17 @@ describe("answersOf", () => {
     expect(answersOf(waiting())[1]!.title).toContain("presses Esc");
   });
 
+  it("offers the answers of a panel session's prompt while Lookout's hook waits on it, or would once turned on", () => {
+    const live = waiting({ host: "panel", terminalPid: undefined, promptHook: "live" });
+    expect(answersOf(live).map((answer) => answer.choice)).toEqual(["yes", "no"]);
+    expect(answersOf(live)[0]!.title).toBe("Allow it once: Lookout answers it in the panel");
+    const off = waiting({ host: "panel", terminalPid: undefined, promptHook: "off", reason: { kind: "question", ask: "Which colour?", options: ["Red", "Blue"], raw: "input needed", call: "q1", answer: "options" } });
+    expect(answersOf(off).map((answer) => answer.label)).toEqual(["Red", "Blue"]);
+    expect(answersOf(off)[0]!.title).toBe("Answer “Red”: Lookout first asks to answer the panel's prompts from cards");
+    // A panel session's prompt the reader cannot vouch for is not offered either.
+    expect(answersOf(waiting({ host: "panel", promptHook: "live", reason: { kind: "permission", ask: "Bash: npm test", raw: "permission prompt" } }))).toEqual([]);
+  });
+
   it("offers nothing where Lookout cannot type: the agent's panel, another window, outside VS Code", () => {
     expect(answersOf(waiting({ host: "panel" }))).toEqual([]);
     expect(answersOf(waiting({ host: "window", windowLabel: "api" }))).toEqual([]);
@@ -55,5 +66,9 @@ describe("keysFor", () => {
     expect(keysFor(question, "q1", 2)).toBeUndefined();
     expect(keysFor(question, "q1", "yes")).toBeUndefined();
     expect(keysFor(waiting({ state: "working", reason: undefined }), "t1", "yes")).toBeUndefined();
+  });
+
+  it("types nothing for a panel session: its answer goes through the hook", () => {
+    expect(keysFor(waiting({ host: "panel", terminalPid: undefined, promptHook: "live" }), "t1", "yes")).toBeUndefined();
   });
 });

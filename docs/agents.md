@@ -58,7 +58,7 @@ What applies to some agents only. ✓: it applies to that agent.
 | No price: the agent bills premium requests, not tokens | — | — | ✓ |
 | No rename from Lookout | — | ✓ | ✓ |
 | No answer from the card: Codex writes no record when its approval prompt shows, so Lookout cannot be sure a key would land in it rather than in the composer; Copilot's prompt keys were not checked | — | ✓ | ✓ |
-| Prompts are answered from the card only in a terminal of this window: an agent's panel takes no keys from another extension | ✓ | — | — |
+| Prompts are answered from the card in a terminal of this window; in this window's Claude Code panel only with `lookout.answers.panelSessions` on, through a Claude Code hook, since the panel takes no keys from another extension | ✓ | — | — |
 | Earlier sessions show no git branch, and `branch:` finds only running ones | — | ✓ | ✓ |
 | Compressed earlier sessions (`.jsonl.zst`) are counted, not read | — | ✓ | — |
 | A Local chat shows a change a few seconds late, since VS Code saves the chat within seconds | — | — | ✓ |

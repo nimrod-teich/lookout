@@ -194,11 +194,12 @@ export function readRetention(configDir: string, folders: readonly string[], pla
 }
 
 /**
- * How a write of the retention went: the file written (`target` when the
- * settings file is a link to it), with the copy kept of it as it was; or
- * why it was refused, with nothing changed.
+ * How a write of the user settings file went: the file written (`target`
+ * when the settings file is a link to it), with the copy kept of it as it
+ * was, or `unchanged` when it already said so; or why it was refused, with
+ * nothing changed.
  */
-export type RetentionWrite = { ok: true; file: string; target?: string; backup?: string } | { ok: false; file: string; why: string };
+export type RetentionWrite = { ok: true; file: string; target?: string; backup?: string; unchanged?: true } | { ok: false; file: string; why: string };
 
 /** The text's own indentation and line ending, to write it back as it was. */
 function styleOf(text: string): { indent: string; eol: string } {
@@ -207,13 +208,26 @@ function styleOf(text: string): { indent: string; eol: string } {
 
 /**
  * Writes `cleanupPeriodDays` into the user settings file, every other key
- * kept in the file's own indentation and line ending, with a copy of the
- * file as it was beside it. A link is written through, to the file it
- * names, with that file's permissions; a file that does not parse, is
- * hard-linked elsewhere, or changes while it is being written is left
- * alone, so nothing of the user's is lost to a rewrite.
+ * kept, with a copy of the file as it was beside it: see `updateUserSettings`.
  */
 export function writeRetention(configDir: string, days: number, now: number = Date.now()): RetentionWrite {
+  return updateUserSettings(configDir, (settings) => {
+    settings[RETENTION_KEY] = days;
+    return true;
+  }, now);
+}
+
+/**
+ * Changes the user settings file with `edit`, every other key kept in the
+ * file's own indentation and line ending, with a copy of the file as it was
+ * beside it. `edit` changes the settings in place and says whether it
+ * changed anything, or refuses, with why; nothing is written unless it
+ * changed something. A link is written
+ * through, to the file it names, with that file's permissions; a file that
+ * does not parse, is hard-linked elsewhere, or changes while it is being
+ * written is left alone, so nothing of the user's is lost to a rewrite.
+ */
+export function updateUserSettings(configDir: string, edit: (settings: Record<string, unknown>) => boolean | { refuse: string }, now: number = Date.now()): RetentionWrite {
   const file = userSettingsFile(configDir);
   let target = file;
   let st: fs.Stats | undefined;
@@ -244,6 +258,9 @@ export function writeRetention(configDir: string, days: number, now: number = Da
     }
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false, file, why: "does not hold a settings object" };
     settings = parsed as Record<string, unknown>;
+    const edited = edit(settings);
+    if (typeof edited === "object") return { ok: false, file, why: edited.refuse };
+    if (!edited) return { ok: true, file, unchanged: true };
     style = styleOf(before);
     backup = `${target}.${new Date(now).toISOString().replace(/[:.]/g, "-")}.before-lookout`;
     try {
@@ -251,8 +268,11 @@ export function writeRetention(configDir: string, days: number, now: number = Da
     } catch {
       return { ok: false, file, why: "could not be copied aside" };
     }
+  } else {
+    const edited = edit(settings);
+    if (typeof edited === "object") return { ok: false, file, why: edited.refuse };
+    if (!edited) return { ok: true, file, unchanged: true };
   }
-  settings[RETENTION_KEY] = days;
   const temp = `${target}.${process.pid}.lookout.tmp`;
   try {
     fs.mkdirSync(path.dirname(target), { recursive: true });
