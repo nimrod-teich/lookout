@@ -621,8 +621,8 @@
           },
           "lookout.settingsSync.enabled": {
             "type": "boolean",
-            "default": false,
-            "markdownDescription": "Send your stars, archive, parked sessions, the board's order and grouping, account names, and your notes with the titles of the sessions they are on, through VS Code's Settings Sync to your other machines, merged both ways. Needs Settings Sync on with its **Extensions** category, and Lookout installed in VS Code itself: under WSL, SSH or a container nothing syncs. Off, Lookout sends nothing off the machine; a backup carries all of it instead."
+            "default": true,
+            "markdownDescription": "Send your stars, archive, parked sessions, the board's order and grouping, account names, and your notes with the titles of the sessions they are on, through VS Code's Settings Sync to your other machines, merged both ways. It takes effect only with Settings Sync on and its **Extensions** category ticked, and with Lookout installed in VS Code itself: under WSL, SSH or a container nothing syncs. Off, Lookout sends nothing off the machine; a backup carries all of it instead."
           },
           "lookout.worktrees.folders": {
             "type": "array",

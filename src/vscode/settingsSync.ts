@@ -1,5 +1,5 @@
 // The light state and the notes follow the user from machine to machine
-// through Settings Sync, once `lookout.settingsSync.enabled` is on. Settings
+// through Settings Sync, unless `lookout.settingsSync.enabled` is off. Settings
 // Sync sends only the keys a machine gave it, writes on a machine only the
 // keys that machine gave it, and of a key two machines changed keeps the
 // other machine's copy whole. So Lookout gives it two keys, always the same
@@ -77,7 +77,7 @@ export interface SettingsSyncDeps {
 
 /** Whether the user turned Settings Sync on for Lookout. */
 export function syncEnabled(): boolean {
-  return vscode.workspace.getConfiguration("lookout").get<boolean>(SYNC_SETTING, false) === true;
+  return vscode.workspace.getConfiguration("lookout").get<boolean>(SYNC_SETTING, true) !== false;
 }
 
 /** Settings Sync for the light state and the notes: the window's part. */

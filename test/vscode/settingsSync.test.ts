@@ -467,7 +467,15 @@ describe("registerSettingsSync", () => {
     settingsSync(here, cloud);
   }
 
+  it("syncs with the setting left as it comes", () => {
+    here.notes.addNote("s2", "here", SEEN, clock);
+    register();
+    expect(here.memento.keysForSync).toEqual([...SYNC_KEYS]);
+    expect(Object.keys((here.memento.get<{ sessions: object }>(SYNC_NOTES_KEY) ?? { sessions: {} }).sessions)).toEqual(["s2"]);
+  });
+
   it("with the setting off, gives Settings Sync no keys and merges nothing", () => {
+    stub.config[SETTING] = false;
     here.notes.addNote("s2", "here", SEEN, clock);
     register();
     expect(here.memento.keysForSync).toBeUndefined();
