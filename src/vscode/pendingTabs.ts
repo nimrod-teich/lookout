@@ -348,12 +348,18 @@ class PendingTabs {
   }
 }
 
+/** This window's pending tabs, as the extension holds them. */
+export interface PendingTabsHandle extends vscode.Disposable {
+  /** Counts the waiting tabs again: a restore in this window queued some, and no folder or focus changed to say so. */
+  refresh(): void;
+}
+
 /**
  * Offers this window's pending tabs on activation, when its folders change and
  * when it gains the focus (a restore in another window may have added some),
  * and registers `lookout.reopenTabs`, which lists every pending tab.
  */
-export function registerPendingTabs(context: vscode.ExtensionContext, deps: PendingTabsDeps): vscode.Disposable {
+export function registerPendingTabs(context: vscode.ExtensionContext, deps: PendingTabsDeps): PendingTabsHandle {
   const tabs = new PendingTabs(context.globalState, path.join(context.globalStorageUri.fsPath, "tab-claims"), deps);
   const disposables = [
     tabs,
@@ -364,5 +370,5 @@ export function registerPendingTabs(context: vscode.ExtensionContext, deps: Pend
     }),
   ];
   void tabs.offer();
-  return { dispose: () => disposables.forEach((disposable) => disposable.dispose()) };
+  return { refresh: () => tabs.showCount(), dispose: () => disposables.forEach((disposable) => disposable.dispose()) };
 }

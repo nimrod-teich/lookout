@@ -367,6 +367,19 @@ describe("tabs waiting elsewhere", () => {
     expect(count()).toBeUndefined();
   });
 
+  it("counts the tabs a restore in this window queued, with no change of focus or folder", async () => {
+    const state = new Memento();
+    openFolder("/not/theirs");
+    const { disposable } = window(state);
+    await settle();
+    expect(count()).toBeUndefined();
+    await state.update(PENDING_TABS_KEY, [tab(A, "/work/app", "Wire the cache")]);
+    disposable.refresh();
+    expect(count()).toBe("$(history) 1");
+    // Counted only: the offer keeps to the window's own tabs, at its usual times.
+    expect(messages("info")).toEqual([]);
+  });
+
   it("says where tabs of a folder that is not here work instead, and offers them there", async () => {
     const state = new Memento();
     const gone = "/nowhere/gone";

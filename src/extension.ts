@@ -661,6 +661,7 @@ export function activate(context: vscode.ExtensionContext): void {
     usageDir: path.join(storage, "usage"),
     removedWorktreesFile: path.join(storage, "worktrees", "removed.json"),
   };
+  const pendingTabs = registerPendingTabs(context, { log, claudeDirs: () => config.claudeDirs });
   context.subscriptions.push(
     registerBackUp(context, { ...transferPaths, claudeDirs: () => config.claudeDirs, tabs: () => controller.openTabs() }),
     registerRestore(context, {
@@ -668,7 +669,11 @@ export function activate(context: vscode.ExtensionContext): void {
       claudeDirs: () => config.claudeDirs,
       // Kept transcripts of other agents go back under their own folders.
       agentRoots: () => ({ [CODEX]: codexSessionsDir(config.codexHome), [COPILOT]: sessionStateDir(config.copilotHome) }),
-      restored: () => controller.poll(),
+      // The tabs the restore queued are counted in this window at once, not at its next change of focus.
+      restored: () => {
+        controller.poll();
+        pendingTabs.refresh();
+      },
       knownFolders: () => controller.knownFolders(),
       // The setting a restore just raised is read again first: the controller writes what its configuration says.
       applyRetention: () => {
@@ -676,7 +681,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return controller.applyRetention();
       },
     }),
-    registerPendingTabs(context, { log, claudeDirs: () => config.claudeDirs }),
+    pendingTabs,
     registerSettingsSync(context, { recordsDir: transferPaths.recordsDir, changed: () => controller.poll(), log }),
   );
 
