@@ -3,7 +3,8 @@
 // a category that grows too big stops syncing whole, so the two values
 // together stay under 64 KB of JSON. Past that, the synced copies leave out
 // the oldest archived sessions first, then the oldest sessions' notes, then
-// older stars, parked sessions and tombstones. What a synced copy leaves out
+// older tombstones, then what the stars carry of the oldest starred sessions,
+// then older stars, parked sessions and kept ones. What a synced copy leaves out
 // stays on this machine, and takes nothing away elsewhere: only a tombstone
 // removes anything. Nothing here touches the disk.
 import { lastChange, syncedNotes, type SessionNotes, type SyncedNotes } from "./syncedNotes";
@@ -22,7 +23,7 @@ export interface SyncFit {
   /** Sessions with notes left out, and the notes they hold. */
   sessionsLeft: number;
   notesLeft: number;
-  /** Stars, parked sessions and tombstones left out besides. */
+  /** Stars, parked sessions, tombstones and what stars carry, left out besides. */
   restLeft: number;
   /** The JSON of both values, in bytes. */
   bytes: number;
@@ -41,8 +42,9 @@ type Entry = { list: ListName; entry: Stamped };
  * Each step leaves out as little as it can: the archive's oldest sessions
  * first; then the notes of the sessions that changed longest ago, every
  * session older than the first left out going too; then the oldest
- * tombstones of every list; then the oldest kept, parked and starred
- * sessions, in that order. The board's order and grouping and the account
+ * tombstones of every list; then the titles and machines the oldest
+ * starred sessions carry, the star kept; then the oldest kept, parked and
+ * starred sessions, in that order, a star with what it carries. The board's order and grouping and the account
  * names always stay. Within a list the newest go last, by when each was put
  * there and then by its place; ties are broken by id, so machines with the
  * same state choose the same.
@@ -53,9 +55,10 @@ export function fitSync(state: SyncedState, sessions: ReadonlyMap<string, Sessio
   const tombstones: Entry[] = LISTS.flatMap((list) => state[list].removed.map((entry) => ({ list, entry })));
   tombstones.sort((a, b) => b.entry[1] - a.entry[1] || LISTS.indexOf(a.list) - LISTS.indexOf(b.list) || compare(a.entry[0], b.entry[0]));
   const members: Entry[] = (["favourites", "parked", "kept"] as const).flatMap((list) => newestFirst(state[list].ids).map((entry) => ({ list, entry })));
+  const about = Object.entries(state.about ?? {}).sort(([a, x], [b, y]) => y.at - x.at || compare(a, b));
 
   // How many of each, newest first, the copies keep.
-  const keep = { archive: archive.length, sessions: bySession.length, tombstones: tombstones.length, members: members.length };
+  const keep = { archive: archive.length, sessions: bySession.length, tombstones: tombstones.length, about: about.length, members: members.length };
   const build = () => {
     const kept = new Set<string>();
     for (const [id] of archive.slice(0, keep.archive)) kept.add(`archive\0${id}`);
@@ -63,6 +66,10 @@ export function fitSync(state: SyncedState, sessions: ReadonlyMap<string, Sessio
     const gone = new Set(tombstones.slice(0, keep.tombstones).map(({ list, entry }) => `${list}\0${entry[0]}`));
     const copy: SyncedState = { ...state };
     for (const list of LISTS) copy[list] = { ids: state[list].ids.filter(([id]) => kept.has(`${list}\0${id}`)), removed: state[list].removed.filter(([id]) => gone.has(`${list}\0${id}`)) };
+    // What a star carries goes with the star.
+    const told = about.slice(0, keep.about).filter(([id]) => kept.has(`favourites\0${id}`));
+    if (told.length > 0) copy.about = Object.fromEntries(told.sort(([a], [b]) => compare(a, b)));
+    else delete copy.about;
     return { state: copy, notes: syncedNotes(new Map(bySession.slice(0, keep.sessions))) };
   };
   const fits = () => {
@@ -70,7 +77,7 @@ export function fitSync(state: SyncedState, sessions: ReadonlyMap<string, Sessio
     return syncBytes(copies.state, copies.notes) <= limit;
   };
 
-  for (const step of ["archive", "sessions", "tombstones", "members"] as const) {
+  for (const step of ["archive", "sessions", "tombstones", "about", "members"] as const) {
     if (fits()) break;
     // The most of this step's entries that fit; none when even that is too many.
     let low = 0;
@@ -94,7 +101,7 @@ export function fitSync(state: SyncedState, sessions: ReadonlyMap<string, Sessio
     archiveLeft: archive.length - keep.archive,
     sessionsLeft: left.length,
     notesLeft: left.reduce((sum, [, value]) => sum + value.notes.length, 0),
-    restLeft: tombstones.length - keep.tombstones + (members.length - keep.members),
+    restLeft: tombstones.length - keep.tombstones + (about.length - keep.about) + (members.length - keep.members),
     bytes: syncBytes(copies.state, copies.notes),
   };
 }

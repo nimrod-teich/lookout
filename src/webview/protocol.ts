@@ -63,6 +63,8 @@ export type ToBoard =
       archive?: PastView[];
       /** The sessions whose transcript the agent deleted, their conversations kept by Lookout, last written first. */
       purged?: PastView[];
+      /** The starred and noted sessions whose conversations are on another machine, latest first. */
+      elsewhere?: PastView[];
       /** How many agents Lookout watches: none when every agent is turned off in the settings. */
       watching?: number;
       /** How the sessions are ordered inside each group, and the user's own order. */
@@ -115,6 +117,8 @@ export type FromBoard =
   | { type: "forget"; id: string }
   /** Put a purged session's kept transcript back where the agent keeps its transcripts. */
   | { type: "restore"; id: string }
+  /** A click on a session whose conversation is on another machine: say so, and offer to restore a backup. */
+  | { type: "elsewhere"; id: string }
   /** The user dragged a card: their own order of the sessions, which the board now follows. */
   | { type: "order"; ids: string[] }
   /** The user dragged a starred card: the favourites in their new order. */

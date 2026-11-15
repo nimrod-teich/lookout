@@ -262,6 +262,27 @@ describe("Board", () => {
     expect(actions.resume).toHaveBeenCalledWith(archived.id);
   });
 
+  it("sends the sessions on other machines, and relays a click, a star, an archive and a note only for one it showed there", () => {
+    const FAR: PastView = { id: "00000000-0000-4000-8000-0000000000c1", agent: "claude-code", title: "Vendor identity plan", project: "on wsl-desktop", cwd: "", resumable: false, modifiedAt: 0, elsewhere: true, host: "wsl-desktop" };
+    const showElsewhere = vi.fn();
+    const toggleArchive = vi.fn();
+    const editNote = vi.fn();
+    const { webviewView, actions } = setup([], undefined, { elsewhere: () => [FAR], showElsewhere, toggleArchive, editNote, archive: () => ({ ids: [], past: [] }) });
+    expect(webviewView.posted[0]).toMatchObject({ type: "sessions", elsewhere: [FAR] });
+    webviewView.receive({ type: "elsewhere", id: FAR.id });
+    webviewView.receive({ type: "elsewhere", id: PAST[0]!.id });
+    webviewView.receive({ type: "elsewhere", id: 5 });
+    expect(showElsewhere.mock.calls).toEqual([[FAR.id]]);
+    const unknown = "00000000-0000-4000-8000-0000000000c9";
+    for (const type of ["favourite", "archive", "note"]) {
+      webviewView.receive({ type, id: FAR.id });
+      webviewView.receive({ type, id: unknown });
+    }
+    expect((actions.toggleFavourite as ReturnType<typeof vi.fn>).mock.calls).toEqual([[FAR.id]]);
+    expect(toggleArchive.mock.calls).toEqual([[FAR.id]]);
+    expect(editNote.mock.calls).toEqual([[FAR.id]]);
+  });
+
   it("relays a request to read a search on the search page", () => {
     const { actions, webviewView } = setup([view()]);
     webviewView.receive({ type: "openSearch", query: "cache since:3d" });

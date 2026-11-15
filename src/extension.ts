@@ -7,6 +7,7 @@ import { CODEX, sessionsDir as codexSessionsDir } from "./core/agents/codex/path
 import { COPILOT, sessionStateDir } from "./core/agents/copilot/paths";
 import { clockTime, describeAlert, noticeBody } from "./core/format";
 import { PAGE_SNIPPET } from "./core/history";
+import { plainText } from "./core/plainText";
 import { nextAttention } from "./core/model";
 import { RemovedWorktrees } from "./core/removedWorktrees";
 import { WorktreeWorker } from "./core/worktreeWorker";
@@ -291,6 +292,27 @@ export function activate(context: vscode.ExtensionContext): void {
     const choice = await vscode.window.showWarningMessage(`Forget the conversation of "${title}"?`, { modal: true, detail: "The agent deleted its transcript; what Lookout kept is the only copy left, and goes for good. A note on it stays." }, "Forget");
     if (choice === "Forget") controller.forget(id);
   };
+  /**
+   * A click on a session whose conversation is on another machine: says
+   * which, as the machine that has it named it, and offers to restore a
+   * backup made there. Its title and machine came from that machine: shown
+   * as plain text.
+   */
+  const showElsewhere = async (id: string) => {
+    const view = controller.elsewhere.find((other) => other.id === id);
+    if (!view) return;
+    const where = view.host ? `on ${plainText(view.host, 80)}` : "on another machine";
+    const restore = "Restore from Backup…";
+    const choice = await vscode.window.showInformationMessage(
+      `"${plainText(view.title, 120)}" is ${where}.`,
+      {
+        modal: true,
+        detail: "Its star or notes came through Settings Sync or a restore, but its conversation is not on this machine, so it cannot be read or resumed here. Back Up… on that machine, then Restore from Backup… here, brings the conversation, and the other conversations of that machine.",
+      },
+      restore,
+    );
+    if (choice === restore) void vscode.commands.executeCommand("lookout.restore");
+  };
   /** Keeps Claude Code's retention of transcripts at `lookout.retention.days`, and says what was written, or why not. */
   function applyRetention(): void {
     const outcome = controller.applyRetention();
@@ -464,6 +486,8 @@ export function activate(context: vscode.ExtensionContext): void {
     editNote: (id) => editNote(id),
     purged: () => controller.purged,
     forget: (id) => void forgetOne(id),
+    elsewhere: () => controller.elsewhere,
+    showElsewhere: (id) => void showElsewhere(id),
     restore: restoreTranscript,
     resume: (id) => void resume(id),
     usage: () => controller.usageGroups.map((group) => ({ ...group, canRefresh: group.canRefresh ?? false })),
@@ -682,7 +706,14 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     }),
     pendingTabs,
-    registerSettingsSync(context, { recordsDir: transferPaths.recordsDir, changed: () => controller.poll(), log }),
+    registerSettingsSync(context, {
+      recordsDir: transferPaths.recordsDir,
+      changed: () => controller.poll(),
+      log,
+      // What the stars and notes carry of the sessions on this machine, for a machine that does not have them.
+      describe: (id) => controller.sessionHere(id),
+      elsewhere: () => controller.elsewhereCounts(),
+    }),
   );
 
   controller.start(config);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NoteEntry } from "../../src/core/sessionRecords";
-import type { SessionNotes } from "../../src/core/syncedNotes";
+import { syncedNotes, type SessionNotes } from "../../src/core/syncedNotes";
 import type { Stamped, SyncedList, SyncedState } from "../../src/core/syncedState";
 import { fitSync, SYNC_LIMIT, syncBytes } from "../../src/core/syncLimit";
 
@@ -97,5 +97,30 @@ describe("fitSync", () => {
     const two = fitSync(JSON.parse(JSON.stringify(whole)) as SyncedState, new Map([...noted(5, 6000)].reverse()));
     expect(JSON.stringify(two.state)).toBe(JSON.stringify(one.state));
     expect(JSON.stringify(two.notes)).toBe(JSON.stringify(one.notes));
+  });
+
+  it("leaves out what the oldest stars carry before any star, and what a star carries goes with it", () => {
+    const stars = Array.from({ length: 300 }, (_, i) => [id(i), NOW + i * 1000] as Stamped);
+    const about = Object.fromEntries(stars.map(([sid, at]) => [sid, { title: "".padEnd(200, "t"), agent: "claude-code", host: "laptop", at }]));
+    const full = state({ favourites: list(stars), about });
+    const bare = syncBytes(state({ favourites: list(stars) }), syncedNotes(new Map()));
+    const fit = fitSync(full, new Map(), bare + 10_000);
+    expect(fit.state.favourites.ids).toHaveLength(300);
+    const told = Object.keys(fit.state.about ?? {});
+    expect(told.length).toBeGreaterThan(0);
+    expect(told.length).toBeLessThan(300);
+    // The newest stars' word stays.
+    expect(told).toContain(id(299));
+    expect(told).not.toContain(id(0));
+    expect(fit.restLeft).toBe(300 - told.length);
+    expect(fit.bytes).toBeLessThanOrEqual(bare + 10_000);
+    // Tighter still: stars go, and none leaves its word behind.
+    const tight = fitSync(full, new Map(), syncBytes(state({ favourites: list(stars.slice(0, 150)) }), syncedNotes(new Map())));
+    const kept = new Set(tight.state.favourites.ids.map(([sid]) => sid));
+    expect(kept.size).toBeLessThan(300);
+    for (const sid of Object.keys(tight.state.about ?? {})) expect(kept.has(sid)).toBe(true);
+    // A word on a session no longer starred never reaches the copy.
+    const stray = fitSync(state({ favourites: list([[id(1), NOW]]), about: { [id(1)]: { title: "kept", at: NOW }, [id(2)]: { title: "gone", at: NOW } } }), new Map());
+    expect(Object.keys(stray.state.about ?? {})).toEqual([id(1)]);
   });
 });

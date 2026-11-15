@@ -485,6 +485,50 @@
   },
   "favourites": [
     "c2",
-    "cp1"
+    "cp1",
+    "e1"
+  ],
+  "elsewhere": [
+    {
+      "id": "e1",
+      "agent": "claude-code",
+      "title": "Vendor identity plan",
+      "project": "on wsl-desktop",
+      "cwd": "",
+      "resumable": false,
+      "modifiedAt": 4827200000,
+      "elsewhere": true,
+      "host": "wsl-desktop",
+      "note": "Five calls still open: ask about the signing key first.",
+      "noteAt": 4827200000,
+      "noteCount": 2
+    },
+    {
+      "id": "e2",
+      "agent": "claude-code",
+      "title": "Release checklist for the dashboard",
+      "project": "dashboard",
+      "cwd": "/home/alice/projects/dashboard",
+      "resumable": false,
+      "modifiedAt": 4568000000,
+      "elsewhere": true,
+      "host": "wsl-desktop",
+      "note": "Tag only after the chart PR merges.",
+      "noteAt": 4568000000,
+      "noteCount": 1
+    },
+    {
+      "id": "e3",
+      "agent": "codex",
+      "title": "Session 7f3a9c21",
+      "project": "another machine",
+      "cwd": "",
+      "resumable": false,
+      "modifiedAt": 0,
+      "elsewhere": true,
+      "note": "Compare with the old parser before deleting it.",
+      "noteAt": 4222400000,
+      "noteCount": 1
+    }
   ]
 }

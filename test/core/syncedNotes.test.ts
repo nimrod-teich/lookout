@@ -196,6 +196,20 @@ describe("mergeNotes", () => {
     const remote = value([note("a", "from elsewhere", 10)], [], "Wire the cache");
     expect(mergeNotes(undefined, { notes: [] }, remote, NOW)).toEqual(remote);
   });
+
+  it("settles every machine on the machine the session is on, as the first one that has it says", () => {
+    const said = mergeNotes(undefined, { ...local([note("a", "x", 1)]), host: "laptop" }, undefined, NOW);
+    expect(said?.host).toBe("laptop");
+    // A machine without the session keeps the synced copy's word, and so does one that has it too, after a restore.
+    expect(mergeNotes(undefined, { notes: [] }, said, NOW)?.host).toBe("laptop");
+    expect(mergeNotes(said, { ...local([note("a", "x", 1)]), host: "desk" }, said, NOW)?.host).toBe("laptop");
+    // Read back as written, a name that is not one left out.
+    expect(readSessionNotes(JSON.parse(JSON.stringify(said)))?.host).toBe("laptop");
+    expect(readSessionNotes({ ...said, host: 5 })?.host).toBeUndefined();
+    expect(readSessionNotes({ ...said, host: "".padEnd(300, "h") })?.host).toBeUndefined();
+    // Without a machine named, the copy is what an older Lookout wrote.
+    expect(mergeNotes(undefined, local([note("a", "x", 1)]), undefined, NOW)).not.toHaveProperty("host");
+  });
 });
 
 describe("lastChange", () => {

@@ -6,6 +6,10 @@
 // (local) and the synced value (remote), which Settings Sync replaces whole
 // with another machine's copy when both changed it. Nothing here touches
 // the disk.
+//
+// The stars also carry what a machine that has a starred session knows of
+// it, its title, agent and machine, for a machine that does not have the
+// conversation: it shows the star under On other machines.
 import { readGroupBy, type GroupBy } from "./grouping";
 import { readParking, type Parking } from "./parking";
 import { readSort, type SessionSort } from "./sorting";
@@ -23,6 +27,32 @@ export interface SyncedList {
   removed: Stamped[];
 }
 
+/**
+ * What the machine a starred session is on tells the others of it: its
+ * title, its agent and the machine's name, and when it said so last.
+ */
+export interface AboutSession {
+  title?: string;
+  agent?: string;
+  host?: string;
+  at: number;
+}
+
+/** What a machine knows of the sessions on it, for the stars' `about`. */
+export interface SessionsHere {
+  /** This machine's name, os.hostname(). */
+  host: string;
+  /** A session on this machine: its title and agent; none for one that is not here. */
+  of(id: string): { title?: string; agent?: string } | undefined;
+}
+
+/** The longest title, agent id and machine name an `about` entry is read with. */
+const TITLE_MAX = 300;
+const AGENT_MAX = 64;
+const HOST_MAX = 255;
+/** The longest title read at all; up to it, a title is cut to TITLE_MAX. */
+const READ_MAX = 4096;
+
 /** The lists of the light state, as the synced value names them. */
 export const LISTS = ["favourites", "archive", "parked", "kept"] as const;
 export type ListName = (typeof LISTS)[number];
@@ -36,6 +66,10 @@ export interface SyncedState extends Record<ListName, SyncedList> {
   group?: GroupBy;
   /** The Claude accounts seen signed in: organization uuid → the key of the account's address. */
   claudeOrgs: Record<string, string>;
+  /** Of each starred session, what the machine it is on says of it, by session id. */
+  about?: Record<string, AboutSession>;
+  /** The machine that last changed the synced copy; only the synced value carries it. */
+  by?: string;
 }
 
 /** This machine's light state, as Lookout keeps it in globalState. */
@@ -86,6 +120,9 @@ export function readSyncedState(value: unknown): SyncedState | undefined {
   const out: SyncedState = { v: 1, favourites: readList(r.favourites), archive: readList(r.archive), parked: readList(r.parked), kept: readList(r.kept), claudeOrgs: readOrgs(r.claudeOrgs) };
   if (typeof r.sort === "object" && r.sort !== null && !Array.isArray(r.sort)) out.sort = readSort(r.sort);
   if (typeof r.group === "string" && readGroupBy(r.group) === r.group) out.group = r.group as GroupBy;
+  const about = readAbout(r.about);
+  if (Object.keys(about).length > 0) out.about = about;
+  if (typeof r.by === "string" && r.by !== "" && r.by.length <= HOST_MAX) out.by = r.by;
   return ordered(out);
 }
 
@@ -105,8 +142,11 @@ export function readSyncedState(value: unknown): SyncedState | undefined {
  * With no base, on this machine's first merge, what this machine has counts
  * as older than anything the remote copy says: an id another machine took
  * out stays out, and the remote copy's order and grouping are taken.
+ *
+ * What the stars carry of their sessions: see `mergeAbout`. The merged state
+ * names no machine (`by`): the one that writes it as the synced copy does.
  */
-export function mergeState(base: SyncedState | undefined, local: LocalState, remote: SyncedState | undefined, now: number): SyncedState {
+export function mergeState(base: SyncedState | undefined, local: LocalState, remote: SyncedState | undefined, now: number, here?: SessionsHere): SyncedState {
   const first = base === undefined;
   const merged: SyncedState = {
     v: 1,
@@ -121,7 +161,68 @@ export function mergeState(base: SyncedState | undefined, local: LocalState, rem
   if (sort !== undefined) merged.sort = sort;
   const group = single(base?.group, local.group, remote?.group, first);
   if (group !== undefined) merged.group = group;
+  const about = mergeAbout(base?.about, remote?.about, merged.favourites.ids.map(([id]) => id), here, now);
+  if (Object.keys(about).length > 0) merged.about = about;
   return ordered(merged);
+}
+
+/**
+ * What the stars carry of their sessions, for the starred ids only. Of the
+ * base's and the remote copy's word on a session, the later one. A machine
+ * that has the session says what it knows of it when no machine has yet,
+ * or when it was the one that said it and the title or agent changed since;
+ * a machine that also has the session, after a restore, leaves the first
+ * one's word as it is, so two machines never take turns rewriting it.
+ */
+export function mergeAbout(
+  base: Readonly<Record<string, AboutSession>> | undefined,
+  remote: Readonly<Record<string, AboutSession>> | undefined,
+  starred: readonly string[],
+  here: SessionsHere | undefined,
+  now: number,
+): Record<string, AboutSession> {
+  const out: Record<string, AboutSession> = {};
+  for (const id of starred) {
+    let said = newer(base?.[id], remote?.[id]);
+    const known = here?.of(id);
+    if (here && known) {
+      const mine: AboutSession = aboutOf(known.title, known.agent, here.host, now);
+      if (!said || (said.host === here.host && (said.title !== mine.title || said.agent !== mine.agent))) said = mine;
+    }
+    if (said) out[id] = said;
+  }
+  return out;
+}
+
+/** Of two words on a session, the later one; for two at one time, the same one on every machine. */
+function newer(a: AboutSession | undefined, b: AboutSession | undefined): AboutSession | undefined {
+  if (!a || !b) return a ?? b;
+  if (a.at !== b.at) return a.at > b.at ? a : b;
+  return JSON.stringify(a) >= JSON.stringify(b) ? a : b;
+}
+
+/** An `about` entry with its fields in one order and in their limits, so two copies of it read alike. */
+function aboutOf(title: string | undefined, agent: string | undefined, host: string | undefined, at: number): AboutSession {
+  return {
+    ...(title ? { title: title.slice(0, TITLE_MAX) } : {}),
+    ...(agent ? { agent: agent.slice(0, AGENT_MAX) } : {}),
+    ...(host ? { host: host.slice(0, HOST_MAX) } : {}),
+    at,
+  };
+}
+
+function readAbout(raw: unknown): Record<string, AboutSession> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, AboutSession> = {};
+  for (const [id, value] of Object.entries(raw)) {
+    if (!isSyncedId(id) || typeof value !== "object" || value === null || Array.isArray(value)) continue;
+    const v = value as Partial<Record<keyof AboutSession, unknown>>;
+    if (typeof v.at !== "number" || !Number.isFinite(v.at)) continue;
+    const text = (field: unknown, max: number) => (typeof field === "string" && field !== "" && field.length <= max ? field : undefined);
+    // A longer title is cut, not left out: the session is still worth naming.
+    out[id] = aboutOf(text(v.title, READ_MAX), text(v.agent, AGENT_MAX), text(v.host, HOST_MAX), v.at);
+  }
+  return out;
 }
 
 /**
@@ -193,10 +294,12 @@ function fromLocal(local: LocalState): SyncedState {
 }
 
 /** A state with its fields in one order, so two machines' copies of the same state are the same JSON. */
-function ordered(state: SyncedState): SyncedState {
+export function ordered(state: SyncedState): SyncedState {
   const out: SyncedState = { v: 1, favourites: state.favourites, archive: state.archive, parked: state.parked, kept: state.kept, claudeOrgs: sortedOrgs(state.claudeOrgs) };
   if (state.sort !== undefined) out.sort = state.sort;
   if (state.group !== undefined) out.group = state.group;
+  if (state.about !== undefined && Object.keys(state.about).length > 0) out.about = Object.fromEntries(Object.entries(state.about).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  if (state.by !== undefined) out.by = state.by;
   return out;
 }
 

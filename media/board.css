@@ -2057,6 +2057,16 @@ body.vscode-high-contrast-light .card {
   opacity: 0.55;
 }
 
+/* On another machine: nothing of it is here but its star and notes; a faint dotted rail, and the card a little dimmer. */
+.card.elsewhere .rail {
+  background: repeating-linear-gradient(to bottom, var(--idle) 0 1px, transparent 1px 4px);
+  opacity: 0.6;
+}
+
+.card.elsewhere .title {
+  opacity: 0.85;
+}
+
 .group-favourites .star-mark {
   font-style: normal;
   color: var(--waiting);

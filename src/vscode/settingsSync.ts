@@ -23,13 +23,21 @@
 // itself, so such a write puts both back together and never reads as the
 // user taking something out; the notes' base is a file beside the notes'
 // files for the same reason.
+//
+// Each synced copy names the machine that last changed it (`by`), written
+// only with a change of what it holds, so two machines that agree leave it
+// alone. A window notes when a copy another machine wrote arrives, and says
+// so in Lookout's log; Lookout: Settings Sync Status shows what it knows.
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { plainText } from "../core/plainText";
 import { SessionRecords, type NoteEntry } from "../core/sessionRecords";
 import { mergeNotes, readSyncedNotes, syncedNotes, type SessionNotes } from "../core/syncedNotes";
-import { changedKeys, localValues, mergeState, readLocalState, readSyncedState } from "../core/syncedState";
-import { fitSync, type SyncFit } from "../core/syncLimit";
+import { changedKeys, localValues, mergeState, ordered, readLocalState, readSyncedState, type SessionsHere } from "../core/syncedState";
+import { fitSync, SYNC_LIMIT, type SyncFit } from "../core/syncLimit";
 import { SYNC_KEYS, SYNC_NOTES_KEY, SYNC_STATE_KEY } from "../core/transfer/types";
 import type { Log } from "./log";
 
@@ -45,8 +53,57 @@ export const SYNC_REGISTERED_KEY = "lookout.sync.registered";
 /** Set while the synced copies leave something out and the user was told; not synced. */
 export const SYNC_CAPPED_KEY = "lookout.sync.capped";
 
+/** What this machine last saw of each synced copy, and the last copies another machine wrote; not synced. */
+export const SYNC_SEEN_KEY = "lookout.sync.seen";
+
 /** The window in front merges this often: Settings Sync says nothing of the values it pulls. */
 export const MERGE_EVERY_MS = 60_000;
+
+/** The command that says what Lookout's Settings Sync knows. */
+export const SYNC_STATUS_COMMAND = "lookout.syncStatus";
+
+/** VS Code's own Settings Sync commands, as its workbench names them. */
+const SYNC_NOW_COMMAND = "workbench.userDataSync.actions.syncNow";
+const SYNC_LOG_COMMAND = "workbench.userDataSync.actions.showLog";
+const RESTORE_COMMAND = "lookout.restore";
+
+/** A copy another machine wrote, as it arrived. */
+export interface Arrival {
+  /** Epoch ms this machine saw it. */
+  at: number;
+  /** The machine that wrote it; none for a Lookout that did not say, before 0.1.7. */
+  by?: string;
+  /** In the state's copy: its stars. */
+  stars?: number;
+  /** In the notes' copy: its notes, and the sessions they are on. */
+  notes?: number;
+  sessions?: number;
+}
+
+/** What this machine last saw of the synced copies. */
+export interface SyncSeen {
+  /** A digest of each copy as this machine last saw or wrote it. */
+  state?: string;
+  notes?: string;
+  /** The last copy of each that another machine wrote. */
+  arrived?: { state?: Arrival; notes?: Arrival };
+}
+
+/** What Lookout: Settings Sync Status says. */
+export interface SyncStatus {
+  enabled: boolean;
+  /** Epoch ms this window last merged; none before its first merge. */
+  mergedAt?: number;
+  arrived: { state?: Arrival; notes?: Arrival };
+  /** What this machine syncs, as of its last merge. */
+  stars: number;
+  archived: number;
+  parked: number;
+  notes: number;
+  sessions: number;
+  /** What the last merge left out of the synced copies to keep them small. */
+  fit?: SyncFit;
+}
 
 /**
  * What this machine merged last of the notes, in a file beside the records
@@ -72,7 +129,13 @@ export interface SettingsSyncDeps {
   /** How often the window in front merges, for the tests. */
   mergeEveryMs?: number;
   now?: () => number;
-  log?: Pick<Log, "errorOnce">;
+  log?: Pick<Log, "errorOnce" | "info">;
+  /** A session on this machine, by id: its title and agent, for the stars and notes to carry. None for one that is not here. */
+  describe?(id: string): { title?: string; agent?: string } | undefined;
+  /** This machine's name, as the synced copies give it; os.hostname() by default. */
+  host?: string;
+  /** The starred and noted sessions whose conversations are not on this machine, for the status. */
+  elsewhere?(): { sessions: number; stars: number; notes: number };
 }
 
 /** Whether the user turned Settings Sync on for Lookout. */
@@ -93,6 +156,10 @@ export class SettingsSync implements vscode.Disposable {
   private disposed = false;
   /** Writes made by this window, for temporary names no other write shares. */
   private saves = 0;
+  /** This machine's name in the synced copies. */
+  private readonly host: string;
+  /** What the last merge saw and kept, for the status. */
+  private last: Omit<SyncStatus, "enabled" | "arrived"> | undefined;
 
   constructor(
     private readonly state: SyncedMemento,
@@ -101,6 +168,13 @@ export class SettingsSync implements vscode.Disposable {
     this.records = new SessionRecords(deps.recordsDir);
     this.baseFile = deps.baseFile ?? path.join(path.dirname(deps.recordsDir), BASE_FILE);
     this.now = deps.now ?? Date.now;
+    this.host = deps.host ?? os.hostname();
+  }
+
+  /** What Lookout's Settings Sync knows now. */
+  status(): SyncStatus {
+    const seen = readSeen(this.state.get<unknown>(SYNC_SEEN_KEY));
+    return { enabled: syncEnabled(), arrived: seen.arrived ?? {}, ...(this.last ?? { stars: 0, archived: 0, parked: 0, notes: 0, sessions: 0 }) };
   }
 
   /**
@@ -130,10 +204,13 @@ export class SettingsSync implements vscode.Disposable {
     this.syncKeys(SYNC_KEYS);
     if (this.state.get<unknown>(SYNC_REGISTERED_KEY) !== true) void this.state.update(SYNC_REGISTERED_KEY, true);
 
+    const here: SessionsHere = { host: this.host, of: (id) => this.deps.describe?.(id) };
+    const seen = this.noticeArrivals(now);
+
     // The light state: Lookout's keys, written back where the merge changed them.
     const local = readLocalState((key) => this.state.get<unknown>(key));
     const stateBase = readSyncedState(this.state.get<unknown>(SYNC_BASE_KEY));
-    const state = mergeState(stateBase, local, readSyncedState(this.state.get<unknown>(SYNC_STATE_KEY)), now);
+    const state = mergeState(stateBase, local, readSyncedState(this.state.get<unknown>(SYNC_STATE_KEY)), now, here);
     const values = localValues(state);
     const keys = changedKeys(local, state);
     for (const key of keys) void this.state.update(key, values[key]);
@@ -156,7 +233,8 @@ export class SettingsSync implements vscode.Disposable {
         id,
         (notes) => {
           outcome.before = notes;
-          outcome.result = mergeNotes(base.get(id), { agent: record?.agent, title: record?.title, notes }, remote.get(id), now);
+          const host = here.of(id) ? this.host : undefined;
+          outcome.result = mergeNotes(base.get(id), { agent: record?.agent, title: record?.title, host, notes }, remote.get(id), now);
           return outcome.result?.notes ?? [];
         },
         about && { agent: about.agent, title: about.title },
@@ -169,14 +247,75 @@ export class SettingsSync implements vscode.Disposable {
       if (!sameJson(base.get(id), result)) changes.set(id, result);
     }
 
-    // The synced copies, within the limit, then the bases.
-    const fit = fitSync(state, merged);
-    if (!sameJson(this.state.get<unknown>(SYNC_STATE_KEY), fit.state)) void this.state.update(SYNC_STATE_KEY, fit.state);
-    if (!sameJson(this.state.get<unknown>(SYNC_NOTES_KEY), fit.notes)) void this.state.update(SYNC_NOTES_KEY, fit.notes);
+    // The synced copies, within the limit less the room the writer's name takes in each, then the bases.
+    const fit = fitSync(state, merged, SYNC_LIMIT - 2 * Buffer.byteLength(JSON.stringify({ by: this.host })));
+    const stateCopy = this.copy(SYNC_STATE_KEY, fit.state, (value) => ordered({ ...value, by: this.host }));
+    const notesCopy = this.copy(SYNC_NOTES_KEY, fit.notes, (value) => ({ ...value, by: this.host }));
     if (!sameJson(stateBase, state)) void this.state.update(SYNC_BASE_KEY, state);
     if (changes.size > 0) this.writeBase(changes);
+    this.saw(seen, stateCopy, notesCopy);
     this.tell(fit);
+    let notesKept = 0;
+    for (const value of merged.values()) notesKept += value.notes.length;
+    this.last = {
+      mergedAt: now,
+      stars: state.favourites.ids.length,
+      archived: state.archive.ids.length,
+      parked: state.parked.ids.length,
+      notes: notesKept,
+      sessions: [...merged.values()].filter((value) => value.notes.length > 0).length,
+      fit,
+    };
     if (keys.length > 0 || notesChanged) this.deps.changed?.();
+  }
+
+  /**
+   * The synced copy of `key` as this machine holds it after the merge: the
+   * one there when it holds what the merge says (whoever wrote it), else
+   * `value` written, naming this machine.
+   */
+  private copy<T extends object>(key: string, value: T, named: (value: T) => T): unknown {
+    const held = this.state.get<unknown>(key);
+    if (sameJson(withoutBy(held), value)) return held;
+    const written = named(value);
+    void this.state.update(key, written);
+    return written;
+  }
+
+  /**
+   * Notes the synced copies another machine wrote since this one last saw
+   * them, and says so in Lookout's log: a copy that is not the one this
+   * machine last saw or wrote. A copy that names no machine, on a machine
+   * that has seen none yet, may be its own from before 0.1.7: not noted.
+   */
+  private noticeArrivals(now: number): SyncSeen {
+    const seen = readSeen(this.state.get<unknown>(SYNC_SEEN_KEY));
+    const next: SyncSeen = { ...seen };
+    const look = (key: "state" | "notes", value: unknown, counts: () => Omit<Arrival, "at" | "by">) => {
+      if (value === undefined) return;
+      const digest = digestOf(value);
+      if (digest === seen[key]) return;
+      next[key] = digest;
+      const by = byOf(value);
+      if (by === this.host || (seen[key] === undefined && by === undefined)) return;
+      const arrival: Arrival = { at: now, ...(by === undefined ? {} : { by }), ...counts() };
+      next.arrived = { ...next.arrived, [key]: arrival };
+      this.deps.log?.info(`Settings Sync brought ${by === undefined ? "another machine" : `${plainText(by, 80)}`}'s copy of ${key === "state" ? `the stars and lists: ${plural(arrival.stars ?? 0, "star")}` : `the notes: ${plural(arrival.notes ?? 0, "note")} on ${plural(arrival.sessions ?? 0, "session")}`}.`);
+    };
+    look("state", this.state.get<unknown>(SYNC_STATE_KEY), () => ({ stars: readSyncedState(this.state.get<unknown>(SYNC_STATE_KEY))?.favourites.ids.length ?? 0 }));
+    look("notes", this.state.get<unknown>(SYNC_NOTES_KEY), () => {
+      const sessions = [...(readSyncedNotes(this.state.get<unknown>(SYNC_NOTES_KEY))?.values() ?? [])];
+      return { notes: sessions.reduce((sum, value) => sum + value.notes.length, 0), sessions: sessions.filter((value) => value.notes.length > 0).length };
+    });
+    return next;
+  }
+
+  /** Remembers the synced copies as this machine leaves them, so the next merge tells another machine's from its own. */
+  private saw(seen: SyncSeen, state: unknown, notes: unknown): void {
+    const next: SyncSeen = { ...seen };
+    if (state !== undefined) next.state = digestOf(state);
+    if (notes !== undefined) next.notes = digestOf(notes);
+    if (!sameJson(readSeen(this.state.get<unknown>(SYNC_SEEN_KEY)), next)) void this.state.update(SYNC_SEEN_KEY, next);
   }
 
   /**
@@ -276,16 +415,124 @@ export function registerSettingsSync(context: Pick<vscode.ExtensionContext, "glo
   const timer = setInterval(() => {
     if (inFront()) sync.merge();
   }, deps.mergeEveryMs ?? MERGE_EVERY_MS);
+  const status = registerSettingsSyncStatus(sync, deps);
   sync.merge();
   return {
     dispose: () => {
       clearInterval(timer);
+      status.dispose();
       setting.dispose();
       windowState.dispose();
       watch.dispose();
       sync.dispose();
     },
   };
+}
+
+/** Registers Lookout: Settings Sync Status for this window's sync. */
+export function registerSettingsSyncStatus(sync: SettingsSync, deps: SettingsSyncDeps): vscode.Disposable {
+  return vscode.commands.registerCommand(SYNC_STATUS_COMMAND, () => showStatus(sync, deps));
+}
+
+/** Lookout: Settings Sync Status: what this machine syncs, what came from another, and what is not here. */
+export async function showStatus(sync: SettingsSync, deps: Pick<SettingsSyncDeps, "elsewhere">): Promise<void> {
+  const status = sync.status();
+  const lines: string[] = [];
+  const remote = vscode.env.remoteName;
+  if (!status.enabled) lines.push("lookout.settingsSync.enabled is off: Lookout gives Settings Sync nothing, and sends nothing off the machine.");
+  else lines.push("Lookout syncs your stars, lists and notes through VS Code's Settings Sync, in its Extensions category.");
+  if (remote) lines.push(`This window's Lookout runs in ${plainText(remote, 40)}. Settings Sync carries Lookout's data only where Lookout is also installed in VS Code itself, with Settings Sync on and its Extensions category ticked.`);
+  if (status.enabled) {
+    lines.push(status.mergedAt ? `This window last merged at ${clock(status.mergedAt)}.` : "This window has not merged yet.");
+    const arrived = [status.arrived.state, status.arrived.notes].filter((a): a is Arrival => a !== undefined);
+    if (arrived.length === 0) lines.push("No copy another machine wrote has arrived on this machine yet.");
+    for (const [what, arrival] of [
+      ["the stars and lists", status.arrived.state],
+      ["the notes", status.arrived.notes],
+    ] as const) {
+      if (!arrival) continue;
+      const counts = arrival.stars !== undefined ? plural(arrival.stars, "star") : `${plural(arrival.notes ?? 0, "note")} on ${plural(arrival.sessions ?? 0, "session")}`;
+      lines.push(`The last copy of ${what} from another machine came from ${arrival.by ? plainText(arrival.by, 80) : "a machine with an older Lookout"} on ${dateTime(arrival.at)}: ${counts}.`);
+    }
+    if (status.mergedAt) lines.push(`This machine syncs ${plural(status.stars, "star")}, ${plural(status.archived, "archived session")}, ${plural(status.parked, "parked session")} and ${plural(status.notes, "note")} on ${plural(status.sessions, "session")}.`);
+    const elsewhere = deps.elsewhere?.();
+    if (elsewhere && elsewhere.sessions > 0) {
+      lines.push(`${plural(elsewhere.sessions, "starred or noted session")} (${plural(elsewhere.stars, "star")}, ${plural(elsewhere.notes, "note")}) ${elsewhere.sessions === 1 ? "is" : "are"} of conversations that are not on this machine: the board shows them under On other machines, and restoring a backup made on their machine brings the conversations.`);
+    }
+    const fit = status.fit;
+    if (fit && (fit.archiveLeft > 0 || fit.notesLeft > 0 || fit.restLeft > 0)) {
+      const left: string[] = [];
+      if (fit.archiveLeft > 0) left.push(plural(fit.archiveLeft, "archived session"));
+      if (fit.notesLeft > 0) left.push(`${plural(fit.notesLeft, "note")} on ${plural(fit.sessionsLeft, "older session")}`);
+      if (fit.restLeft > 0) left.push(`${plural(fit.restLeft, "older star, parked session or removal")}`);
+      lines.push(`To stay under 64 KB, the synced copies leave out ${left.join(", ")}. They stay on this machine, and a backup carries them.`);
+    }
+  }
+  const SYNC_NOW = "Sync Now";
+  const SHOW_LOG = "Show Settings Sync Log";
+  const RESTORE = "Restore from Backup…";
+  const buttons = status.enabled ? [SYNC_NOW, SHOW_LOG, RESTORE] : [RESTORE];
+  const pick = await vscode.window.showInformationMessage("Lookout's Settings Sync", { modal: true, detail: lines.join("\n\n") }, ...buttons);
+  const command = pick === SYNC_NOW ? SYNC_NOW_COMMAND : pick === SHOW_LOG ? SYNC_LOG_COMMAND : pick === RESTORE ? RESTORE_COMMAND : undefined;
+  if (command) void Promise.resolve(vscode.commands.executeCommand(command)).catch(() => undefined);
+}
+
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+}
+
+function clock(ms: number): string {
+  return new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function dateTime(ms: number): string {
+  const at = new Date(ms);
+  return `${at.toLocaleDateString(undefined, { month: "long", day: "numeric" })} at ${clock(ms)}`;
+}
+
+/** A synced copy without the machine that wrote it: what it holds. */
+function withoutBy(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value) || !("by" in value)) return value;
+  const rest: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  delete rest.by;
+  return rest;
+}
+
+/** The machine a synced copy names as its writer. */
+function byOf(value: unknown): string | undefined {
+  const by = typeof value === "object" && value !== null ? (value as { by?: unknown }).by : undefined;
+  return typeof by === "string" && by !== "" ? by : undefined;
+}
+
+/** A short digest of a synced copy, to tell one copy from another without keeping it. */
+function digestOf(value: unknown): string {
+  return crypto.createHash("sha256").update(JSON.stringify(value) ?? "").digest("base64").slice(0, 22);
+}
+
+function readSeen(raw: unknown): SyncSeen {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const r = raw as Record<string, unknown>;
+  const out: SyncSeen = {};
+  if (typeof r.state === "string") out.state = r.state;
+  if (typeof r.notes === "string") out.notes = r.notes;
+  const arrived = typeof r.arrived === "object" && r.arrived !== null ? (r.arrived as Record<string, unknown>) : {};
+  const arrival = (value: unknown): Arrival | undefined => {
+    if (typeof value !== "object" || value === null) return undefined;
+    const a = value as Record<string, unknown>;
+    if (typeof a.at !== "number" || !Number.isFinite(a.at)) return undefined;
+    const count = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined);
+    const out: Arrival = { at: a.at };
+    if (typeof a.by === "string" && a.by !== "") out.by = a.by;
+    for (const key of ["stars", "notes", "sessions"] as const) {
+      const n = count(a[key]);
+      if (n !== undefined) out[key] = n;
+    }
+    return out;
+  };
+  const state = arrival(arrived.state);
+  const notes = arrival(arrived.notes);
+  if (state || notes) out.arrived = { ...(state ? { state } : {}), ...(notes ? { notes } : {}) };
+  return out;
 }
 
 /** What this machine merged last of the notes, by session id; nothing for a file that is missing or does not read, which only lets a note taken away come back. */

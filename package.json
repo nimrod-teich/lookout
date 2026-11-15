@@ -121,6 +121,11 @@
         "category": "Lookout"
       },
       {
+        "command": "lookout.syncStatus",
+        "title": "Settings Sync Status",
+        "category": "Lookout"
+      },
+      {
         "command": "lookout.sortSessions",
         "title": "Sort Sessions",
         "category": "Lookout"
@@ -242,6 +247,11 @@
           "command": "lookout.restore",
           "when": "view == lookout.board",
           "group": "backup@2"
+        },
+        {
+          "command": "lookout.syncStatus",
+          "when": "view == lookout.board",
+          "group": "backup@3"
         }
       ],
       "commandPalette": [
@@ -322,7 +332,7 @@
         },
         {
           "command": "lookout.card.conversation",
-          "when": "webviewId == 'lookout.board' && webviewSection == 'card'",
+          "when": "webviewId == 'lookout.board' && webviewSection == 'card' && !lookoutElsewhere",
           "group": "1_open@2"
         },
         {

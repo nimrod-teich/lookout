@@ -24,6 +24,8 @@ interface BoardState {
   archive?: boolean;
   /** The user opened the Purged group. */
   purged?: boolean;
+  /** The user opened the On other machines group. */
+  elsewhere?: boolean;
   /** Agents the user hid through the legend. */
   agents?: string[];
   /** The agent whose usage tab the user picked. */
@@ -142,9 +144,16 @@ let purgedOpen = vscode.getState()?.purged === true;
 let purgedPage = 0;
 let purgedEl: HTMLElement | undefined;
 const purgedCards = new Map<string, HTMLElement>();
+/** The starred and noted sessions whose conversations are on another machine. */
+let elsewherePast: PastView[] = [];
+/** The user opened the On other machines group; kept across reloads. */
+let elsewhereOpen = vscode.getState()?.elsewhere === true;
+let elsewherePage = 0;
+let elsewhereEl: HTMLElement | undefined;
+const elsewhereCards = new Map<string, HTMLElement>();
 
 function saveState(): void {
-  vscode.setState({ hidden: [...hidden], folded: [...folded], earlier: earlierOpen, parked: parkedOpen, archive: archiveOpen, purged: purgedOpen, agents: [...hiddenAgents], usageTab });
+  vscode.setState({ hidden: [...hidden], folded: [...folded], earlier: earlierOpen, parked: parkedOpen, archive: archiveOpen, purged: purgedOpen, elsewhere: elsewhereOpen, agents: [...hiddenAgents], usageTab });
 }
 
 /** On a section by attribute: a dot and a count per state it holds, in the legend's colours. */
@@ -611,7 +620,7 @@ let agentById = new Map<string, string>();
 
 function indexAgents(): void {
   const byId = new Map<string, string>();
-  for (const list of [allSessions, past, favourites.past, archivePast, purgedPast]) for (const view of list) if (!byId.has(view.id)) byId.set(view.id, view.agent);
+  for (const list of [allSessions, past, favourites.past, archivePast, purgedPast, elsewherePast]) for (const view of list) if (!byId.has(view.id)) byId.set(view.id, view.agent);
   agentById = byId;
 }
 
@@ -1176,7 +1185,8 @@ function setPastMenu(card: HTMLElement, view: PastView, kind: PastKind): void {
     lookoutArchived: kind === "archived",
     lookoutPurged: view.purged === true,
     lookoutKept: view.kept === true,
-    lookoutCanKeep: view.purged !== true,
+    lookoutCanKeep: view.purged !== true && view.elsewhere !== true,
+    lookoutElsewhere: view.elsewhere === true,
   });
   if (card.dataset.vscodeContext !== context) card.dataset.vscodeContext = context;
 }
@@ -1416,11 +1426,11 @@ function restoreButton(id: string): HTMLElement {
 }
 
 /** What a card that is not running is listed as: it changes which buttons it carries. */
-type PastKind = "earlier" | "archived" | "purged";
+type PastKind = "earlier" | "archived" | "purged" | "elsewhere";
 
 /** An earlier session's card; an archived one has no star, and its button brings it back; a purged one's button forgets it. */
 function createPastCard(view: PastView, kind: PastKind = "earlier"): HTMLElement {
-  const card = el("button", kind === "purged" ? "card past purged" : "card past");
+  const card = el("button", kind === "purged" ? "card past purged" : kind === "elsewhere" ? "card past elsewhere" : "card past");
   card.type = "button";
   card.dataset.id = view.id;
   card.append(el("span", "rail"));
@@ -1437,14 +1447,18 @@ function createPastCard(view: PastView, kind: PastKind = "earlier"): HTMLElement
   card.append(main);
   markCard(card, row, view.agent);
   card.addEventListener("click", () => {
+    // Its conversation is on another machine: the extension says which, and offers to restore a backup.
+    if (kind === "elsewhere") vscode.postMessage({ type: "elsewhere", id: view.id });
     // The agent resumes only the sessions of this window's folders; another project's opens its conversation.
-    if (card.dataset.resumable === "true") vscode.postMessage({ type: "resume", id: view.id });
+    else if (card.dataset.resumable === "true") vscode.postMessage({ type: "resume", id: view.id });
     else vscode.postMessage({ type: "openHit", query, id: view.id });
   });
   return card;
 }
 
 function pastElapsed(view: PastView): string {
+  // A session another machine named without a time.
+  if (view.modifiedAt <= 0) return "";
   return `${formatElapsed(now() - view.modifiedAt)} ago`;
 }
 
@@ -1455,6 +1469,7 @@ function resumeWhere(view: PastView): string {
 
 /** What a click on an earlier session does, and why. */
 function pastTitle(view: PastView, resumable: boolean): string {
+  if (view.elsewhere) return `On ${view.host ?? "another machine"} · its conversation is not on this machine: click to restore a backup made there`;
   const written = `Not running · last written ${pastElapsed(view)}`;
   if (view.purged) return `${written} · the agent deleted its transcript, and Lookout kept what was said: click to read it. It cannot be resumed`;
   if (resumable) return `${written} · click to resume it ${resumeWhere(view)}`;
@@ -1480,6 +1495,8 @@ function updatePastCard(card: HTMLElement, view: PastView): void {
   const values: Chip[] = [...accountChip(view.account), { text: view.worktree ? `${view.project} · ${view.worktree}` : view.project }];
   if (view.branch) values.push(branchChip(view.branch));
   if (view.kept) values.push(keptChip());
+  // The machine it is on, unless the project chip already names it.
+  if (view.elsewhere && view.host && view.cwd) values.push({ text: `on ${view.host}`, title: "The machine its conversation is on" });
   while (chipsEl.childNodes.length > values.length) chipsEl.lastChild!.remove();
   values.forEach((value, i) => setChip((chipsEl.childNodes[i] ?? chipsEl.appendChild(el("span", "chip"))) as HTMLElement, value));
   renderHits(card.querySelector(".hits")!, result);
@@ -1823,12 +1840,71 @@ function renderPurged(after: HTMLElement): void {
   }
 }
 
-/** The groups under the live ones: Earlier, then Archived and Purged under it. */
+/**
+ * The starred and noted sessions whose conversations are on another
+ * machine: their stars and notes came through Settings Sync or a restore.
+ * Last on the board, collapsed; open while a search has matches among
+ * them. Gone while there is none.
+ */
+function renderElsewhere(after: HTMLElement): void {
+  const listed = elsewherePast.filter((view) => agentShown(view.agent));
+  const shown = query === "" ? listed : listed.filter((view) => hits.has(view.id));
+  if (listed.length === 0) {
+    elsewhereEl?.remove();
+    elsewhereEl = undefined;
+    elsewhereCards.clear();
+    return;
+  }
+  const open = (elsewhereOpen || query !== "") && shown.length > 0;
+  if (!elsewhereEl) {
+    elsewhereEl = el("section", "group group-past group-elsewhere");
+    const heading = el("h2", "heading");
+    heading.title = "Starred and noted sessions whose conversations are on another machine: their stars and notes came through Settings Sync or a restore. Click to show or hide them; a click on one says where it is, and offers to restore a backup made there.";
+    heading.append(el("i", "chev", "▸"), el("span", "label", "On other machines"), el("span", "count"));
+    heading.addEventListener("click", () => {
+      elsewhereOpen = !elsewhereOpen;
+      saveState();
+      render();
+    });
+    elsewhereEl.append(heading, el("div", "cards"), pager("Pages of sessions on other machines", (step) => turnPage(elsewhereEl, () => (elsewherePage += step))));
+  }
+  elsewhereEl.classList.toggle("open", open);
+  elsewhereEl.querySelector(".count")!.textContent = query === "" ? String(shown.length) : `${shown.length} of ${listed.length}`;
+  if (elsewhereEl.previousElementSibling !== after) root.insertBefore(elsewhereEl, after.nextSibling);
+  const list = elsewhereEl.querySelector(".cards")!;
+  list.classList.toggle("hidden", !open);
+  const { page: at, first, end } = showPage(elsewhereEl, shown.length, elsewherePage, open);
+  elsewherePage = at;
+  const seen = new Set<string>();
+  let previousCard: HTMLElement | undefined;
+  if (open) {
+    for (const view of shown.slice(first, end)) {
+      seen.add(view.id);
+      let card = elsewhereCards.get(view.id);
+      if (!card) {
+        card = createPastCard(view, "elsewhere");
+        elsewhereCards.set(view.id, card);
+      }
+      updatePastCard(card, view);
+      const prev = previousCard ?? null;
+      if (card.parentElement !== list || card.previousElementSibling !== prev) list.insertBefore(card, prev ? prev.nextSibling : list.firstChild);
+      previousCard = card;
+    }
+  }
+  for (const [id, card] of elsewhereCards) {
+    if (seen.has(id)) continue;
+    card.remove();
+    elsewhereCards.delete(id);
+  }
+}
+
+/** The groups under the live ones: Earlier, then Archived and Purged under it, then the sessions on other machines. */
 function renderPastGroups(after: HTMLElement): void {
   renderEarlier(after);
   if (!earlierEl) return;
   renderArchive(earlierEl);
   renderPurged(archiveEl ?? earlierEl);
+  renderElsewhere(purgedEl ?? archiveEl ?? earlierEl);
 }
 
 function render(): void {
@@ -1838,7 +1914,7 @@ function render(): void {
   renderMeters();
   const sections: Section[] = groupBy === "state" ? groupSessions(sessions).map((group) => ({ id: group.key, label: group.label, views: group.views })) : sectionsBy(sessions, groupBy);
   // While a search runs, archived and purged sessions with matches count too: their groups show them.
-  const archiveMatches = query === "" ? 0 : [...archivePast, ...purgedPast].filter((view) => agentShown(view.agent) && hits.has(view.id)).length;
+  const archiveMatches = query === "" ? 0 : [...archivePast, ...purgedPast, ...elsewherePast].filter((view) => agentShown(view.agent) && hits.has(view.id)).length;
   const pastShown = shownPast().shown.length + archiveMatches;
   const nothing = sessions.length === 0 && pastShown === 0;
   root.classList.toggle("empty", nothing);
@@ -1868,6 +1944,9 @@ function render(): void {
       purgedEl?.remove();
       purgedEl = undefined;
       purgedCards.clear();
+      elsewhereEl?.remove();
+      elsewhereEl = undefined;
+      elsewhereCards.clear();
     } else renderPastGroups(empty);
     return;
   }
@@ -1966,6 +2045,10 @@ function tick(): void {
     const card = purgedCards.get(view.id);
     if (card) card.querySelector(".elapsed")!.textContent = pastElapsed(view);
   }
+  for (const view of elsewherePast) {
+    const card = elsewhereCards.get(view.id);
+    if (card) card.querySelector(".elapsed")!.textContent = pastElapsed(view);
+  }
   renderBeam();
   if (usageGroups.length) renderMeters();
 }
@@ -1994,6 +2077,7 @@ window.addEventListener("message", (event: MessageEvent<ToBoard>) => {
   groupPicker.set(groupBy);
   archivePast = message.archive ?? [];
   purgedPast = message.purged ?? [];
+  elsewherePast = message.elsewhere ?? [];
   indexAgents();
   // One group, from an extension that knew only Claude's usage, or one per agent.
   usageGroups = sortGroups(Array.isArray(message.usage) ? message.usage : message.usage ? [message.usage] : []);

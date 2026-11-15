@@ -190,6 +190,10 @@ export interface PastView {
   purged?: boolean;
   /** Lookout keeps a copy of its transcript, on the user's say-so: a purged one can be put back. */
   kept?: boolean;
+  /** Starred or noted, and its conversation is not on this machine: the stars and notes came through Settings Sync or a restore. */
+  elsewhere?: boolean;
+  /** The machine it is on, when the machine that has it said so. */
+  host?: string;
 }
 
 export interface SessionSpend {

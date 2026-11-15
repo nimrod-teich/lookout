@@ -33,7 +33,10 @@ import { latestNote, SessionRecords, type NoteEntry, type SessionSeen } from "..
 import { ConversationStore, type StoredSession } from "../core/store";
 import { hasFilters, parseQuery } from "../core/terms";
 import { openTabs } from "../core/transfer/tabs";
-import type { WindowTabs } from "../core/transfer/types";
+import { SYNC_NOTES_KEY, SYNC_STATE_KEY, type WindowTabs } from "../core/transfer/types";
+import { readSyncedNotes } from "../core/syncedNotes";
+import { readSyncedState, type AboutSession } from "../core/syncedState";
+import { SYNC_BASE_KEY } from "./settingsSync";
 import { TranscriptVault, type Restore } from "../core/vault";
 import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
 import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../core/usageAlerts";
@@ -271,6 +274,9 @@ export class Controller implements vscode.Disposable {
   private readonly build: string;
   /** The sessions whose transcript is gone, their conversations kept, last written first. */
   private purgedPast: PastView[] = [];
+  /** The starred and noted sessions whose conversations are not on this machine. */
+  private elsewherePast: PastView[] = [];
+  private elsewhereById = new Map<string, PastView>();
   private purgedKey = "[]";
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   /** Keep a conversation after its transcript goes; off: it goes with it. */
@@ -693,9 +699,66 @@ export class Controller implements vscode.Disposable {
     return out;
   }
 
-  /** A session that is not running, as listed now or, when the scope has changed since, as last listed; failing those, as its record remembers it. */
+  /** A session that is not running, as listed now or, when the scope has changed since, as last listed; failing those, as its record remembers it, or as another machine described it. */
   pastView(id: string): PastView | undefined {
-    return this.pastById.get(id) ?? this.pastSeen.get(id) ?? this.recordedView(id);
+    return this.pastById.get(id) ?? this.pastSeen.get(id) ?? this.recordedView(id) ?? this.elsewhereById.get(id);
+  }
+
+  /** The starred and noted sessions whose conversations are not on this machine, newest first. */
+  get elsewhere(): readonly PastView[] {
+    return this.elsewherePast;
+  }
+
+  /** How many of the starred and noted sessions are not on this machine, and their stars and notes. */
+  elsewhereCounts(): { sessions: number; stars: number; notes: number } {
+    const stars = new Set(this.favouriteIds());
+    return {
+      sessions: this.elsewherePast.length,
+      stars: this.elsewherePast.filter((view) => stars.has(view.id)).length,
+      notes: this.elsewherePast.reduce((sum, view) => sum + (view.noteCount ?? 0), 0),
+    };
+  }
+
+  /** A session on this machine, running or listed: its title and agent, for Settings Sync to tell the other machines. None for one that is not here. */
+  sessionHere(id: string): { title: string; agent: string } | undefined {
+    const view = this.liveById.get(id) ?? this.pastById.get(id);
+    return view ? { title: view.title, agent: view.agent } : undefined;
+  }
+
+  /**
+   * A starred or noted session whose conversation is not on this machine,
+   * as its record, the stars' word from the machine that has it, and the
+   * synced notes describe it.
+   */
+  private elsewhereView(id: string, about: ReadonlyMap<string, AboutSession>, noteHosts: ReadonlyMap<string, string>): PastView {
+    const record = this.records?.get(id);
+    const said = about.get(id);
+    const host = said?.host ?? noteHosts.get(id);
+    const cwd = record?.cwd ?? "";
+    const latest = record ? latestNote(record) : undefined;
+    const where = cwd ? projectOf(cwd) : { project: host ? `on ${host}` : "another machine" };
+    return {
+      id,
+      agent: record?.agent ?? said?.agent ?? CLAUDE_CODE,
+      title: record?.title ?? said?.title ?? `Session ${id.slice(0, 8)}`,
+      ...where,
+      ...(record?.branch ? { branch: record.branch } : {}),
+      cwd,
+      resumable: false,
+      modifiedAt: record?.modifiedAt ?? latest?.at ?? said?.at ?? 0,
+      elsewhere: true,
+      ...(host ? { host } : {}),
+    };
+  }
+
+  /** What the stars carry of their sessions, and the machines the synced notes name, as this machine holds them now. */
+  private syncedWord(): { about: Map<string, AboutSession>; noteHosts: Map<string, string> } {
+    const about = new Map<string, AboutSession>();
+    // The synced copy may leave the oldest out to stay small; the base has what this machine merged last.
+    for (const key of [SYNC_STATE_KEY, SYNC_BASE_KEY]) for (const [id, said] of Object.entries(readSyncedState(this.host.globalState.get<unknown>(key))?.about ?? {})) about.set(id, said);
+    const noteHosts = new Map<string, string>();
+    for (const [id, value] of readSyncedNotes(this.host.globalState.get<unknown>(SYNC_NOTES_KEY)) ?? []) if (value.host) noteHosts.set(id, value.host);
+    return { about, noteHosts };
   }
 
   /** The sessions whose transcript the agent deleted, their conversations kept by Lookout. */
@@ -1350,6 +1413,16 @@ export class Controller implements vscode.Disposable {
     const favouritePast = [...also.filter((view) => stars.has(view.id) && !archived.has(view.id)), ...this.purgedPast.filter((view) => stars.has(view.id) && !archived.has(view.id))];
     // Noted sessions no other list holds: not on the board, but searched and known by name.
     const notedPast = also.filter((view) => !stars.has(view.id) && !archived.has(view.id) && notRestored(view));
+    // Starred and noted sessions no agent here lists, nor the store: their conversations are on another machine.
+    // While the agents' lists are still being read, one may yet turn up here: the list stays as it was, less what turned up.
+    const found = new Set([...update.views, ...past, ...also, ...this.purgedPast, ...restored].map((view) => view.id));
+    const wanted = new Set([...stars, ...this.notedIds()].filter((id) => !archived.has(id) && !found.has(id)));
+    let elsewhere: PastView[];
+    if (incomplete) elsewhere = this.elsewherePast.filter((view) => wanted.has(view.id));
+    else {
+      const word = this.syncedWord();
+      elsewhere = [...wanted].map((id) => this.elsewhereView(id, word.about, word.noteHosts));
+    }
     this.earlierCapped = capped || shownPast.length > limit;
     this.earlierNotes = notes;
     // An idle tab or terminal with nothing sent is not worth a card.
@@ -1359,7 +1432,7 @@ export class Controller implements vscode.Disposable {
     this.noticeVanished(update.views, past);
     this.keepStarred(stars, live);
     const mark = (views: PastView[]) => this.markKept(this.annotate(views));
-    this.publish(live, mark(shownPast.slice(0, limit)), mark(favouritePast), mark(archivePast), mark(notedPast), mark(this.purgedPast));
+    this.publish(live, mark(shownPast.slice(0, limit)), mark(favouritePast), mark(archivePast), mark(notedPast), mark(this.purgedPast), sortElsewhere(this.annotate(elsewhere)));
     for (const view of [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast, ...this.purgedPast]) this.pastSeen.set(view.id, view);
     this.observeRecords(live, [...this.pastViews, ...this.favouritePast, ...this.archivePast, ...this.notedPast, ...this.purgedPast]);
     if (incomplete) this.scheduleFill();
@@ -1710,8 +1783,8 @@ export class Controller implements vscode.Disposable {
     }, DEBOUNCE_MS);
   }
 
-  private publish(views: SessionView[], past: PastView[], favouritePast: PastView[], archivePast: PastView[], notedPast: PastView[], purgedPast: PastView[]): void {
-    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.earlierNotes, this.favouriteIds(), favouritePast, archivePast, notedPast, purgedPast]);
+  private publish(views: SessionView[], past: PastView[], favouritePast: PastView[], archivePast: PastView[], notedPast: PastView[], purgedPast: PastView[], elsewhere: PastView[] = this.elsewherePast): void {
+    const snapshot = JSON.stringify([views, past, this.earlierScope, this.earlierCapped, this.earlierNotes, this.favouriteIds(), favouritePast, archivePast, notedPast, purgedPast, elsewhere]);
     if (snapshot === this.snapshot) return;
     this.snapshot = snapshot;
     this.current = views;
@@ -1720,6 +1793,8 @@ export class Controller implements vscode.Disposable {
     this.archivePast = archivePast;
     this.notedPast = notedPast;
     this.purgedPast = purgedPast;
+    this.elsewherePast = elsewhere;
+    this.elsewhereById = new Map(elsewhere.map((view) => [view.id, view]));
     // Looked up by id per search result: a map, not a scan of thousands of sessions per result.
     this.liveById = new Map(views.map((view) => [view.id, view]));
     const byId = new Map<string, PastView>();
@@ -1821,4 +1896,9 @@ function refreshFailure(result: RefreshResult): string {
     default:
       return `Usage refresh: the Claude Code binary gave no usage numbers${why}`;
   }
+}
+
+/** The sessions on other machines, the latest written or noted first; for one time, by id, so every poll lists them alike. */
+function sortElsewhere(views: PastView[]): PastView[] {
+  return views.sort((a, b) => Math.max(b.modifiedAt, b.noteAt ?? 0) - Math.max(a.modifiedAt, a.noteAt ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
