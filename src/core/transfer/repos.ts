@@ -229,6 +229,13 @@ export function findLocalRepos(starts: readonly string[], home: string, wanted: 
   return [...found.values()];
 }
 
+/** `p` is `home` or below it, as this machine's paths go. */
+function isUnder(home: string, p: string): boolean {
+  if (!home) return false;
+  const rel = path.relative(path.resolve(home), path.resolve(p));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+}
+
 /** A path's parts, compared without case where the machine ignores it. */
 function sameName(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
@@ -268,7 +275,7 @@ export function repoMappings(
     };
     narrow((repo) => !repo.linked);
     narrow((repo) => sameName(path.basename(repo.root), baseOf(source.root)));
-    narrow((repo) => repo.root === home || repo.root.startsWith(home.endsWith(path.sep) ? home : `${home}${path.sep}`));
+    narrow((repo) => isUnder(home, repo.root));
     if (choices.length === 1) mapping.push({ from: source.root, to: choices[0]!.root, by: "repo" });
     else ambiguous.push({ from: source.root, choices: choices.map((repo) => repo.root).sort() });
   }
