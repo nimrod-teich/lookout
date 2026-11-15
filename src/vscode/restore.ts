@@ -15,11 +15,12 @@ import type { ClaudeDir } from "../core/agents/claude/paths";
 import { formatBytes } from "../core/format";
 import { plainText } from "../core/plainText";
 import { bundleReader, type BundleReader } from "../core/transfer/bundleReader";
+import type { AmbiguousRepo } from "../core/transfer/repos";
 import {
   applyRestore,
-  defaultMapping,
   planRestore,
   readBackupHistory,
+  suggestMapping,
   sweepRestoreTemp,
   type FileCounts,
   type HistoryCopy,
@@ -32,6 +33,7 @@ import {
 } from "../core/transfer/restore";
 import type { BundleHeader, BundleSource, LightStateKey, PathMapping, SourceMachine } from "../core/transfer/types";
 import type { RetentionOutcome } from "./controller";
+import { REOPEN_TABS } from "./pendingTabs";
 
 export const RESTORE_COMMAND = "lookout.restore";
 
@@ -39,6 +41,7 @@ const RESTORE = "Restore";
 const KEEP = "Restore and Keep Them";
 const ANYWAY = "Restore Anyway";
 const CHANGE_MAPPING = "Change Folder Mapping…";
+const REOPEN_TABS_LABEL = "Reopen Tabs…";
 /** Wrong passphrases before the restore gives up. */
 const TRIES = 5;
 /** Folders missing on this machine the summary names; the rest are counted. */
@@ -65,6 +68,8 @@ export interface RestoreDeps {
   applyRetention?(): RetentionOutcome | undefined;
   /** Told once a restore has written something, for this window to look again. */
   restored?(): void;
+  /** The folders this machine is known to work in: the backup's repositories are looked for from them. */
+  knownFolders?(): readonly string[];
   /** Reads backup files; the built-in reader when not given. */
   reader?: BundleReader;
   home?: string;
@@ -144,14 +149,21 @@ export async function restoreFromBackup(context: RestoreContext, deps: RestoreDe
     }
     const manifest = source.manifest;
     const planOf = (mapping: PathMapping[]) => vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Comparing the backup with this machine…" }, () => planRestore(manifest, targets, mapping, history));
-    let mapping = defaultMapping(manifest.source, home);
+    const starts = [...(deps.knownFolders?.() ?? []), ...(targets.folders ?? []), ...worktreesFolders()];
+    const suggested = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Looking for the backup's repositories here…" }, async () => suggestMapping(manifest, home, starts));
+    let mapping = suggested.mapping;
+    let ambiguous = suggested.ambiguous;
     for (;;) {
       const plan = await planOf(mapping);
       const keepDays = plan.retention ? retentionToKeep(plan.retention) : undefined;
       const buttons = plan.retention ? [KEEP, RESTORE, CHANGE_MAPPING] : [RESTORE, CHANGE_MAPPING];
-      const choice = await vscode.window.showInformationMessage(`Restore the backup of ${hostOf(plan.source)}?`, { modal: true, detail: describePlan(plan, keepDays) }, ...buttons);
+      const choice = await vscode.window.showInformationMessage(`Restore the backup of ${hostOf(plan.source)}?`, { modal: true, detail: describePlan(plan, keepDays, ambiguous) }, ...buttons);
       if (choice === CHANGE_MAPPING) {
-        mapping = (await askMapping(plan, planOf, home)) ?? mapping;
+        const changed = await askMapping(plan, planOf, home, ambiguous);
+        if (changed) {
+          mapping = changed;
+          ambiguous = ambiguous.filter((repo) => !changed.some((entry) => entry.from === repo.from));
+        }
         continue;
       }
       if (choice === KEEP) {
@@ -182,7 +194,12 @@ export async function restoreFromBackup(context: RestoreContext, deps: RestoreDe
       deps.restored?.();
       const done = describeResult(result);
       const show = result.failed.length ? vscode.window.showWarningMessage : vscode.window.showInformationMessage;
-      void show(done);
+      // The tabs reopen in the windows of their folders: the list says which, and opens them.
+      if (result.tabs.added) {
+        void Promise.resolve(show(done, REOPEN_TABS_LABEL)).then((pick) => {
+          if (pick === REOPEN_TABS_LABEL) void Promise.resolve(vscode.commands.executeCommand(REOPEN_TABS)).catch(() => undefined);
+        });
+      } else void show(done);
       return;
     }
   } catch (error) {
@@ -195,6 +212,12 @@ export async function restoreFromBackup(context: RestoreContext, deps: RestoreDe
       // Closed already.
     }
   }
+}
+
+/** `lookout.worktrees.folders`: folders that hold the user's repositories. */
+function worktreesFolders(): string[] {
+  const value = vscode.workspace.getConfiguration("lookout").get<unknown>("worktrees.folders", []);
+  return Array.isArray(value) ? value.filter((folder): folder is string => typeof folder === "string" && path.isAbsolute(folder)) : [];
 }
 
 /** `lookout.retention.days` as the setting holds it: whole days up to a hundred years, else 0. */
@@ -304,7 +327,7 @@ function shown(p: unknown): string {
  * one at a time, the folders still missing. The mapping as the user left
  * it, or none when they backed out at the first question.
  */
-async function askMapping(plan: RestorePlan, replan: (mapping: PathMapping[]) => Thenable<RestorePlan>, home: string): Promise<PathMapping[] | undefined> {
+async function askMapping(plan: RestorePlan, replan: (mapping: PathMapping[]) => Thenable<RestorePlan>, home: string, ambiguous: readonly AmbiguousRepo[] = []): Promise<PathMapping[] | undefined> {
   const source = plan.source;
   const host = hostOf(source);
   const others = plan.mapping.filter((entry) => entry.from !== source.home);
@@ -321,14 +344,25 @@ async function askMapping(plan: RestorePlan, replan: (mapping: PathMapping[]) =>
   const asked = new Set<string>();
   for (;;) {
     const missing = (await replan(mapping)).missingFolders.filter((folder) => !asked.has(folder.from));
-    if (!missing.length) return mapping;
-    const items: (vscode.QuickPickItem & { from?: string; to?: string })[] = [
+    const clones = ambiguous.filter((repo) => !asked.has(repo.from) && !mapping.some((entry) => entry.from === repo.from));
+    if (!missing.length && !clones.length) return mapping;
+    const items: (vscode.QuickPickItem & { from?: string; to?: string; choices?: string[] })[] = [
       { label: "Done", description: "Restore the rest where the mapping puts them" },
+      ...clones.map((repo) => ({ label: shown(path.basename(repo.from) || repo.from), description: `${plural(repo.choices.length, "clone")} here`, detail: `On ${host}: ${shown(repo.from)}`, from: repo.from, choices: repo.choices })),
       ...missing.map((folder) => ({ label: shown(path.basename(folder.to) || folder.to), description: shown(folder.to), detail: `${plural(folder.sessions, "session")}; on ${host}: ${shown(folder.from)}`, from: folder.from, to: folder.to })),
     ];
     const pick = (await vscode.window.showQuickPick(items, { title: "Folders Not on This Machine", placeHolder: "Pick a folder to say where it is here", ignoreFocusOut: true })) as (typeof items)[number] | undefined;
     if (!pick?.from) return mapping;
     asked.add(pick.from);
+    if (pick.choices) {
+      const other = "Another folder…";
+      const clone = await vscode.window.showQuickPick([...pick.choices.map((choice) => ({ label: shown(choice), choice })), { label: other }], { title: `Which clone is ${shown(pick.from)}?`, ignoreFocusOut: true });
+      if (clone && "choice" in clone) {
+        mapping = [...mapping.filter((entry) => entry.from !== pick.from), { from: pick.from, to: clone.choice, by: "repo" }];
+        continue;
+      }
+      if (!clone) continue;
+    }
     const chosen = await vscode.window.showOpenDialog({ title: `Where is ${shown(pick.from)} on this machine?`, openLabel: "Use This Folder", canSelectFiles: false, canSelectFolders: true, canSelectMany: false, defaultUri: vscode.Uri.file(nearest(pick.to ?? home, home)) });
     const to = chosen?.[0]?.fsPath;
     if (to) mapping = [...mapping.filter((entry) => entry.from !== pick.from), { from: pick.from, to }];
@@ -403,12 +437,24 @@ function retentionDays(risk: RetentionRisk): string {
  * Never a note's text, nor the passphrase. `keep` is the retention Restore
  * and Keep Them sets, when Claude Code would delete restored transcripts.
  */
-export function describePlan(plan: RestorePlan, keep?: number): string {
+export function describePlan(plan: RestorePlan, keep?: number, ambiguous: readonly AmbiguousRepo[] = []): string {
   const lines: string[] = [];
   lines.push(`Made on ${hostOf(plan.source)} (${platformOf(plan.source)}) on ${when(plan.createdAt)}.`);
   if (plan.restoredBefore !== undefined) lines.push(`This backup was restored on this machine before, on ${when(plan.restoredBefore)}.`);
   lines.push("");
-  lines.push(plan.mapping.length ? `Folders: ${plan.mapping.map((entry) => `${shown(entry.from)} → ${shown(entry.to)}`).join("; ")}` : "Folders: as they were on the other machine");
+  const given = plan.mapping.filter((entry) => entry.by !== "repo");
+  const found = plan.mapping.filter((entry) => entry.by === "repo");
+  lines.push(given.length ? `Folders: ${given.map((entry) => `${shown(entry.from)} → ${shown(entry.to)}`).join("; ")}` : "Folders: as they were on the other machine");
+  if (found.length) {
+    lines.push(`Repositories found here by their git remote (${found.length.toLocaleString("en-US")}):`);
+    for (const entry of found.slice(0, MISSING_SHOWN)) lines.push(`  ${shown(entry.from)} → ${shown(entry.to)}`);
+    if (found.length > MISSING_SHOWN) lines.push(`  and ${(found.length - MISSING_SHOWN).toLocaleString("en-US")} more`);
+  }
+  if (ambiguous.length) {
+    lines.push(`Repositories with several clones here (${ambiguous.length.toLocaleString("en-US")}), left where the folders above put them until Change Folder Mapping… says which:`);
+    for (const repo of ambiguous.slice(0, MISSING_SHOWN)) lines.push(`  ${shown(repo.from)}: ${repo.choices.slice(0, 3).map(shown).join(", ")}${repo.choices.length > 3 ? ` and ${repo.choices.length - 3} more` : ""}`);
+    if (ambiguous.length > MISSING_SHOWN) lines.push(`  and ${(ambiguous.length - MISSING_SHOWN).toLocaleString("en-US")} more`);
+  }
   lines.push("");
   const notes: string[] = [];
   if (plan.notes.added) notes.push(`notes on ${plural(plan.notes.added, "session")} to add`);

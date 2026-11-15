@@ -669,6 +669,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // Kept transcripts of other agents go back under their own folders.
       agentRoots: () => ({ [CODEX]: codexSessionsDir(config.codexHome), [COPILOT]: sessionStateDir(config.copilotHome) }),
       restored: () => controller.poll(),
+      knownFolders: () => controller.knownFolders(),
       // The setting a restore just raised is read again first: the controller writes what its configuration says.
       applyRetention: () => {
         reload();

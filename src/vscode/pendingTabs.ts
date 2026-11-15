@@ -108,6 +108,8 @@ class PendingTabs {
   private offering = false;
   /** Tabs are being opened. */
   private opening = false;
+  /** How many tabs wait, in every window's status bar, until they are reopened or forgotten. */
+  private readonly count = vscode.window.createStatusBarItem("lookout.pendingTabs", vscode.StatusBarAlignment.Left, -100);
 
   constructor(
     private readonly state: vscode.Memento,
@@ -115,6 +117,24 @@ class PendingTabs {
     private readonly deps: PendingTabsDeps,
   ) {
     this.claims = new TabClaims(claimsDir);
+    this.count.name = "Lookout: Tabs to Reopen";
+    this.count.command = REOPEN_TABS;
+  }
+
+  /** Shows how many tabs from a backup wait, or nothing when none do. Another window's restore or reopen shows here when this window next looks. */
+  showCount(): void {
+    const pending = this.pending();
+    if (pending.length === 0) {
+      this.count.hide();
+      return;
+    }
+    this.count.text = `$(history) ${pending.length}`;
+    this.count.tooltip = `${tabsFrom(pending)} ${plural(pending.length, "waits", "wait")} to be reopened, each in the window of its folder. Click to see ${plural(pending.length, "it", "them")}.`;
+    this.count.show();
+  }
+
+  dispose(): void {
+    this.count.dispose();
   }
 
   private pending(): PendingTab[] {
@@ -132,6 +152,7 @@ class PendingTabs {
 
   /** Offers to reopen the pending tabs of this window's first folder, the ones not offered before whose transcripts are here. */
   async offer(): Promise<void> {
+    this.showCount();
     if (this.offering || this.opening) return;
     const tabs = pendingFor(this.pending(), this.firstFolder()).filter((tab) => !this.putOff.has(tab.sessionId.toLowerCase()) && this.ready(tab));
     // Without Claude Code the tabs wait: the list says why.
@@ -159,7 +180,7 @@ class PendingTabs {
     const ordered = [...pending].sort((a, b) => Number(here.has(b.sessionId)) - Number(here.has(a.sessionId)) || a.cwd.localeCompare(b.cwd));
     const items = ordered.map((tab) => {
       const ready = this.ready(tab);
-      const where = here.has(tab.sessionId) ? "This window" : "Opens its folder in a new window";
+      const where = here.has(tab.sessionId) ? "This window" : isDirectory(tab.cwd) ? "Opens its folder in a new window" : "Its folder is not on this machine: you choose where it works";
       return {
         label: titleOf(tab),
         description: folderOf(tab.cwd),
@@ -233,6 +254,7 @@ class PendingTabs {
     }
     const reopened = claimed.length - failed.length;
     if (reopened > 0) this.deps.log.info(`Reopened ${reopened} Claude ${plural(reopened, "tab", "tabs")} from a backup`);
+    this.showCount();
     if (failed.length === 0) return;
     for (const tab of failed) {
       this.claims.release(tab);
@@ -240,11 +262,32 @@ class PendingTabs {
     }
     const rest = this.pending();
     await this.state.update(PENDING_TABS_KEY, [...rest, ...withoutTabs(failed, rest)]);
+    this.showCount();
     void vscode.window.showWarningMessage(`Lookout could not reopen ${titles(failed)}. ${plural(failed.length, "It waits", "They wait")} under Reopen Tabs from Backup.`);
   }
 
   private async forget(tabs: readonly PendingTab[]): Promise<void> {
     await this.state.update(PENDING_TABS_KEY, withoutTabs(this.pending(), tabs));
+    this.showCount();
+  }
+
+  /**
+   * Says the tabs of a folder that is not here worked in `folder` instead:
+   * every waiting tab of the old folder moves with them. Claude Code finds a
+   * conversation wherever its transcript is, and runs it in the folder of
+   * the window that opens it.
+   */
+  private async repoint(from: string, folder: string): Promise<PendingTab[]> {
+    const key = folderKey(from);
+    const moved: PendingTab[] = [];
+    const pending = this.pending().map((tab) => {
+      if (folderKey(tab.cwd) !== key) return tab;
+      const next = { ...tab, cwd: folder };
+      moved.push(next);
+      return next;
+    });
+    await this.state.update(PENDING_TABS_KEY, pending);
+    return moved;
   }
 
   /**
@@ -282,13 +325,25 @@ class PendingTabs {
         }
       }
     }
-    if (missing.length > 0) {
-      const lost = missing.flatMap((entry) => entry.tabs);
+    for (const entry of missing) {
+      const choose = "Choose Folder…";
       const choice = await vscode.window.showWarningMessage(
-        `Lookout: ${titles(lost)} worked in ${listed(missing.map((entry) => folderOf(entry.folder)))}, which ${plural(missing.length, "is", "are")} not on this machine. Forget ${plural(lost.length, "it", "them")}?`,
+        `Lookout: ${titles(entry.tabs)} worked in ${folderOf(entry.folder)}, which is not on this machine. Choose the folder ${plural(entry.tabs.length, "it works", "they work")} in here, or forget ${plural(entry.tabs.length, "it", "them")}.`,
+        choose,
         "Forget",
       );
-      if (choice === "Forget") await this.forget(lost);
+      if (choice === "Forget") {
+        await this.forget(entry.tabs);
+        continue;
+      }
+      if (choice !== choose) continue;
+      const picked = await vscode.window.showOpenDialog({ title: `Where does ${titleOf(entry.tabs[0]!)} work here?`, openLabel: "Use This Folder", canSelectFiles: false, canSelectFolders: true, canSelectMany: false });
+      const folder = picked?.[0]?.fsPath;
+      if (!folder) continue;
+      const moved = await this.repoint(entry.folder, folder);
+      // This window's own folder: offered here; another: its window offers them.
+      if (folderKey(folder) === folderKey(this.firstFolder() ?? "")) await this.offer();
+      else await this.elsewhere(moved);
     }
   }
 }
@@ -301,6 +356,7 @@ class PendingTabs {
 export function registerPendingTabs(context: vscode.ExtensionContext, deps: PendingTabsDeps): vscode.Disposable {
   const tabs = new PendingTabs(context.globalState, path.join(context.globalStorageUri.fsPath, "tab-claims"), deps);
   const disposables = [
+    tabs,
     vscode.commands.registerCommand(REOPEN_TABS, () => tabs.choose()),
     vscode.workspace.onDidChangeWorkspaceFolders(() => void tabs.offer()),
     vscode.window.onDidChangeWindowState(() => {

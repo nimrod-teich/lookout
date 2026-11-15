@@ -41,6 +41,7 @@ const MANIFEST: ManifestBody = {
   notes: [{ v: 1, id: sessionId(1), agent: "claude-code", title: "Billing", notes: [{ id: "n1", text: `a note ${NEEDLE}`, at: 1 }] }],
   tabs: [{ label: "app", folders: ["/home/someone/app"], tabs: [{ sessionId: sessionId(1), title: "Billing" }] }],
   claudeDirs: [{ label: "default", resolved: "/home/someone/.claude", isDefault: true }],
+  repos: [{ root: "/home/someone/app", linked: false, remotes: ["someone/app"] }],
 };
 
 interface Item {

@@ -121,9 +121,24 @@ describe.skipIf(!sqlite)("backUp", () => {
         { label: "default", resolved: m.dirs[0]!.resolved, isDefault: true },
         { label: "work", resolved: m.dirs[1]!.resolved, isDefault: false },
       ],
+      repos: [],
     });
     expect(sink.aborted).toBe(0);
     expect(leftIn(tempDir)).toEqual([]);
+  });
+
+  it("records the repositories the sessions worked in, by their remotes' paths and never their URLs", async () => {
+    const { m, inventory, tempDir } = await setUp();
+    fs.writeFileSync(path.join(m.repo, ".git", "config"), '[remote "origin"]\n\turl = https://bot:ghs_secret@github.com/Owner/App.git\n');
+    const sink = new FakeSink();
+    await backUp("/out/backup.lookout", inventory, EVERYTHING, OPTIONS, undefined, undefined, deps(sink, tempDir));
+    const repos = sink.manifest!.repos!;
+    // A linked worktree, with its main checkout's remotes: a restore maps the main checkout, which carries it.
+    expect(repos).toEqual([
+      { root: m.repo, linked: false, remotes: ["owner/app"] },
+      { root: m.worktree, linked: true, remotes: ["owner/app"] },
+    ]);
+    expect(JSON.stringify(sink.manifest)).not.toContain("ghs_secret");
   });
 
   it("puts in the history database as it stands while another window writes to it, and removes the copy", async () => {

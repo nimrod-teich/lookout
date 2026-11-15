@@ -555,6 +555,14 @@ export class Controller implements vscode.Disposable {
     return { inUse: inUse.filter((use) => use.dir), cwds };
   }
 
+  /** The folders this machine is known to work in: this window's and the other windows', and where its sessions ran. A restore looks for the backup's repositories from them. */
+  knownFolders(): string[] {
+    const folders = new Set<string>(this.host.workspaceFolders());
+    for (const other of this.windows.read(this.host.pid).values()) for (const dir of other.folders ?? []) folders.add(dir);
+    for (const view of [...this.current, ...this.pastViews]) if (view.cwd) folders.add(view.cwd);
+    return [...folders];
+  }
+
   /** The sessions the user starred, newest star first, and those of them that are not running. */
   get favourites(): { ids: string[]; past: PastView[] } {
     return { ids: this.favouriteIds(), past: this.favouritePast };

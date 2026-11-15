@@ -1,6 +1,7 @@
 // What a backup file holds and how its parts are named: the contract shared
 // by the file's writer and reader, the backup, the restore, the open-tabs
 // capture and Settings Sync. Nothing here touches the disk.
+import type { RepoRecord } from "./repos";
 import type { Readable } from "node:stream";
 import type { SessionRecord } from "../sessionRecords";
 
@@ -120,6 +121,8 @@ export interface BundleManifest {
   notes: SessionRecord[];
   tabs: WindowTabs[];
   claudeDirs: { label: string; resolved: string; isDefault: boolean }[];
+  /** The git repositories the sessions, notes and tabs worked in, with their remotes, for a restore to find them here; none in a backup of 0.1.6. */
+  repos?: RepoRecord[];
   /** In payload order. */
   files: BundleFile[];
 }
@@ -189,4 +192,6 @@ export class BundleError extends Error {
 export interface PathMapping {
   from: string;
   to: string;
+  /** "repo": a repository found here by its remote, not a folder the user or the home folder gave. */
+  by?: "repo";
 }

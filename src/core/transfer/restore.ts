@@ -26,6 +26,7 @@ import { isSortKey, readSort } from "../sorting";
 import { ConversationStore } from "../store";
 import type { RemovedRecord } from "../worktrees";
 import { mergeHistory, readHistorySessions, type HistoryMerge, type HistoryPlace, type HistorySession } from "./restoreHistory";
+import { findLocalRepos, readRepoRecords, repoAt, repoMappings, type AmbiguousRepo, type RepoRecord } from "./repos";
 import { inside, isFolderName, isSegment, isSessionId, layOf, makeFolders, mapCovered, mapFolderName, mapPath, mapPathKey, projectFolder, segmentsOf, under } from "./restorePaths";
 import { PENDING_TABS_KEY, type BundleFile, type BundleManifest, type BundleSource, type LightStateKey, type PathMapping, type PendingTab, type SourceMachine } from "./types";
 
@@ -297,6 +298,47 @@ type Mapper = (p: unknown) => string | undefined;
 /** The mapping a restore starts from: the source machine's home is this one's. */
 export function defaultMapping(source: SourceMachine, home: string = os.homedir()): PathMapping[] {
   return typeof source?.home === "string" && source.home !== "" ? [{ from: source.home, to: home }] : [];
+}
+
+/** `p` is below `home` on the source machine, not `home` itself: compared its way, without case where it ignores case. */
+function strictlyInside(home: unknown, p: string, platform: NodeJS.Platform): boolean {
+  if (typeof home !== "string" || home === "") return false;
+  const split = (x: string) => x.split(platform === "win32" ? /[\\/]+/ : /\/+/).filter((part) => part !== "");
+  const fold = platform === "win32" || platform === "darwin";
+  const h = split(home);
+  const q = split(p);
+  if (q.length <= h.length || q.some((part) => part === "." || part === "..")) return false;
+  return h.every((part, i) => (fold ? part.toLowerCase() === q[i]!.toLowerCase() : part === q[i]));
+}
+
+/**
+ * The mapping a restore starts from: the old home folder to this one, and
+ * each repository the backup records to its clone here when it has moved
+ * or been renamed (`repoMappings`). Clones are looked for in `starts`, the
+ * folders this machine is known to work in, and under the home folder, and
+ * only when some repository is not where the home folder's mapping puts it.
+ * Repositories with several equally good clones are named in `ambiguous`.
+ * Only a repository inside the old home folder is mapped: the backup's
+ * repositories refine where the home folder's mapping puts a path, and never
+ * bring a path outside it into a folder of this machine.
+ */
+export function suggestMapping(manifest: BundleManifest, home: string, starts: readonly string[]): { mapping: PathMapping[]; ambiguous: AmbiguousRepo[] } {
+  const base = defaultMapping(manifest.source, home);
+  const platform = manifest.source?.platform ?? "linux";
+  const sources = readRepoRecords(manifest.repos).filter((repo) => !repo.linked && strictlyInside(manifest.source?.home, repo.root, platform));
+  if (sources.length === 0) return { mapping: base, ambiguous: [] };
+  const mapped = (p: string) => mapPath(p, base, platform);
+  const placed = (repo: RepoRecord) => {
+    const there = mapped(repo.root);
+    const at = there ? repoAt(there) : undefined;
+    return there !== undefined && at !== undefined && path.resolve(at.root) === path.resolve(there) && at.remotes.some((key) => repo.remotes.includes(key));
+  };
+  // Every repository at its place: nothing to look for.
+  const wanted = new Set(sources.filter((repo) => !placed(repo)).flatMap((repo) => repo.remotes));
+  if (wanted.size === 0) return { mapping: base, ambiguous: [] };
+  const local = findLocalRepos(starts, home, wanted);
+  const found = repoMappings(sources, local, mapped, home, platform);
+  return { mapping: [...base, ...found.mapping], ambiguous: found.ambiguous };
 }
 
 function tally(): Tally {
