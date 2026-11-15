@@ -13,17 +13,19 @@ describe("the package allowlist", () => {
       .filter((line) => line.startsWith("!"))
       .map((line) => line.slice(1).trim());
     const loaded = new Set<string>();
-    for (const file of ["vscode/board.ts", "vscode/findings.ts", "vscode/searchPage.ts", "vscode/worktreesPage.ts", "extension.ts"]) {
+    for (const file of ["vscode/board.ts", "vscode/findings.ts", "vscode/searchPage.ts", "vscode/worktreesPage.ts", "vscode/backupPage.ts", "extension.ts"]) {
       const source = fs.readFileSync(path.join(root, "src", file), "utf8");
       for (const match of source.matchAll(/"(dist|media)",\s*"([^"]+)"/g)) loaded.add(`${match[1]}/${match[2]}`);
     }
     expect([...loaded].sort()).toEqual([
+      "dist/backup.js",
       "dist/board.js",
       "dist/findings.js",
       "dist/reader.js",
       "dist/search.js",
       "dist/worktreeThread.js",
       "dist/worktrees.js",
+      "media/backup.css",
       "media/board.css",
       "media/findings.css",
       "media/search.css",

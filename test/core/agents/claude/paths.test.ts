@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { labelOf, resolveConfigDirs, sameDirs, signInEnv, type ClaudeDir, type ConfigDirSources } from "../../../../src/core/agents/claude/paths";
+import { encodeProjectDir, labelOf, namesProjectDir, resolveConfigDirs, sameDirs, signInEnv, type ClaudeDir, type ConfigDirSources } from "../../../../src/core/agents/claude/paths";
 import { tempConfigDir } from "../../helpers";
 
 const home = path.resolve("/home/u");
@@ -124,5 +124,36 @@ describe("signInEnv", () => {
     const [primary, personal] = resolveConfigDirs({ home, env: {}, extra: ["personal=~/.claude-personal/"] });
     expect(signInEnv(personal!)).toEqual({ CLAUDE_CONFIG_DIR: path.join(home, ".claude-personal") + path.sep, CLAUDE_CODE_OAUTH_TOKEN: null, ANTHROPIC_API_KEY: null });
     expect(signInEnv(primary!)).toEqual({ CLAUDE_CONFIG_DIR: null, CLAUDE_CODE_OAUTH_TOKEN: null, ANTHROPIC_API_KEY: null });
+  });
+});
+
+describe("encodeProjectDir", () => {
+  // Names Claude Code 2.1.310 gives these paths, from its own code.
+  const long = "/home/u/" + "very-long-directory-name/".repeat(12);
+  const windows = "C:\\Users\\\u00dcn\u00ef\\" + "x".repeat(250);
+  const wide = "/" + "\u00e4".repeat(300);
+
+  it("makes every character but a letter or a digit a dash", () => {
+    expect(encodeProjectDir("/home/u/proj")).toBe("-home-u-proj");
+    expect(encodeProjectDir("C:\\Users\\u\\my.app")).toBe("C--Users-u-my-app");
+  });
+
+  it("cuts a name over 200 characters to 200 and adds a hash of the whole path, as Claude Code does", () => {
+    expect(encodeProjectDir(long)).toBe(`${long.replace(/[^a-zA-Z0-9]/g, "-").slice(0, 200)}-umubuj`);
+    expect(encodeProjectDir(windows)).toBe(`${"C--Users--n--".padEnd(200, "x")}-iqgw7c`);
+    expect(encodeProjectDir(wide)).toBe(`${"-".repeat(200)}-ipya3z`);
+    expect(encodeProjectDir("/" + "a".repeat(199))).toBe("-" + "a".repeat(199));
+    expect(encodeProjectDir("/" + "a".repeat(200))).toMatch(new RegExp(`^-a{199}-[0-9a-z]+$`));
+  });
+
+  it("knows a folder named after a place, a cut one also with another build's hash, and nothing else", () => {
+    expect(namesProjectDir("-home-u-proj", "/home/u/proj")).toBe(true);
+    expect(namesProjectDir("-home-u-proj-x", "/home/u/proj")).toBe(false);
+    const cut = encodeProjectDir(long);
+    expect(namesProjectDir(cut, long)).toBe(true);
+    expect(namesProjectDir(`${cut.slice(0, 200)}-1234567890`, long)).toBe(true);
+    expect(namesProjectDir(cut.slice(0, 200), long)).toBe(false);
+    expect(namesProjectDir(`${cut.slice(0, 200)}-x-y`, long)).toBe(false);
+    expect(namesProjectDir(`${cut.slice(0, 199)}z-umubuj`, long)).toBe(false);
   });
 });

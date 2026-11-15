@@ -105,6 +105,22 @@
         "icon": "$(git-branch)"
       },
       {
+        "command": "lookout.backUp",
+        "title": "Back Up…",
+        "category": "Lookout",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "lookout.restore",
+        "title": "Restore from Backup…",
+        "category": "Lookout"
+      },
+      {
+        "command": "lookout.reopenTabs",
+        "title": "Reopen Tabs from Backup…",
+        "category": "Lookout"
+      },
+      {
         "command": "lookout.sortSessions",
         "title": "Sort Sessions",
         "category": "Lookout"
@@ -216,6 +232,16 @@
           "command": "lookout.cleanUpWorktrees",
           "when": "view == lookout.board",
           "group": "worktrees@1"
+        },
+        {
+          "command": "lookout.backUp",
+          "when": "view == lookout.board",
+          "group": "backup@1"
+        },
+        {
+          "command": "lookout.restore",
+          "when": "view == lookout.board",
+          "group": "backup@2"
         }
       ],
       "commandPalette": [
@@ -592,6 +618,11 @@
             "minimum": 0,
             "maximum": 36500,
             "markdownDescription": "Keep Claude Code's transcripts this many days: Lookout writes `cleanupPeriodDays` into Claude Code's user settings file (`~/.claude/settings.json`) when it says otherwise, every other key kept and a copy of the file as it was beside it; Claude Code applies it at its next start. `0` leaves Claude Code's own setting (30 days by default); `3650` is ten years. Managed settings, and a folder's own `.claude/settings.json`, win over it."
+          },
+          "lookout.settingsSync.enabled": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Send your stars, archive, parked sessions, the board's order and grouping, account names, and your notes with the titles of the sessions they are on, through VS Code's Settings Sync to your other machines, merged both ways. Needs Settings Sync on with its **Extensions** category, and Lookout installed in VS Code itself: under WSL, SSH or a container nothing syncs. Off, Lookout sends nothing off the machine; a backup carries all of it instead."
           },
           "lookout.worktrees.folders": {
             "type": "array",

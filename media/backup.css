@@ -1,0 +1,793 @@
+/* The backup page wears the harbour's night, like the worktrees page, the conversation tab, the search page and the notes. */
+:root {
+  --paper: #0a1521;
+  --paper-2: #0d1b2b;
+  --well: #060d16;
+  --ink: #e6f0f7;
+  --muted: #8ea5b8;
+  --line: rgba(160, 200, 230, 0.18);
+  --line-strong: rgba(160, 200, 230, 0.32);
+  --lamp: #ffb000;
+  --beam: #5fb4ff;
+  --danger: #ff7a7a;
+  /* What went well. */
+  --safe: #6fd39a;
+}
+
+html {
+  background: var(--paper);
+}
+
+body {
+  min-height: 100vh;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 0 72px;
+  color: var(--ink);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  background: var(--paper);
+}
+
+#root {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The keyboard's place, on the dark paper. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 1px solid var(--beam);
+  outline-offset: 2px;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  margin: 0;
+  accent-color: var(--beam);
+  cursor: pointer;
+}
+
+input:disabled {
+  cursor: default;
+}
+
+/* The top: what there is, and the way to look again --------------------------- */
+
+.top {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "eyebrow tools"
+    "title tools"
+    "where tools";
+  align-items: center;
+  column-gap: 16px;
+  margin: 0 -24px 16px;
+  padding: 18px 24px 14px;
+  background:
+    radial-gradient(1px 1px at 12% 28%, rgba(255, 255, 255, 0.55) 50%, transparent 51%),
+    radial-gradient(1px 1px at 31% 62%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    radial-gradient(1px 1px at 47% 20%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 63% 70%, rgba(255, 255, 255, 0.3) 50%, transparent 51%),
+    radial-gradient(1px 1px at 78% 34%, rgba(255, 255, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(1px 1px at 91% 58%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    linear-gradient(180deg, #0f2238 0%, #0b1726 70%, var(--paper) 100%);
+  border-bottom: 1px solid var(--line-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.eyebrow {
+  grid-area: eyebrow;
+  color: var(--beam);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  grid-area: title;
+  margin: 2px 0;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.where {
+  grid-area: where;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tools {
+  grid-area: tools;
+  display: flex;
+  gap: 8px;
+}
+
+/* The tools are quiet: the one coloured action on the page is Back Up. */
+.tool {
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tool:hover:not(:disabled) {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+/* Progress ------------------------------------------------------------------ */
+
+.progress {
+  margin: 0 0 16px;
+}
+
+.progress-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.progress-text {
+  flex: 1;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stop {
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+.bar {
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.bar-fill {
+  width: 0;
+  height: 100%;
+  background: var(--beam);
+  transition: width 0.2s ease;
+}
+
+/* The look has no measure of how far it got: a beam sweeps the bar instead. */
+.bar.indeterminate .bar-fill {
+  position: absolute;
+  width: 30%;
+  transition: none;
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  from {
+    left: -30%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+/* What the last backup did --------------------------------------------------- */
+
+.banner {
+  position: relative;
+  margin: 0 0 18px;
+  padding: 12px 40px 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--safe);
+  border-radius: 6px;
+  background: var(--paper-2);
+}
+
+.banner.failed {
+  border-left-color: var(--danger);
+}
+
+.banner .done {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.banner .when {
+  margin-left: 10px;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.banner .aside {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.banner .left {
+  margin-top: 6px;
+  color: var(--lamp);
+  font-size: 12px;
+}
+
+.banner-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.banner .notice {
+  margin-top: 6px;
+}
+
+.banner .notice:first-child,
+.banner .error:first-child {
+  margin-top: 0;
+}
+
+.banner .error {
+  margin-top: 6px;
+  color: var(--danger);
+}
+
+.dismiss {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dismiss:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* The form -------------------------------------------------------------------- */
+
+fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.block {
+  margin: 0 0 26px;
+}
+
+.block-title {
+  display: block;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: calc(var(--vscode-font-size) + 3px);
+  font-weight: 650;
+}
+
+.about,
+.note {
+  margin: 8px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.note {
+  margin-bottom: 0;
+}
+
+/* A section: its tick, its name over what it holds, its count, its size. */
+.item,
+.repo {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto 84px;
+  align-items: start;
+  column-gap: 10px;
+  padding: 7px 4px;
+  border-radius: 4px;
+}
+
+.item:hover,
+.repo:hover {
+  background: var(--paper-2);
+}
+
+.item .tick,
+.repo .tick {
+  margin-top: 2px;
+}
+
+.item-main {
+  min-width: 0;
+}
+
+.item-name {
+  display: block;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.item-about {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.item-count,
+.repo-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  line-height: calc(var(--vscode-font-size) + 6px);
+}
+
+/* A count with its detail ("14 starred · 342 archived · …") wraps before the name and what it holds give way. */
+.item-count {
+  max-width: 260px;
+  white-space: normal;
+}
+
+.item-size,
+.repo-size {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.item.off .item-name,
+.item.off .item-size,
+.repo.off .repo-name,
+.repo.off .repo-size {
+  color: var(--muted);
+}
+
+.item.empty {
+  opacity: 0.6;
+}
+
+.item.empty .item-name {
+  cursor: default;
+}
+
+/* Inside the transcripts: the age filter, the two inclusions, the repositories. */
+.nest {
+  margin: 0 0 6px 13px;
+  padding: 4px 0 6px 21px;
+  border-left: 1px solid var(--line);
+}
+
+.nest.off {
+  opacity: 0.5;
+}
+
+.item.part .item-name {
+  font-weight: 500;
+}
+
+.nest-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* The age filter: a row of segments, each a radio button the keyboard moves along. */
+.segments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 4px 8px;
+}
+
+.segments legend {
+  float: left;
+  margin-right: 6px;
+  padding: 0;
+}
+
+.segment {
+  position: relative;
+  cursor: pointer;
+}
+
+.segment input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.segment span {
+  display: inline-block;
+  padding: 3px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.segment:hover span {
+  color: var(--ink);
+}
+
+.segment input:checked + span {
+  border-color: rgba(95, 180, 255, 0.6);
+  background: rgba(95, 180, 255, 0.14);
+  color: var(--ink);
+}
+
+.segment input:focus-visible + span {
+  outline: 1px solid var(--beam);
+  outline-offset: 2px;
+}
+
+.segments:disabled .segment {
+  cursor: default;
+}
+
+.repos-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 10px 4px 2px;
+}
+
+.all {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.all:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.repo {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.repo-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.more {
+  margin: 4px 0 0 34px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--beam);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.more:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+/* The compression: two cards, each with its estimate. */
+.options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.option {
+  display: grid;
+  grid-template-columns: 16px auto 1fr;
+  grid-template-areas:
+    "radio name estimate"
+    ". about about";
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper-2);
+  cursor: pointer;
+}
+
+.option:hover {
+  border-color: var(--line-strong);
+}
+
+.option:has(input:checked) {
+  border-color: rgba(95, 180, 255, 0.6);
+  box-shadow: 0 0 0 1px rgba(95, 180, 255, 0.2);
+}
+
+.option.off {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.option input {
+  grid-area: radio;
+}
+
+.option-name {
+  grid-area: name;
+  font-weight: 600;
+}
+
+.option-estimate {
+  grid-area: estimate;
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.option-about {
+  grid-area: about;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* The passphrase ------------------------------------------------------------- */
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.fields.off {
+  opacity: 0.5;
+}
+
+.pass {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 320px;
+}
+
+.pass-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pass input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--well);
+  color: var(--ink);
+  font: inherit;
+}
+
+.pass input:focus {
+  border-color: rgba(95, 180, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(95, 180, 255, 0.25);
+  outline: none;
+}
+
+.problem {
+  min-height: 18px;
+  margin-top: 6px;
+  color: var(--lamp);
+  font-size: 12px;
+}
+
+.problem.hint {
+  color: var(--muted);
+}
+
+.plain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.plain label {
+  cursor: pointer;
+}
+
+.warning {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 122, 122, 0.35);
+  border-left: 3px solid var(--danger);
+  border-radius: 6px;
+  background: rgba(255, 122, 122, 0.08);
+  color: var(--danger);
+  line-height: 1.45;
+}
+
+/* The bar at the foot: what the choice takes, and the backup ------------------ */
+
+.foot {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 10px 24px;
+  border-top: 1px solid var(--line-strong);
+  background: rgba(10, 21, 33, 0.96);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.foot-text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.foot-text.reason {
+  color: var(--lamp);
+}
+
+/* How far the write got, along the bar's top edge. */
+.foot-bar {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--beam);
+  transition: width 0.2s ease;
+}
+
+.foot.busy .foot-text {
+  color: var(--ink);
+}
+
+.save {
+  flex: none;
+  padding: 6px 16px;
+  white-space: nowrap;
+  border: 1px solid rgba(95, 180, 255, 0.55);
+  border-radius: 6px;
+  background: rgba(95, 180, 255, 0.16);
+  color: var(--beam);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.save:hover:not(:disabled) {
+  background: rgba(95, 180, 255, 0.26);
+}
+
+/* While it writes, the button turns a ring, so the page never looks stopped. */
+.foot.writing .save::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  vertical-align: -1px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: turn 0.8s linear infinite;
+}
+
+.foot.writing .save:disabled {
+  opacity: 0.8;
+}
+
+@keyframes turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .foot.writing .save::before {
+    animation: none;
+    border-right-color: currentColor;
+  }
+
+  .bar.indeterminate .bar-fill {
+    left: 0;
+    width: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+@media (max-width: 560px) {
+  .top {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "eyebrow"
+      "title"
+      "where"
+      "tools";
+    row-gap: 6px;
+  }
+
+  .item,
+  .repo {
+    grid-template-columns: 20px minmax(0, 1fr) 72px;
+  }
+
+  .item-count,
+  .repo-count {
+    grid-column: 2;
+    grid-row: 2;
+    text-align: left;
+  }
+
+  .item-size,
+  .repo-size {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .options {
+    grid-template-columns: 1fr;
+  }
+
+  .foot {
+    gap: 10px;
+    padding: 8px 16px;
+  }
+
+  .foot-text {
+    font-size: 12px;
+  }
+}

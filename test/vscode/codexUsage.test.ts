@@ -15,10 +15,12 @@ function context() {
   const saved: Record<string, unknown> = {};
   const memento = {
     get: (key: string, fallback: unknown) => saved[key] ?? fallback,
+    keys: () => Object.keys(saved),
     update: (key: string, value: unknown) => {
       saved[key] = value;
       return Promise.resolve();
     },
+    setKeysForSync: () => {},
   };
   return { subscriptions, globalStorageUri: { fsPath: path.join(root, "global-storage") }, extensionUri: { fsPath: "/ext" }, workspaceState: memento, globalState: memento } as never;
 }

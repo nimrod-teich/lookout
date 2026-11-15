@@ -144,9 +144,35 @@ export function sessionsDir(configDir: string): string {
   return path.join(configDir, "sessions");
 }
 
-/** Claude Code names a project's transcript directory after its cwd. */
+/** Claude Code cuts a project folder's name to this many characters, and puts a hash of the whole path after them. */
+export const PROJECT_DIR_MAX = 200;
+
+/** Claude Code's hash of a path for a long folder name: 32-bit, over its UTF-16 code units, in base 36 without a sign. */
+function pathHash(text: string): string {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+  return Math.abs(hash).toString(36);
+}
+
+/** A name of letters, digits and `-` as Claude Code keeps it: as it is up to 200 characters, else its first 200, `-`, and the hash of `source`. */
+export function cutProjectDir(name: string, source: string): string {
+  return name.length <= PROJECT_DIR_MAX ? name : `${name.slice(0, PROJECT_DIR_MAX)}-${pathHash(source)}`;
+}
+
+/** Claude Code names a project's transcript directory after its cwd: every character other than a letter or a digit becomes `-`, and a long name is cut. */
 export function encodeProjectDir(cwd: string): string {
-  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
+  return cutProjectDir(cwd.replace(/[^a-zA-Z0-9]/g, "-"), cwd);
+}
+
+/**
+ * The project folder is named after `cwd`: its name exactly, or, for a cut
+ * name, its first 200 characters and `-` followed by another hash, which
+ * Claude Code accepts too, since another of its builds hashes differently.
+ */
+export function namesProjectDir(folder: string, cwd: string): boolean {
+  const name = encodeProjectDir(cwd);
+  if (folder === name) return true;
+  return name.length > PROJECT_DIR_MAX && folder.startsWith(name.slice(0, PROJECT_DIR_MAX + 1)) && /^[0-9a-z]+$/i.test(folder.slice(PROJECT_DIR_MAX + 1));
 }
 
 /**

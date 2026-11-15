@@ -1,0 +1,171 @@
+<!doctype html>
+<!-- Dev preview of the backup page outside VS Code: npm run build, then open this file. ?busy=look for the first look under way, ?busy=write for a write under way, ?done=1 for the page after a backup (its summary), &left=3 with files gone since the look, ?error=1 for a write that failed, ?stopped=1 for one stopped, ?gzip=1 for a runtime without zstd, ?empty=1 for a machine with nothing to back up. Back Up… writes for a few seconds; Stop stops it. -->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="theme-dark.css" id="theme">
+<link rel="stylesheet" href="../media/backup.css">
+<style>html { background: var(--vscode-editor-background); }</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  const params = new URLSearchParams(location.search);
+  document.body.className = "vscode-dark";
+  const now = Date.now();
+  const D = 86_400_000, KB = 1024, MB = 1024 ** 2;
+  // A seeded random, so every load shows the same machine.
+  let seed = 7;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const home = "/home/dev/src";
+  const repoNames = [["infra", 310], ["api", 260], ["web", 210], ["data-pipeline", 150], ["docs", 90], ["mobile", 70], ["design-system", 55], ["scripts", 39], ["sandbox", 20]];
+  const empty = params.get("empty") === "1";
+  // Each session: its repository, when it was last active, its transcript, and the subagents and tool outputs that go with it.
+  const sessions = empty ? [] : repoNames.flatMap(([name, n]) =>
+    Array.from({ length: n }, () => ({
+      repo: `${home}/${name}`,
+      lastActive: now - Math.floor(rand() ** 2 * 420) * D - Math.floor(rand() * D),
+      bytes: Math.floor(rand() ** 3 * 12 * MB) + 40 * KB,
+      subagents: Math.floor(rand() ** 2 * 5),
+      subagentBytes: Math.floor(rand() ** 3 * 2 * MB),
+      tools: Math.floor(rand() ** 2 * 22),
+      toolBytes: Math.floor(rand() ** 3 * 2.5 * MB),
+    })),
+  );
+  const sum = (list, f) => list.reduce((s, x) => s + f(x), 0);
+  const repos = empty ? [] : repoNames.map(([name]) => {
+    const own = sessions.filter((s) => s.repo === `${home}/${name}`);
+    return { repo: `${home}/${name}`, name, sessions: own.length, bytes: sum(own, (s) => s.bytes + s.subagentBytes + s.toolBytes) };
+  }).sort((a, b) => b.bytes - a.bytes);
+  const rows = empty
+    ? ["transcripts", "subagents", "toolResults", "history", "vault", "notes", "state", "tabs", "usage", "worktreesLog"].map((id) => ({ id, count: 0, bytes: 0 }))
+    : [
+        { id: "state", count: 362, bytes: 9 * KB, detail: "14 starred · 342 archived · 3 parked · board order and grouping · 2 account names" },
+        { id: "notes", count: 52, bytes: 18 * KB, detail: "52 notes on 31 sessions" },
+        { id: "tabs", count: 7, bytes: 2 * KB, detail: "7 tabs in 3 windows" },
+        { id: "history", count: 1, bytes: 412 * MB },
+        { id: "transcripts", count: sessions.length, bytes: sum(sessions, (s) => s.bytes) },
+        { id: "subagents", count: sum(sessions, (s) => s.subagents), bytes: sum(sessions, (s) => (s.subagents ? s.subagentBytes : 0)) },
+        { id: "toolResults", count: sum(sessions, (s) => s.tools), bytes: sum(sessions, (s) => (s.tools ? s.toolBytes : 0)) },
+        { id: "vault", count: 38, bytes: 220 * MB },
+        { id: "usage", count: 184, bytes: 3 * MB },
+        { id: "worktreesLog", count: 1, bytes: 6 * KB },
+      ];
+  const rowOf = (id) => rows.find((r) => r.id === id);
+  const zstd = params.get("gzip") !== "1";
+  // How much each kind shrinks, from measurements of real transcripts: zstd 3, zstd 9, gzip 6.
+  const ratio = { conversation: [0.13, 0.126, 0.296], history: [0.35, 0.33, 0.45], other: [0.2, 0.19, 0.3] };
+  const shrink = (bytes, kind, level) => bytes * ratio[kind][zstd ? (level === "smaller" ? 1 : 0) : 2];
+  const light = ["state", "notes", "tabs"];
+  let choice = { sections: rows.map((r) => r.id), skipRepos: [], level: "fast", encrypt: true };
+  const chosenOf = (c) => {
+    const on = new Set(c.sections);
+    const transcripts = on.has("transcripts");
+    const recent = sessions.filter((s) => !c.days || s.lastActive >= now - c.days * D);
+    const picked = transcripts ? recent.filter((s) => !c.skipRepos.includes(s.repo)) : [];
+    const sections = {};
+    const files = [];
+    const add = (id, count, bytes, kind) => {
+      if (!count) return;
+      sections[id] = { count, bytes };
+      files.push({ count, bytes, kind });
+    };
+    add("transcripts", picked.length, sum(picked, (s) => s.bytes), "conversation");
+    if (on.has("subagents")) add("subagents", sum(picked, (s) => s.subagents), sum(picked, (s) => (s.subagents ? s.subagentBytes : 0)), "conversation");
+    if (on.has("toolResults")) add("toolResults", sum(picked, (s) => s.tools), sum(picked, (s) => (s.tools ? s.toolBytes : 0)), "conversation");
+    if (on.has("history")) add("history", rowOf("history").count, rowOf("history").bytes, "history");
+    if (on.has("vault")) add("vault", rowOf("vault").count, rowOf("vault").bytes, "conversation");
+    for (const id of ["usage", "worktreesLog"]) if (on.has(id)) add(id, rowOf(id).count, rowOf(id).bytes, "other");
+    let lightBytes = 0;
+    for (const id of light) if (on.has(id) && rowOf(id).count) { sections[id] = { count: rowOf(id).count, bytes: rowOf(id).bytes }; lightBytes += rowOf(id).bytes; }
+    const perRepo = {};
+    for (const s of recent) {
+      const r = (perRepo[s.repo] ??= { sessions: 0, bytes: 0 });
+      r.sessions++;
+      r.bytes += s.bytes + (on.has("subagents") && s.subagents ? s.subagentBytes : 0) + (on.has("toolResults") && s.tools ? s.toolBytes : 0);
+    }
+    return {
+      sections,
+      repos: perRepo,
+      sessions: picked.length,
+      files: sum(files, (f) => f.count),
+      bytes: sum(files, (f) => f.bytes) + lightBytes,
+      estimate: { fast: Math.round(sum(files, (f) => shrink(f.bytes, f.kind, "fast")) + lightBytes), smaller: Math.round(sum(files, (f) => shrink(f.bytes, f.kind, "smaller")) + lightBytes) },
+    };
+  };
+  const busy = params.get("busy") ?? undefined;
+  const all = chosenOf(choice);
+  const left = Number(params.get("left") ?? 0);
+  const summary = params.get("done") === "1"
+    ? { file: "/home/dev/lookout-devbox-2026-11-15.lookout", name: "lookout-devbox-2026-11-15.lookout", bytes: all.estimate.fast, sessions: all.sessions, files: all.files - left, left, encrypted: true, tookMs: 134_000, at: now - 20_000 }
+    : undefined;
+  let state = {
+    busy,
+    progress: busy === "write" ? { done: Math.round(all.bytes * 0.37), total: all.bytes } : undefined,
+    host: "devbox",
+    lookedAt: busy === "look" ? undefined : now - 3 * 60_000,
+    sections: busy === "look" ? [] : rows,
+    repos: busy === "look" ? [] : repos,
+    chosen: busy === "look" ? undefined : all,
+    zstd,
+    summary,
+    notice: params.get("stopped") === "1" ? "The backup was stopped; nothing was saved." : undefined,
+    error: params.get("error") === "1" ? "The backup stopped: ENOSPC: no space left on device, write" : undefined,
+  };
+  const send = () => window.postMessage({ type: "state", state }, "*");
+  let timer;
+  const write = () => {
+    const total = state.chosen.bytes;
+    let done = 0;
+    const started = Date.now();
+    state = { ...state, busy: "write", progress: { done, total }, summary: undefined, error: undefined, notice: undefined };
+    send();
+    timer = setInterval(() => {
+      done = Math.min(total, done + total / 30);
+      window.postMessage({ type: "progress", progress: { done, total } }, "*");
+      if (done < total) return;
+      clearInterval(timer);
+      const c = state.chosen;
+      state = { ...state, busy: undefined, progress: undefined, summary: { file: "/home/dev/lookout-devbox-2026-11-15.lookout", name: "lookout-devbox-2026-11-15.lookout", bytes: c.estimate[choice.level], sessions: c.sessions, files: c.files, left: 0, encrypted: pendingSecret, tookMs: Date.now() - started, at: Date.now() } };
+      send();
+    }, 120);
+  };
+  let pendingSecret = false;
+  window.acquireVsCodeApi = () => ({
+    postMessage: (m) => {
+      // The passphrase is never printed, here either.
+      console.log("to extension:", JSON.stringify({ ...m, ...(m.passphrase ? { passphrase: "(typed)" } : {}) }));
+      if (m.type === "ready") setTimeout(send, 0);
+      if (m.type === "choose" && state.lookedAt !== undefined) {
+        choice = m.choice;
+        state = { ...state, chosen: chosenOf(choice) };
+        setTimeout(send, 0);
+      }
+      if (m.type === "save") {
+        choice = m.choice;
+        pendingSecret = Boolean(m.passphrase);
+        setTimeout(write, 300);
+      }
+      if (m.type === "stop") {
+        clearInterval(timer);
+        state = { ...state, busy: undefined, progress: undefined, notice: "The backup was stopped; nothing was saved." };
+        setTimeout(send, 100);
+      }
+      if (m.type === "dismiss") {
+        state = { ...state, summary: undefined };
+        send();
+      }
+      if (m.type === "look") {
+        state = { ...state, busy: "look", summary: undefined, error: undefined, notice: undefined };
+        send();
+        setTimeout(() => {
+          state = { ...state, busy: undefined, lookedAt: Date.now(), sections: rows, repos, chosen: chosenOf(choice) };
+          send();
+        }, 1500);
+      }
+    },
+  });
+</script>
+<script src="../dist/backup.js"></script>
+</body>
+</html>

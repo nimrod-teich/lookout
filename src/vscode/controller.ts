@@ -32,6 +32,8 @@ import { readThrough, searchWithStore } from "../core/search";
 import { latestNote, SessionRecords, type NoteEntry, type SessionSeen } from "../core/sessionRecords";
 import { ConversationStore, type StoredSession } from "../core/store";
 import { hasFilters, parseQuery } from "../core/terms";
+import { openTabs } from "../core/transfer/tabs";
+import type { WindowTabs } from "../core/transfer/types";
 import { TranscriptVault, type Restore } from "../core/vault";
 import { ClaudeSettingsEnv, envFlag, isStale, NONESSENTIAL_TRAFFIC, UsageCache, usageCacheFile, wantsRefresh, type RefreshMode, type UsageRead, type UsageSnapshot } from "../core/usage";
 import { AlertLedger, reachedThresholds, scopeOf, type UsageAlert } from "../core/usageAlerts";
@@ -119,6 +121,8 @@ export interface ControllerHost {
   claudeBinary(): string | undefined;
   /** The folders open in this window: their past sessions are listed. */
   workspaceFolders(): string[];
+  /** This window's folder under VS Code's workspaceStorage, where the agents record the tabs it has open; none without a workspace. */
+  workspaceStorageId?: string;
   /** VS Code's extension storage directory, next to which it keeps extension state. */
   globalStorageDir: string;
   /** The bundle of the thread that reads the conversations (`dist/reader.js`); without one, a search reads them here, a little at a time. */
@@ -1268,9 +1272,15 @@ export class Controller implements vscode.Disposable {
     this.poll();
   }
 
-  /** Records this window for the others: its name, terminals, folders, and the sessions it marked finished. */
+  /** Records this window for the others: its name, terminals, folders, the sessions it marked finished, and where its workspace state is. */
   private register(): void {
-    this.windows.register(this.host.pid, this.host.label, this.terminals.pids, this.host.workspaceFolders(), this.attention.snapshot());
+    this.windows.register(this.host.pid, this.host.label, this.terminals.pids, this.host.workspaceFolders(), this.attention.snapshot(), this.host.workspaceStorageId);
+  }
+
+  /** The Claude tabs open in this window and in the other windows on this host that run Lookout, each window's in the order Claude Code lists them. */
+  openTabs(): Promise<WindowTabs[]> {
+    const self = { label: this.host.label, folders: this.host.workspaceFolders(), storageId: this.host.workspaceStorageId };
+    return openTabs([self, ...this.windows.read(this.host.pid).values()], chatStorageRoots(this.host.globalStorageDir));
   }
 
   /** Reads the sessions now, without waiting for the next tick. */

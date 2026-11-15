@@ -210,4 +210,42 @@ describe("SessionRecords", () => {
     expect(records.addNote("s1", "first", SEEN, 1)).toBeDefined();
     expect(fs.existsSync(records.fileOf("s1"))).toBe(true);
   });
+
+  it("puts the notes a change makes of the thread as the file has it, keeping their ids and times, oldest first", () => {
+    const records = new SessionRecords(dir);
+    const a = records.addNote("s1", "first", SEEN, 10)!;
+    // Another window adds a note this one has not read yet: the change is given it.
+    const b = new SessionRecords(dir).addNote("s1", "second", undefined, 20)!;
+    const given: string[][] = [];
+    const c = { id: "remote", text: "from elsewhere", at: 15, editedAt: 30 };
+    expect(
+      records.updateNotes("s1", (notes) => {
+        given.push(notes.map((n) => n.id));
+        return [...notes.filter((n) => n.id !== a.id), c];
+      }),
+    ).toBe(true);
+    expect(given).toEqual([[a.id, b.id]]);
+    expect(new SessionRecords(dir).get("s1")).toEqual({ v: 1, id: "s1", ...SEEN, notes: [c, b] });
+  });
+
+  it("writes nothing when the change changes nothing, and takes the record away with its last note", () => {
+    const records = new SessionRecords(dir);
+    records.addNote("s1", "first", SEEN, 10);
+    fs.utimesSync(records.fileOf("s1"), 1, 1);
+    expect(records.updateNotes("s1", (notes) => notes)).toBe(true);
+    // Not written again.
+    expect(fs.statSync(records.fileOf("s1")).mtimeMs).toBe(1000);
+    expect(records.updateNotes("s1", () => [])).toBe(true);
+    expect(fs.existsSync(records.fileOf("s1"))).toBe(false);
+    expect(records.updateNotes("s1", () => [])).toBe(true);
+  });
+
+  it("gives a session not on record one when told its agent, and nothing otherwise", () => {
+    const records = new SessionRecords(dir);
+    const n = { id: "n", text: "from elsewhere", at: 5 };
+    expect(records.updateNotes("s2", () => [n])).toBe(false);
+    expect(fs.existsSync(records.fileOf("s2"))).toBe(false);
+    expect(records.updateNotes("s2", () => [n], { agent: "codex", title: "Port the parser" })).toBe(true);
+    expect(new SessionRecords(dir).get("s2")).toEqual({ v: 1, id: "s2", agent: "codex", title: "Port the parser", notes: [n] });
+  });
 });

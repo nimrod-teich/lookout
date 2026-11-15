@@ -14,6 +14,17 @@ interface WindowRecord {
   folders?: string[];
   /** Its sessions that finished a turn the user has not looked at. */
   done?: string[];
+  /** The folder under VS Code's workspaceStorage that holds the window's workspace state. */
+  storageId?: string;
+}
+
+/**
+ * A workspace storage folder's name as VS Code makes one: a hash or a number,
+ * with `-<n>` when an extension host found the plain one taken. Anything else
+ * is not joined to a path.
+ */
+export function isStorageId(id: unknown): id is string {
+  return typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id);
 }
 
 /** Another VS Code window on this host that runs Lookout. */
@@ -25,15 +36,18 @@ export interface OtherWindow {
   folders?: readonly string[];
   /** Its sessions that finished a turn the user has not looked at there: only it can tell when they are looked at. */
   done?: readonly string[];
+  /** Its folder under VS Code's workspaceStorage, where the agents' tabs it has open are recorded. None without a workspace, or from an older Lookout. */
+  storageId?: string;
 }
 
 /**
  * The VS Code windows on this host that run Lookout, by extension host pid.
  * Each window writes one file into a directory all windows share, with its
- * name, its terminals' shell pids and its sessions marked finished, so a
- * session hosted by another window, in its panel or in one of its terminals,
- * can be named, jumped to and shown as finished. A file whose process is gone
- * is removed by whoever reads it next.
+ * name, its terminals' shell pids, its sessions marked finished and its
+ * workspace storage folder, so a session hosted by another window, in its
+ * panel or in one of its terminals, can be named, jumped to and shown as
+ * finished, and the tabs it has open can be read. A file whose process is
+ * gone is removed by whoever reads it next.
  */
 export class WindowRegistry {
   private cache = new Map<number, OtherWindow>();
@@ -45,10 +59,17 @@ export class WindowRegistry {
   ) {}
 
   /** Records this window, and again whenever its terminals, folders or finished sessions change. */
-  register(pid: number, label: string, terminals: Iterable<number> = [], folders: readonly string[] = [], done: readonly string[] = []): void {
+  register(pid: number, label: string, terminals: Iterable<number> = [], folders: readonly string[] = [], done: readonly string[] = [], storageId?: string): void {
     try {
       fs.mkdirSync(this.dir, { recursive: true });
-      const record: WindowRecord = { pid, label, terminals: [...terminals].sort((a, b) => a - b), ...(folders.length ? { folders: [...folders] } : {}), ...(done.length ? { done: [...done] } : {}) };
+      const record: WindowRecord = {
+        pid,
+        label,
+        terminals: [...terminals].sort((a, b) => a - b),
+        ...(folders.length ? { folders: [...folders] } : {}),
+        ...(done.length ? { done: [...done] } : {}),
+        ...(isStorageId(storageId) ? { storageId } : {}),
+      };
       // Written whole under another name, then renamed: a reader never sees half a record.
       const temp = path.join(this.dir, `.${pid}.json.tmp`);
       fs.writeFileSync(temp, JSON.stringify(record));
@@ -91,7 +112,13 @@ export class WindowRegistry {
         fs.rmSync(path.join(this.dir, name), { force: true });
         continue;
       }
-      windows.set(record.pid, { label: record.label, terminals: record.terminals ?? [], ...(record.folders?.length ? { folders: record.folders } : {}), ...(record.done?.length ? { done: record.done } : {}) });
+      windows.set(record.pid, {
+        label: record.label,
+        terminals: record.terminals ?? [],
+        ...(record.folders?.length ? { folders: record.folders } : {}),
+        ...(record.done?.length ? { done: record.done } : {}),
+        ...(record.storageId ? { storageId: record.storageId } : {}),
+      });
     }
     this.cache = windows;
     return windows;
@@ -105,7 +132,7 @@ export class WindowRegistry {
       const terminals = Array.isArray(raw.terminals) ? raw.terminals.filter((pid): pid is number => Number.isInteger(pid) && pid > 0) : [];
       const folders = Array.isArray(raw.folders) ? raw.folders.filter((folder): folder is string => typeof folder === "string") : [];
       const done = Array.isArray(raw.done) ? raw.done.filter((id): id is string => typeof id === "string") : [];
-      return { pid: raw.pid, label: raw.label, terminals, folders, done };
+      return { pid: raw.pid, label: raw.label, terminals, folders, done, ...(isStorageId(raw.storageId) ? { storageId: raw.storageId } : {}) };
     } catch {
       return null;
     }

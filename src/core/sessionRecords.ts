@@ -203,6 +203,28 @@ export class SessionRecords {
   }
 
   /**
+   * Puts the notes `change` makes of a session's notes as the file has them
+   * now, each with the id and times `change` gives it, oldest first. A
+   * session not on record gets one when `about` names its agent; the record
+   * goes with its last note. True when the record says what `change` said,
+   * nothing to do included; false when it could not be written, or nothing
+   * is known about the session.
+   */
+  updateNotes(id: string, change: (notes: readonly NoteEntry[]) => readonly NoteEntry[], about?: { agent: string; title?: string }): boolean {
+    const before = this.fresh(id);
+    const was = before?.notes ?? [];
+    const notes = [...change(was)].sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    if (JSON.stringify(notes) === JSON.stringify(was)) return true;
+    if (notes.length === 0) {
+      if (before) this.remove(id);
+      return true;
+    }
+    if (before) return this.write({ ...before, notes });
+    if (!about?.agent) return false;
+    return this.write({ v: 1, id, agent: about.agent, ...(about.title !== undefined ? { title: about.title } : {}), notes });
+  }
+
+  /**
    * The session was seen on the board: its record follows its title and
    * place. Nothing for a session without a record, nor for one another
    * window removed meanwhile; a time left out, as for a running session
