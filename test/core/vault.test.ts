@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { TranscriptVault } from "../../src/core/vault";
+import { sameNumbers, TranscriptVault } from "../../src/core/vault";
 
 let dir: string;
 let projects: string;
@@ -91,6 +91,17 @@ describe("TranscriptVault", () => {
     fs.writeFileSync(path.join(dir, "vault", "junk.json"), "{ not json");
     fs.writeFileSync(path.join(dir, "vault", "old.json"), JSON.stringify({ v: 2, id: "x", agent: "a", file: "/f", keptAt: 1 }));
     expect(vault.kept()).toEqual([]);
+  });
+
+  it("tells two files apart whose numbers differ only past what a double holds, as Windows numbers them", () => {
+    // NTFS puts a file's sequence number in the top 16 bits: two neighbours read the same as doubles.
+    const one = { ino: 2n ** 60n + 1n, dev: 7n };
+    const other = { ino: 2n ** 60n + 2n, dev: 7n };
+    expect(Number(one.ino)).toBe(Number(other.ino));
+    expect(sameNumbers(one, other)).toBe(false);
+    expect(sameNumbers(one, { ...one })).toBe(true);
+    expect(sameNumbers(one, { ...one, dev: 8n })).toBe(false);
+    expect(sameNumbers({ ino: 0n, dev: 7n }, { ino: 0n, dev: 7n })).toBe(false);
   });
 
   it("keeps a copy where a link cannot be made, and brings the copy up to the file", () => {
