@@ -36,7 +36,7 @@ class Memento {
 
 const DAY = 24 * 60 * 60_000;
 
-function setup(options: { encrypted?: boolean; history?: boolean; mtime?: number; host?: string; open?: () => Promise<never> } = {}) {
+function setup(options: { encrypted?: boolean; history?: boolean; mtime?: number; host?: string; open?: () => Promise<never>; repos?: ManifestBody["repos"]; tabs?: ManifestBody["tabs"] } = {}) {
   const base = fs.realpathSync.native(tempConfigDir());
   const home = path.join(base, "home", "bob");
   const claude = path.join(home, ".claude");
@@ -57,7 +57,9 @@ function setup(options: { encrypted?: boolean; history?: boolean; mtime?: number
     notes: [{ v: 1, id, agent: "claude-code", cwd: "/home/alice/proj", notes: [{ id: "n1", text: NOTE, at: 1 }] }],
     tabs: [],
     claudeDirs: [{ label: "default", resolved: "/home/alice/.claude", isDefault: true }],
+    ...(options.repos ? { repos: options.repos } : {}),
   };
+  if (options.tabs) body.tabs = options.tabs;
   const files: FakeFile[] = [{ entry: { kind: "transcript", dir: "default", rel: `-home-alice-proj/${id}.jsonl`, sessionId: id, cwd: "/home/alice/proj", mtime: options.mtime ?? Date.now() - DAY }, bytes: '{"type":"user"}\n' }];
   if (options.history) {
     const rows = [{ id: gone, agent: "claude-code", file: `/home/alice/.claude/projects/-home-alice-old/${gone}.jsonl`, cwd: "/home/alice/old", purgedAt: NOW - 1000, messages: ["an old conversation"] }];
@@ -336,5 +338,61 @@ describe("Restore from Backup… with a backup from someone else", () => {
     await run();
     expect(fs.existsSync(stale)).toBe(false);
     if (process.platform !== "win32") expect(fs.statSync(t.temp).mode & 0o777).toBe(0o700);
+  });
+});
+
+describe("Restore from Backup… and the backup's repositories and tabs", () => {
+  beforeEach(() => stub.reset());
+
+  /** A clone with this remote, as git writes its config. */
+  const clone = (dir: string, url: string) => {
+    fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".git", "config"), `[remote "origin"]\n\turl = ${url}\n`);
+    return dir;
+  };
+  const repos = [{ root: "/home/alice/proj", linked: false, remotes: ["alice/proj"] }];
+
+  it("finds a repository renamed here by its git remote, says so, and puts its transcripts where Claude Code looks for that clone", async () => {
+    const t = setup({ repos });
+    const renamed = clone(path.join(t.home, "code", "renamed"), "git@github.com:alice/proj.git");
+    stub.answerNotice = (notice) => (notice.modal ? "Restore" : undefined);
+    await run();
+    const [summary] = modals();
+    expect(summary?.detail).toContain(`Folders: /home/alice → ${t.home}\nRepositories found here by their git remote (1):\n  /home/alice/proj → ${renamed}`);
+    expect(summary?.detail).not.toContain("Folders not on this machine");
+    expect(fs.existsSync(t.transcriptIn(renamed))).toBe(true);
+    expect(fs.existsSync(t.transcriptIn(path.join(t.home, "proj")))).toBe(false);
+  });
+
+  it("names a repository with several clones here, and takes the one Change Folder Mapping… picks", async () => {
+    const t = setup({ repos });
+    const one = clone(path.join(t.home, "a", "proj"), "git@github.com:alice/proj.git");
+    clone(path.join(t.home, "b", "proj"), "https://github.com/alice/proj");
+    let asked = 0;
+    stub.answerNotice = (notice) => (notice.modal ? (asked++ === 0 ? "Change Folder Mapping…" : "Restore") : undefined);
+    // The home folder stays; the repository is the one picked.
+    stub.inputBox = () => t.home;
+    stub.quickPick = (items) => {
+      const list = items as { label: string; choices?: string[]; choice?: string }[];
+      return list.find((item) => item.choices) ?? list.find((item) => item.choice === one) ?? list[0];
+    };
+    await run();
+    const [first, second] = modals();
+    expect(first?.detail).toContain(`Repositories with several clones here (1), left where the folders above put them until Change Folder Mapping… says which:\n  /home/alice/proj: ${one}, ${path.join(t.home, "b", "proj")}`);
+    expect(second?.detail).toContain(`Repositories found here by their git remote (1):\n  /home/alice/proj → ${one}`);
+    expect(second?.detail).not.toContain("several clones");
+    expect(fs.existsSync(t.transcriptIn(one))).toBe(true);
+  });
+
+  it("offers to reopen the restored tabs from its closing message", async () => {
+    const t = setup({ tabs: [{ label: "proj", folders: ["/home/alice/proj"], tabs: [{ sessionId: sessionId(1), title: "Billing" }] }] });
+    let listed = 0;
+    stub.commands.set("lookout.reopenTabs", () => void listed++);
+    stub.answerNotice = (notice) => (notice.modal ? "Restore" : notice.actions.includes("Reopen Tabs…") ? "Reopen Tabs…" : undefined);
+    await run();
+    await vi.waitFor(() => expect(listed).toBe(1));
+    const done = stub.notices.find((notice) => notice.actions.includes("Reopen Tabs…"));
+    expect(done?.message).toContain("1 tab to reopen");
+    expect(t.memento.values.size).toBeGreaterThan(0);
   });
 });

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7
+
+- **A restore finds your repositories where they are.** A backup records the git repositories its sessions, notes and tabs worked in, by their remotes' paths (`owner/repo`, never a URL). A restore maps each one to its clone on the new machine when it is not where the home folder's mapping puts it, moved or renamed, so its conversations go where Claude Code looks for that clone and its tabs reopen in its window. The summary lists the repositories found that way, and names those with several clones for **Change Folder Mapping…** to choose from. A backup made by 0.1.6 restores as before.
+- **Waiting tabs say so.** After a restore, every window's status bar shows how many Claude tabs wait to be reopened, and a click lists them; the restore's closing message offers **Reopen Tabs…**. A tab still opens only in the window whose first folder it worked in, since Claude Code runs a resumed conversation there. A tab whose folder is not on this machine offers **Choose Folder…**, which moves that folder's tabs, and their conversations, to the one you choose: Claude Code opens a conversation only from its window's first folder.
+
 ## 0.1.6
 
 Answers to a prompt in the Claude Code panel from its card, a backup of everything Lookout keeps that restores on another machine with its open tabs, and stars and notes that follow you through Settings Sync.

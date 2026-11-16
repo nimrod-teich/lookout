@@ -12,6 +12,7 @@ import { Worker } from "node:worker_threads";
 import { createBundle } from "./bundle";
 import { select, type Inventory, type InventoryItem, type Selection } from "./inventory";
 import { SECTIONS, type BundleSink, type ManifestBody, type NewFile, type SourceMachine, type WriteOptions } from "./types";
+import { describeRepos } from "./repos";
 
 /** Starts writing a backup file. */
 export type SinkFactory = (file: string, options: WriteOptions) => Promise<BundleSink>;
@@ -149,6 +150,7 @@ export async function backUp(
       notes: sections.includes("notes") ? inventory.notes : [],
       tabs: sections.includes("tabs") ? inventory.tabs : [],
       claudeDirs: inventory.claudeDirs.map((dir) => ({ label: dir.label, resolved: dir.resolved, isDefault: dir.isDefault })),
+      repos: describeRepos(foldersOf(items, sections.includes("notes") ? inventory.notes : [], sections.includes("tabs") ? inventory.tabs : [])),
     };
     // Not cancelled from here on: the manifest is small, and a file half moved into place is worse than a finished one.
     const { bytes } = await sink.finish(manifest);
@@ -311,4 +313,13 @@ export function snapshotStore(from: string, to: string, signal?: AbortSignal): P
       else resolve();
     });
   });
+}
+
+/** The folders a backup's sessions, notes and tabs worked in: their repositories go in the manifest. */
+function foldersOf(items: readonly { cwd?: string }[], notes: readonly { cwd?: unknown }[], tabs: readonly { folders?: unknown }[]): string[] {
+  const out = new Set<string>();
+  for (const item of items) if (typeof item.cwd === "string" && item.cwd !== "") out.add(item.cwd);
+  for (const note of notes) if (typeof note.cwd === "string" && note.cwd !== "") out.add(note.cwd);
+  for (const win of tabs) if (Array.isArray(win.folders)) for (const folder of win.folders) if (typeof folder === "string" && folder !== "") out.add(folder);
+  return [...out];
 }

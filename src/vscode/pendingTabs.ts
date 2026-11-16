@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { findTranscript, type ClaudeDir } from "../core/agents/claude/paths";
+import { encodeProjectDir, findTranscript, type ClaudeDir } from "../core/agents/claude/paths";
 import { plainText } from "../core/plainText";
 import { folderKey, pendingFor, readPending, TabClaims, withoutTabs } from "../core/transfer/tabs";
 import { PENDING_TABS_KEY, type PendingTab } from "../core/transfer/types";
@@ -78,6 +78,15 @@ function isDirectory(dir: string): boolean {
   }
 }
 
+/** A plain file, not a link to one. */
+function isFile(file: string): boolean {
+  try {
+    return fs.lstatSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /** Resolves at the next change of the editor tabs, or after `ms`. */
 function nextTabChange(ms: number): { done: Promise<void>; dispose(): void } {
   let finish = () => {};
@@ -108,6 +117,8 @@ class PendingTabs {
   private offering = false;
   /** Tabs are being opened. */
   private opening = false;
+  /** How many tabs wait, in every window's status bar, until they are reopened or forgotten. */
+  private readonly count = vscode.window.createStatusBarItem("lookout.pendingTabs", vscode.StatusBarAlignment.Left, -100);
 
   constructor(
     private readonly state: vscode.Memento,
@@ -115,6 +126,24 @@ class PendingTabs {
     private readonly deps: PendingTabsDeps,
   ) {
     this.claims = new TabClaims(claimsDir);
+    this.count.name = "Lookout: Tabs to Reopen";
+    this.count.command = REOPEN_TABS;
+  }
+
+  /** Shows how many tabs from a backup wait, or nothing when none do. Another window's restore or reopen shows here when this window next looks. */
+  showCount(): void {
+    const pending = this.pending();
+    if (pending.length === 0) {
+      this.count.hide();
+      return;
+    }
+    this.count.text = `$(history) ${pending.length}`;
+    this.count.tooltip = `${tabsFrom(pending)} ${plural(pending.length, "waits", "wait")} to be reopened, each in the window of its folder. Click to see ${plural(pending.length, "it", "them")}.`;
+    this.count.show();
+  }
+
+  dispose(): void {
+    this.count.dispose();
   }
 
   private pending(): PendingTab[] {
@@ -132,6 +161,7 @@ class PendingTabs {
 
   /** Offers to reopen the pending tabs of this window's first folder, the ones not offered before whose transcripts are here. */
   async offer(): Promise<void> {
+    this.showCount();
     if (this.offering || this.opening) return;
     const tabs = pendingFor(this.pending(), this.firstFolder()).filter((tab) => !this.putOff.has(tab.sessionId.toLowerCase()) && this.ready(tab));
     // Without Claude Code the tabs wait: the list says why.
@@ -159,7 +189,7 @@ class PendingTabs {
     const ordered = [...pending].sort((a, b) => Number(here.has(b.sessionId)) - Number(here.has(a.sessionId)) || a.cwd.localeCompare(b.cwd));
     const items = ordered.map((tab) => {
       const ready = this.ready(tab);
-      const where = here.has(tab.sessionId) ? "This window" : "Opens its folder in a new window";
+      const where = here.has(tab.sessionId) ? "This window" : isDirectory(tab.cwd) ? "Opens its folder in a new window" : "Its folder is not on this machine: you choose where it works";
       return {
         label: titleOf(tab),
         description: folderOf(tab.cwd),
@@ -233,6 +263,7 @@ class PendingTabs {
     }
     const reopened = claimed.length - failed.length;
     if (reopened > 0) this.deps.log.info(`Reopened ${reopened} Claude ${plural(reopened, "tab", "tabs")} from a backup`);
+    this.showCount();
     if (failed.length === 0) return;
     for (const tab of failed) {
       this.claims.release(tab);
@@ -240,11 +271,72 @@ class PendingTabs {
     }
     const rest = this.pending();
     await this.state.update(PENDING_TABS_KEY, [...rest, ...withoutTabs(failed, rest)]);
+    this.showCount();
     void vscode.window.showWarningMessage(`Lookout could not reopen ${titles(failed)}. ${plural(failed.length, "It waits", "They wait")} under Reopen Tabs from Backup.`);
   }
 
   private async forget(tabs: readonly PendingTab[]): Promise<void> {
     await this.state.update(PENDING_TABS_KEY, withoutTabs(this.pending(), tabs));
+    this.showCount();
+  }
+
+  /**
+   * Says these tabs work in `folder` instead of the one they worked in.
+   */
+  private async repoint(tabs: readonly PendingTab[], folder: string): Promise<PendingTab[]> {
+    const ids = new Set(tabs.map((tab) => tab.sessionId.toLowerCase()));
+    const moved: PendingTab[] = [];
+    const pending = this.pending().map((tab) => {
+      if (!ids.has(tab.sessionId.toLowerCase())) return tab;
+      const next = { ...tab, cwd: folder };
+      moved.push(next);
+      return next;
+    });
+    await this.state.update(PENDING_TABS_KEY, pending);
+    return moved;
+  }
+
+  /**
+   * Files the conversations of tabs that worked in `from` under `folder`'s
+   * project folder, where Claude Code's panel looks for them in a window
+   * whose first folder is `folder`: it looks for a session nowhere else, and
+   * opens an empty chat for one it does not find there. A conversation
+   * already there stays. One filed under `from`, a folder this machine does
+   * not have, moves there with its subagents and tool results; Lookout's
+   * history follows it to its new place. `left`: the tabs whose
+   * conversation is under neither.
+   */
+  private fileUnder(tabs: readonly PendingTab[], from: string, folder: string): { placed: PendingTab[]; left: PendingTab[] } {
+    const placed: PendingTab[] = [];
+    const left: PendingTab[] = [];
+    for (const tab of tabs) {
+      let done = false;
+      for (const dir of this.deps.claudeDirs()) {
+        const projects = path.join(dir.resolved, "projects");
+        const to = path.join(projects, encodeProjectDir(folder), `${tab.sessionId}.jsonl`);
+        if (isFile(to)) {
+          done = true;
+          break;
+        }
+        const at = path.join(projects, encodeProjectDir(from), `${tab.sessionId}.jsonl`);
+        if (!isFile(at)) continue;
+        try {
+          fs.mkdirSync(path.dirname(to), { recursive: true });
+          fs.renameSync(at, to);
+          // Its subagents and tool results, beside it.
+          const files = at.slice(0, -".jsonl".length);
+          const target = to.slice(0, -".jsonl".length);
+          if (isDirectory(files) && !fs.existsSync(target)) fs.renameSync(files, target);
+          this.deps.log.info(`Moved the conversation of ${tab.sessionId} from ${from} to ${folder}, for Claude Code to open it there`);
+          done = true;
+        } catch (err) {
+          this.deps.log.errorOnce(`Could not move the conversation of ${tab.sessionId} to ${folder}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        break;
+      }
+      (done ? placed : left).push(tab);
+    }
+    return { placed, left };
   }
 
   /**
@@ -282,15 +374,41 @@ class PendingTabs {
         }
       }
     }
-    if (missing.length > 0) {
-      const lost = missing.flatMap((entry) => entry.tabs);
+    for (const entry of missing) {
+      const choose = "Choose Folder…";
       const choice = await vscode.window.showWarningMessage(
-        `Lookout: ${titles(lost)} worked in ${listed(missing.map((entry) => folderOf(entry.folder)))}, which ${plural(missing.length, "is", "are")} not on this machine. Forget ${plural(lost.length, "it", "them")}?`,
+        `Lookout: ${titles(entry.tabs)} worked in ${folderOf(entry.folder)}, which is not on this machine. Choose the folder ${plural(entry.tabs.length, "it works", "they work")} in here, or forget ${plural(entry.tabs.length, "it", "them")}.`,
+        choose,
         "Forget",
       );
-      if (choice === "Forget") await this.forget(lost);
+      if (choice === "Forget") {
+        await this.forget(entry.tabs);
+        continue;
+      }
+      if (choice !== choose) continue;
+      const picked = await vscode.window.showOpenDialog({ title: `Where does ${titleOf(entry.tabs[0]!)} work here?`, openLabel: "Use This Folder", canSelectFiles: false, canSelectFolders: true, canSelectMany: false });
+      const folder = picked?.[0]?.fsPath;
+      if (!folder) continue;
+      // Claude Code opens a conversation only from the project folder of the window's first folder: it goes there first.
+      const { placed, left } = this.fileUnder(entry.tabs, entry.folder, folder);
+      if (left.length > 0) {
+        void vscode.window.showWarningMessage(
+          `Lookout could not move the conversation of ${titles(left)} to ${folderOf(folder)}: it is not filed under ${folderOf(entry.folder)} on this machine, and Claude Code would open an empty chat there. ${plural(left.length, "It waits", "They wait")} for ${folderOf(entry.folder)}.`,
+        );
+      }
+      if (placed.length === 0) continue;
+      const moved = await this.repoint(placed, folder);
+      // This window's own folder: offered here; another: its window offers them.
+      if (folderKey(folder) === folderKey(this.firstFolder() ?? "")) await this.offer();
+      else await this.elsewhere(moved);
     }
   }
+}
+
+/** This window's pending tabs, as the extension holds them. */
+export interface PendingTabsHandle extends vscode.Disposable {
+  /** Counts the waiting tabs again: a restore in this window queued some, and no folder or focus changed to say so. */
+  refresh(): void;
 }
 
 /**
@@ -298,9 +416,10 @@ class PendingTabs {
  * when it gains the focus (a restore in another window may have added some),
  * and registers `lookout.reopenTabs`, which lists every pending tab.
  */
-export function registerPendingTabs(context: vscode.ExtensionContext, deps: PendingTabsDeps): vscode.Disposable {
+export function registerPendingTabs(context: vscode.ExtensionContext, deps: PendingTabsDeps): PendingTabsHandle {
   const tabs = new PendingTabs(context.globalState, path.join(context.globalStorageUri.fsPath, "tab-claims"), deps);
   const disposables = [
+    tabs,
     vscode.commands.registerCommand(REOPEN_TABS, () => tabs.choose()),
     vscode.workspace.onDidChangeWorkspaceFolders(() => void tabs.offer()),
     vscode.window.onDidChangeWindowState(() => {
@@ -308,5 +427,5 @@ export function registerPendingTabs(context: vscode.ExtensionContext, deps: Pend
     }),
   ];
   void tabs.offer();
-  return { dispose: () => disposables.forEach((disposable) => disposable.dispose()) };
+  return { refresh: () => tabs.showCount(), dispose: () => disposables.forEach((disposable) => disposable.dispose()) };
 }

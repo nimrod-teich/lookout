@@ -28,6 +28,7 @@ import type { FileHandle } from "node:fs/promises";
 import { pipeline, Readable, type Transform } from "node:stream";
 import * as zlib from "node:zlib";
 import type { SessionRecord } from "../sessionRecords";
+import { readRepoRecords } from "./repos";
 import {
   BundleError,
   LIGHT_STATE_KEYS,
@@ -831,7 +832,7 @@ function parseManifest(bytes: Buffer, payloadLength: number): BundleManifest {
   if (!isRecord(raw)) throw damaged("its manifest does not parse");
   if (raw.format !== 1) throw typeof raw.format === "number" ? later() : damaged("its manifest has no format");
   if (raw.payloadLength !== payloadLength) throw damaged("its footer and its manifest disagree");
-  const { createdAt, lookoutVersion, source, sections, state, notes, tabs, claudeDirs, files } = raw;
+  const { createdAt, lookoutVersion, source, sections, state, notes, tabs, claudeDirs, repos, files } = raw;
   if (
     typeof createdAt !== "number" ||
     typeof lookoutVersion !== "string" ||
@@ -872,6 +873,7 @@ function parseManifest(bytes: Buffer, payloadLength: number): BundleManifest {
     claudeDirs: claudeDirs.filter(
       (dir): dir is BundleManifest["claudeDirs"][number] => isRecord(dir) && typeof dir.label === "string" && typeof dir.resolved === "string" && typeof dir.isDefault === "boolean",
     ),
+    repos: readRepoRecords(repos),
     files: kept,
   };
 }

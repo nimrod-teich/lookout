@@ -248,7 +248,7 @@ describe("text from a backup in a message", () => {
     expect(shown).toEqual([
       `Lookout: 1 Claude tab from laptop ${plain} belongs in this window.`,
       `Lookout could not reopen "Wire ${plain}". It waits under Reopen Tabs from Backup.`,
-      `Lookout: "Gone ${plain}" worked in /nowhere/${plain}, which is not on this machine. Forget it?`,
+      `Lookout: "Gone ${plain}" worked in /nowhere/${plain}, which is not on this machine. Choose the folder it works in here, or forget it.`,
     ]);
   });
 });
@@ -270,14 +270,14 @@ describe("Reopen Tabs from Backup", () => {
     await stub.commands.get(REOPEN_TABS)!();
     expect(listed.map(({ label, description, detail, picked }) => ({ label, description, detail, picked }))).toEqual([
       { label: "Wire the cache", description: "/work/app", detail: "This window · from laptop", picked: true },
-      { label: "Session 00000000", description: "/nowhere/gone", detail: "Opens its folder in a new window · from laptop", picked: false },
+      { label: "Session 00000000", description: "/nowhere/gone", detail: "Its folder is not on this machine: you choose where it works · from laptop", picked: false },
       { label: "Add the route", description: other, detail: "Opens its folder in a new window · from laptop", picked: false },
     ]);
     expect(opened).toEqual([A]);
     // Another folder opens in a window of its own, which offers its tabs.
     expect(messages("info").at(-1)).toBe(`Lookout: 1 tab belongs in a window on ${other}, which offers to reopen it there.`);
     expect(stub.ops.find(([target, action]) => target === "commands" && action === "vscode.openFolder")?.[2]).toEqual([expect.objectContaining({ fsPath: other }), { forceNewWindow: true }]);
-    expect(messages("warning")).toEqual(['Lookout: "Session 00000000" worked in /nowhere/gone, which is not on this machine. Forget it?']);
+    expect(messages("warning")).toEqual(['Lookout: "Session 00000000" worked in /nowhere/gone, which is not on this machine. Choose the folder it works in here, or forget it.']);
     expect(state.pending()).toEqual([B, C]);
 
     // The tab of a folder this machine lacks can be forgotten from the list.
@@ -339,5 +339,123 @@ describe("Reopen Tabs from Backup", () => {
     stub.foldersChange.fire();
     await settle();
     expect(opened).toEqual([]);
+  });
+});
+
+describe("tabs waiting elsewhere", () => {
+  const ITEM = "statusBar:lookout.pendingTabs";
+  const count = () => {
+    const ops = stub.ops.filter(([target, action]) => target === ITEM && (action === "set:text" || action === "show" || action === "hide"));
+    const last = ops.at(-1);
+    if (!last || last[1] === "hide") return undefined;
+    return ops.filter(([, action]) => action === "set:text").at(-1)?.[2];
+  };
+
+  it("counts the tabs that wait, in every window, whichever folder it has, and stops once none do", async () => {
+    const state = new Memento();
+    await state.update(PENDING_TABS_KEY, [tab(A, "/work/app", "Wire the cache"), tab(B, "/somewhere/else", "Add the route")]);
+    openFolder("/not/theirs");
+    window(state);
+    await settle();
+    expect(count()).toBe("$(history) 2");
+    const command = stub.ops.find(([target, action]) => target === ITEM && action === "set:command")?.[2];
+    expect(command).toBe(REOPEN_TABS);
+    // Another window reopened them: this one learns it when it comes to the front.
+    await state.update(PENDING_TABS_KEY, []);
+    stub.focusChange.fire();
+    await settle();
+    expect(count()).toBeUndefined();
+  });
+
+  it("counts the tabs a restore in this window queued, with no change of focus or folder", async () => {
+    const state = new Memento();
+    openFolder("/not/theirs");
+    const { disposable } = window(state);
+    await settle();
+    expect(count()).toBeUndefined();
+    await state.update(PENDING_TABS_KEY, [tab(A, "/work/app", "Wire the cache")]);
+    disposable.refresh();
+    expect(count()).toBe("$(history) 1");
+    // Counted only: the offer keeps to the window's own tabs, at its usual times.
+    expect(messages("info")).toEqual([]);
+  });
+
+  it("says where tabs of a folder that is not here work instead, and offers them there", async () => {
+    const state = new Memento();
+    const gone = "/nowhere/gone";
+    await state.update(PENDING_TABS_KEY, [tab(A, gone, "Wire the cache"), tab(B, gone, "Add the route"), tab(C, "/kept/apart", "Other")]);
+    window(state);
+    await settle();
+    stub.quickPick = (items) => (items as { tab: PendingTab }[]).filter((item) => item.tab.cwd === gone);
+    stub.openDialog = () => ["/work/app"];
+    stub.answerNotice = (notice) => (notice.actions.includes("Choose Folder…") ? "Choose Folder…" : notice.actions.includes("Reopen") ? "Reopen" : undefined);
+    await stub.commands.get(REOPEN_TABS)!();
+    await settle();
+    // Both tabs of the folder that is gone now work in this window's folder, and reopen here.
+    expect(opened).toEqual([A, B]);
+    expect(state.pending()).toEqual([C]);
+    expect(stub.notices.find((notice) => notice.actions.includes("Choose Folder…"))?.message).toBe(
+      'Lookout: "Wire the cache" and "Add the route" worked in /nowhere/gone, which is not on this machine. Choose the folder they work in here, or forget them.',
+    );
+  });
+
+  it("moves the tabs to another folder chosen, with their conversations, for that folder's window to offer", async () => {
+    const state = new Memento();
+    const gone = "/nowhere/gone";
+    const other = fs.realpathSync(tempConfigDir());
+    // As a restore files it: under the folder the tab worked in, with its subagents beside it.
+    claudeDirs = [claudeDir("default", [A], gone)];
+    const dir = claudeDirs[0]!.resolved;
+    const was = transcriptPath(dir, gone, A);
+    fs.mkdirSync(path.join(was.slice(0, -".jsonl".length), "subagents"), { recursive: true });
+    fs.writeFileSync(path.join(was.slice(0, -".jsonl".length), "subagents", "agent-1.jsonl"), "{}\n");
+    await state.update(PENDING_TABS_KEY, [tab(A, gone, "Wire the cache")]);
+    window(state);
+    await settle();
+    stub.quickPick = (items) => items;
+    stub.openDialog = () => [other];
+    stub.commands.set("vscode.openFolder", () => undefined);
+    stub.answerNotice = (notice) => (notice.actions.includes("Choose Folder…") ? "Choose Folder…" : notice.actions.includes("Open in New Window") ? "Open in New Window" : undefined);
+    await stub.commands.get(REOPEN_TABS)!();
+    await settle();
+    expect((state.values.get(PENDING_TABS_KEY) as PendingTab[]).map((t) => t.cwd)).toEqual([other]);
+    // Claude Code's panel looks for it only under the project folder of its window's first folder: it is there now.
+    const now = transcriptPath(dir, other, A);
+    expect(fs.existsSync(now)).toBe(true);
+    expect(fs.existsSync(path.join(now.slice(0, -".jsonl".length), "subagents", "agent-1.jsonl"))).toBe(true);
+    expect(fs.existsSync(was)).toBe(false);
+    expect(stub.ops.find(([target, action]) => target === "commands" && action === "vscode.openFolder")?.[2]).toEqual([expect.objectContaining({ fsPath: other }), { forceNewWindow: true }]);
+    expect(opened).toEqual([]);
+  });
+
+  it("keeps a tab whose conversation is not filed under its folder where it was, and says why", async () => {
+    const state = new Memento();
+    const other = fs.realpathSync(tempConfigDir());
+    // The conversation is under /work/app, not under the folder the tab worked in: moved there, the tab would open an empty chat.
+    await state.update(PENDING_TABS_KEY, [tab(A, "/nowhere/gone", "Wire the cache")]);
+    window(state);
+    await settle();
+    stub.quickPick = (items) => items;
+    stub.openDialog = () => [other];
+    stub.commands.set("vscode.openFolder", () => undefined);
+    stub.notificationAnswer = "Choose Folder…";
+    await stub.commands.get(REOPEN_TABS)!();
+    await settle();
+    expect((state.values.get(PENDING_TABS_KEY) as PendingTab[]).map((t) => t.cwd)).toEqual(["/nowhere/gone"]);
+    expect(fs.existsSync(transcriptPath(claudeDirs[0]!.resolved, "/work/app", A))).toBe(true);
+    expect(messages("warning")).toContainEqual(expect.stringContaining('Lookout could not move the conversation of "Wire the cache"'));
+    expect(stub.ops.some(([target, action]) => target === "commands" && action === "vscode.openFolder")).toBe(false);
+  });
+
+  it("leaves the tabs where they were when no folder is chosen", async () => {
+    const state = new Memento();
+    await state.update(PENDING_TABS_KEY, [tab(A, "/nowhere/gone", "Wire the cache")]);
+    window(state);
+    await settle();
+    stub.quickPick = (items) => items;
+    stub.openDialog = () => undefined;
+    stub.notificationAnswer = "Choose Folder…";
+    await stub.commands.get(REOPEN_TABS)!();
+    expect((state.values.get(PENDING_TABS_KEY) as PendingTab[]).map((t) => t.cwd)).toEqual(["/nowhere/gone"]);
   });
 });
