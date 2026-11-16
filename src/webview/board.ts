@@ -1474,7 +1474,7 @@ function pastTitle(view: PastView, resumable: boolean): string {
   if (view.purged) return `${written} · the agent deleted its transcript, and Lookout kept what was said: click to read it. It cannot be resumed`;
   if (resumable) return `${written} · click to resume it ${resumeWhere(view)}`;
   if (view.resumable) return `${written} · click to read its conversation; Lookout cannot resume ${agentInfo(view.agent).label}'s sessions`;
-  return `${written} · from ${view.cwd || "another project"}, not one of this window's folders: click to read its conversation; the agent resumes it from a window open on that folder`;
+  return `${written} · from ${view.cwd || "another project"}: click to read its conversation; the agent resumes it from a window whose first folder is that one`;
 }
 
 function updatePastCard(card: HTMLElement, view: PastView): void {

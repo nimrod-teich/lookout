@@ -172,7 +172,7 @@ export interface PastView {
   /** The git branch it last worked on. */
   branch?: string;
   cwd: string;
-  /** The agent can resume it in this window; else it runs again from a window open on its folder. */
+  /** The agent can resume it in this window; else it runs again from a window whose first folder is its folder. */
   resumable: boolean;
   /** Epoch ms the transcript was last written. */
   modifiedAt: number;
