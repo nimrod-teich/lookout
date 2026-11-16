@@ -1083,13 +1083,13 @@ describe("the extension", () => {
       stub.commands.set(CLAUDE_OPEN, () => undefined);
       const opened = (id: string) => stub.ops.some(([target, command, args]) => target === "commands" && command === CLAUDE_OPEN && (args as unknown[])[0] === id);
       boardView.receive({ type: "resume", id: ELSEWHERE });
-      await vi.waitFor(() => expect(infoMessages()).toContain(`"deploy the other service" is from /work/other, not one of this window's folders: the agent resumes it from a window open on that folder.`), WAIT);
+      await vi.waitFor(() => expect(infoMessages()).toContain(`"deploy the other service" is from /work/other: the agent resumes it from a window whose first folder is that one.`), WAIT);
       boardView.receive({ type: "resume", id: HERE });
       await vi.waitFor(() => expect(opened(HERE)).toBe(true), WAIT);
       expect(opened(ELSEWHERE)).toBe(false);
 
       // Its conversation's Open session says the same, also once the scope no longer lists it.
-      const refusal = `"deploy the other service" is from /work/other, not one of this window's folders: the agent resumes it from a window open on that folder.`;
+      const refusal = `"deploy the other service" is from /work/other: the agent resumes it from a window whose first folder is that one.`;
       const refusals = () => infoMessages().filter((text) => text === refusal).length;
       boardView.receive({ type: "openHit", query: "", id: ELSEWHERE });
       const panel = stub.panels.at(-1)!;
@@ -1100,6 +1100,24 @@ describe("the extension", () => {
       panel.receive({ type: "jump", id: ELSEWHERE });
       await vi.waitFor(() => expect(refusals()).toBe(3), WAIT);
       expect(opened(ELSEWHERE)).toBe(false);
+    }, 60_000);
+
+    it("in a window of several folders, resumes only the first folder's sessions and opens the others' conversations", async () => {
+      // As a multi-root workspace: the second folder's sessions are listed, but Claude Code's panel looks only under the first.
+      workspace.workspaceFolders = [{ uri: { fsPath: "/work/app" } }, { uri: { fsPath: "/work/other" } }];
+      activate(context());
+      const { boardView, listed } = openBoard();
+      await vi.waitFor(() => expect(listed()?.past.map((p) => [p.id, p.resumable]).sort()).toEqual([
+        [HERE, true],
+        [ELSEWHERE, false],
+      ].sort()), WAIT);
+      stub.commands.set(CLAUDE_OPEN, () => undefined);
+      const opened = (id: string) => stub.ops.some(([target, command, args]) => target === "commands" && command === CLAUDE_OPEN && (args as unknown[])[0] === id);
+      boardView.receive({ type: "resume", id: ELSEWHERE });
+      await vi.waitFor(() => expect(infoMessages()).toContain(`"deploy the other service" is from /work/other: the agent resumes it from a window whose first folder is that one.`), WAIT);
+      expect(opened(ELSEWHERE)).toBe(false);
+      boardView.receive({ type: "resume", id: HERE });
+      await vi.waitFor(() => expect(opened(HERE)).toBe(true), WAIT);
     }, 60_000);
 
     it("reads the conversations in a thread of its own, and sends a search's results again as they are read", async () => {

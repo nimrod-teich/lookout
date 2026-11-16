@@ -273,7 +273,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     if (!view.resumable) {
-      void vscode.window.showInformationMessage(`"${view.title}" is from ${view.cwd || "another project"}, not one of this window's folders: the agent resumes it from a window open on that folder.`);
+      void vscode.window.showInformationMessage(`"${view.title}" is from ${view.cwd || "another project"}: the agent resumes it from a window whose first folder is that one.`);
       return;
     }
     if (!canResume(view)) return;

@@ -15,7 +15,12 @@ export interface PastTranscript {
   branch?: string;
   /** The organization of the account it last ran on, as Claude Code stamped it. */
   organizationUuid?: string;
-  /** It is one of the folders' sessions, which Claude Code resumes in their window. */
+  /**
+   * Filed under the window's first folder, the one folder whose sessions
+   * Claude Code's panel resumes in this window: it looks for a session's
+   * transcript only there (and in that repository's worktrees), and opens an
+   * empty chat for one filed under any other folder.
+   */
   resumable: boolean;
   /** Epoch ms the transcript was last written. */
   modifiedAt: number;
@@ -164,6 +169,8 @@ interface Candidate {
   file: string;
   /** The window's folder it belongs to, if any. */
   folder?: string;
+  /** Filed under the window's first folder: Claude Code's panel resumes it in this window. */
+  first?: boolean;
   mtimeMs: number;
   size: number;
 }
@@ -195,8 +202,9 @@ export class PastTranscripts {
    */
   list(scope: PastScope, exclude: ReadonlySet<string>): { transcripts: PastTranscript[]; capped: boolean; incomplete: boolean; also: PastTranscript[] } {
     const seen = new Set<string>();
-    // The window's own folders first, as their window resumes them: Claude Code keeps a folder's transcripts in the project
-    // directory named after it, found here as the file system names it (without regard to case where it has none).
+    // The window's own folders first, its first folder before the others, so a session filed under several is listed as the
+    // one the panel resumes: Claude Code keeps a folder's transcripts in the project directory named after it, found here as
+    // the file system names it (without regard to case where it has none).
     const found = scope.all ? [...this.inFolders(scope.folders), ...this.everywhere()] : this.inFolders(scope.folders);
     const candidates = found
       .filter((candidate) => !exclude.has(candidate.id) && !seen.has(candidate.id) && seen.add(candidate.id) !== undefined)
@@ -254,10 +262,10 @@ export class PastTranscripts {
     const { title, cwd, branch, organizationUuid } = cached.info;
     if (!title) return undefined;
     // Where it started, as it says: two folders can share a project directory ("my.app" and "my-app").
-    return { id: candidate.id, file: candidate.file, cwd: cwd ?? candidate.folder ?? "", title, branch, ...(organizationUuid ? { organizationUuid } : {}), resumable: candidate.folder !== undefined, modifiedAt: Math.round(candidate.mtimeMs) };
+    return { id: candidate.id, file: candidate.file, cwd: cwd ?? candidate.folder ?? "", title, branch, ...(organizationUuid ? { organizationUuid } : {}), resumable: candidate.first === true, modifiedAt: Math.round(candidate.mtimeMs) };
   }
 
-  private transcriptsIn(dir: string, folder: string | undefined, into: Candidate[]): void {
+  private transcriptsIn(dir: string, folder: string | undefined, into: Candidate[], first = false): void {
     let names: string[];
     try {
       names = fs.readdirSync(dir);
@@ -271,7 +279,7 @@ export class PastTranscripts {
       const file = path.join(dir, name);
       try {
         const st = fs.statSync(file);
-        if (st.isFile() && st.size > 0) into.push({ id, file, folder, mtimeMs: st.mtimeMs, size: st.size });
+        if (st.isFile() && st.size > 0) into.push({ id, file, folder, ...(first ? { first } : {}), mtimeMs: st.mtimeMs, size: st.size });
       } catch {
         // Gone meanwhile.
       }
@@ -280,7 +288,7 @@ export class PastTranscripts {
 
   private inFolders(folders: readonly string[]): Candidate[] {
     const out: Candidate[] = [];
-    for (const folder of folders) this.transcriptsIn(path.join(this.configDir, "projects", encodeProjectDir(folder)), folder, out);
+    folders.forEach((folder, i) => this.transcriptsIn(path.join(this.configDir, "projects", encodeProjectDir(folder)), folder, out, i === 0));
     return out;
   }
 

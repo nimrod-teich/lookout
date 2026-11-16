@@ -56,9 +56,10 @@ describe("PastTranscripts", () => {
     const past = new PastTranscripts(dir);
     const { transcripts: list, capped } = past.list({ folders: ["/work/app", "/work/svc", "/nowhere"], all: false, limit: 500 }, new Set([sessionId(4)]));
     expect(capped).toBe(false);
+    // Listed for every folder of the window; resumable only for the first, the one folder Claude Code's panel looks in.
     expect(list.map((p) => [p.id, p.title, p.cwd, p.resumable])).toEqual([
       [sessionId(2), "Newer", "/work/app", true],
-      [sessionId(3), "In another project", "/work/svc", true],
+      [sessionId(3), "In another project", "/work/svc", false],
       [sessionId(1), "Older", "/work/app", true],
     ]);
     expect(list[0]?.file).toBe(b);
@@ -122,6 +123,33 @@ describe("PastTranscripts", () => {
         [sessionId(2), true],
       ]),
     );
+  });
+
+  it("resumes only the window's first folder's sessions, and lists a session filed under several folders as the first's", () => {
+    const dir = tempConfigDir();
+    const infra = "/Users/me/projects/infra";
+    const devops = "/Users/me/projects/devops";
+    // The same conversation filed under two folders, as a move between machines can leave it, and one filed only under the second.
+    for (const folder of [devops, infra]) appendEntries(transcriptPath(dir, folder, sessionId(1)), [{ type: "user", cwd: "/home/bob/projects/app", message: { content: "Both" } }]);
+    appendEntries(transcriptPath(dir, devops, sessionId(2)), [{ type: "user", cwd: devops, message: { content: "Second folder only" } }]);
+    const past = new PastTranscripts(dir);
+    const rows = (folders: string[], all = false) => past.list({ folders, all, limit: 10 }, new Set()).transcripts.map((p) => [p.id, p.file, p.resumable]).sort();
+    expect(rows([infra, devops])).toEqual([
+      [sessionId(1), transcriptPath(dir, infra, sessionId(1)), true],
+      [sessionId(2), transcriptPath(dir, devops, sessionId(2)), false],
+    ]);
+    expect(rows([infra, devops], true)).toEqual(rows([infra, devops]));
+    // A window whose first folder is the second's: its sessions resume there.
+    expect(rows([devops, infra])).toEqual([
+      [sessionId(1), transcriptPath(dir, devops, sessionId(1)), true],
+      [sessionId(2), transcriptPath(dir, devops, sessionId(2)), true],
+    ]);
+    // Asked for by id, as a starred or noted session is: the same rule.
+    const { also } = past.list({ folders: [infra, devops], all: false, limit: 0, also: [sessionId(1), sessionId(2)] }, new Set());
+    expect(also.map((p) => [p.id, p.resumable]).sort()).toEqual([
+      [sessionId(1), true],
+      [sessionId(2), false],
+    ]);
   });
 
   it("lists the sessions asked for by id besides, wherever they ran", () => {

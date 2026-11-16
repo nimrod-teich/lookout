@@ -91,7 +91,7 @@ export interface PastSession {
   title: string;
   /** The git branch it last worked on. */
   branch?: string;
-  /** The agent can resume it in this window: it belongs to one of the window's folders. */
+  /** The agent can resume it in this window: it belongs to the window's folders, as the agent counts them (Claude Code: the first folder only). */
   resumable: boolean;
   /** Epoch ms the transcript was last written. */
   modifiedAt: number;
