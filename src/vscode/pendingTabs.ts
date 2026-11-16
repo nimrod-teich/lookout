@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { findTranscript, type ClaudeDir } from "../core/agents/claude/paths";
+import { encodeProjectDir, findTranscript, type ClaudeDir } from "../core/agents/claude/paths";
 import { plainText } from "../core/plainText";
 import { folderKey, pendingFor, readPending, TabClaims, withoutTabs } from "../core/transfer/tabs";
 import { PENDING_TABS_KEY, type PendingTab } from "../core/transfer/types";
@@ -73,6 +73,15 @@ function titles(tabs: readonly PendingTab[], max = 3): string {
 function isDirectory(dir: string): boolean {
   try {
     return fs.statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** A plain file, not a link to one. */
+function isFile(file: string): boolean {
+  try {
+    return fs.lstatSync(file).isFile();
   } catch {
     return false;
   }
@@ -272,22 +281,62 @@ class PendingTabs {
   }
 
   /**
-   * Says the tabs of a folder that is not here worked in `folder` instead:
-   * every waiting tab of the old folder moves with them. Claude Code finds a
-   * conversation wherever its transcript is, and runs it in the folder of
-   * the window that opens it.
+   * Says these tabs work in `folder` instead of the one they worked in.
    */
-  private async repoint(from: string, folder: string): Promise<PendingTab[]> {
-    const key = folderKey(from);
+  private async repoint(tabs: readonly PendingTab[], folder: string): Promise<PendingTab[]> {
+    const ids = new Set(tabs.map((tab) => tab.sessionId.toLowerCase()));
     const moved: PendingTab[] = [];
     const pending = this.pending().map((tab) => {
-      if (folderKey(tab.cwd) !== key) return tab;
+      if (!ids.has(tab.sessionId.toLowerCase())) return tab;
       const next = { ...tab, cwd: folder };
       moved.push(next);
       return next;
     });
     await this.state.update(PENDING_TABS_KEY, pending);
     return moved;
+  }
+
+  /**
+   * Files the conversations of tabs that worked in `from` under `folder`'s
+   * project folder, where Claude Code's panel looks for them in a window
+   * whose first folder is `folder`: it looks for a session nowhere else, and
+   * opens an empty chat for one it does not find there. A conversation
+   * already there stays. One filed under `from`, a folder this machine does
+   * not have, moves there with its subagents and tool results; Lookout's
+   * history follows it to its new place. `left`: the tabs whose
+   * conversation is under neither.
+   */
+  private fileUnder(tabs: readonly PendingTab[], from: string, folder: string): { placed: PendingTab[]; left: PendingTab[] } {
+    const placed: PendingTab[] = [];
+    const left: PendingTab[] = [];
+    for (const tab of tabs) {
+      let done = false;
+      for (const dir of this.deps.claudeDirs()) {
+        const projects = path.join(dir.resolved, "projects");
+        const to = path.join(projects, encodeProjectDir(folder), `${tab.sessionId}.jsonl`);
+        if (isFile(to)) {
+          done = true;
+          break;
+        }
+        const at = path.join(projects, encodeProjectDir(from), `${tab.sessionId}.jsonl`);
+        if (!isFile(at)) continue;
+        try {
+          fs.mkdirSync(path.dirname(to), { recursive: true });
+          fs.renameSync(at, to);
+          // Its subagents and tool results, beside it.
+          const files = at.slice(0, -".jsonl".length);
+          const target = to.slice(0, -".jsonl".length);
+          if (isDirectory(files) && !fs.existsSync(target)) fs.renameSync(files, target);
+          this.deps.log.info(`Moved the conversation of ${tab.sessionId} from ${from} to ${folder}, for Claude Code to open it there`);
+          done = true;
+        } catch (err) {
+          this.deps.log.errorOnce(`Could not move the conversation of ${tab.sessionId} to ${folder}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        break;
+      }
+      (done ? placed : left).push(tab);
+    }
+    return { placed, left };
   }
 
   /**
@@ -340,7 +389,15 @@ class PendingTabs {
       const picked = await vscode.window.showOpenDialog({ title: `Where does ${titleOf(entry.tabs[0]!)} work here?`, openLabel: "Use This Folder", canSelectFiles: false, canSelectFolders: true, canSelectMany: false });
       const folder = picked?.[0]?.fsPath;
       if (!folder) continue;
-      const moved = await this.repoint(entry.folder, folder);
+      // Claude Code opens a conversation only from the project folder of the window's first folder: it goes there first.
+      const { placed, left } = this.fileUnder(entry.tabs, entry.folder, folder);
+      if (left.length > 0) {
+        void vscode.window.showWarningMessage(
+          `Lookout could not move the conversation of ${titles(left)} to ${folderOf(folder)}: it is not filed under ${folderOf(entry.folder)} on this machine, and Claude Code would open an empty chat there. ${plural(left.length, "It waits", "They wait")} for ${folderOf(entry.folder)}.`,
+        );
+      }
+      if (placed.length === 0) continue;
+      const moved = await this.repoint(placed, folder);
       // This window's own folder: offered here; another: its window offers them.
       if (folderKey(folder) === folderKey(this.firstFolder() ?? "")) await this.offer();
       else await this.elsewhere(moved);

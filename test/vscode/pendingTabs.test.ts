@@ -399,10 +399,17 @@ describe("tabs waiting elsewhere", () => {
     );
   });
 
-  it("moves the tabs to another folder chosen, for that folder's window to offer", async () => {
+  it("moves the tabs to another folder chosen, with their conversations, for that folder's window to offer", async () => {
     const state = new Memento();
+    const gone = "/nowhere/gone";
     const other = fs.realpathSync(tempConfigDir());
-    await state.update(PENDING_TABS_KEY, [tab(A, "/nowhere/gone", "Wire the cache")]);
+    // As a restore files it: under the folder the tab worked in, with its subagents beside it.
+    claudeDirs = [claudeDir("default", [A], gone)];
+    const dir = claudeDirs[0]!.resolved;
+    const was = transcriptPath(dir, gone, A);
+    fs.mkdirSync(path.join(was.slice(0, -".jsonl".length), "subagents"), { recursive: true });
+    fs.writeFileSync(path.join(was.slice(0, -".jsonl".length), "subagents", "agent-1.jsonl"), "{}\n");
+    await state.update(PENDING_TABS_KEY, [tab(A, gone, "Wire the cache")]);
     window(state);
     await settle();
     stub.quickPick = (items) => items;
@@ -412,8 +419,32 @@ describe("tabs waiting elsewhere", () => {
     await stub.commands.get(REOPEN_TABS)!();
     await settle();
     expect((state.values.get(PENDING_TABS_KEY) as PendingTab[]).map((t) => t.cwd)).toEqual([other]);
+    // Claude Code's panel looks for it only under the project folder of its window's first folder: it is there now.
+    const now = transcriptPath(dir, other, A);
+    expect(fs.existsSync(now)).toBe(true);
+    expect(fs.existsSync(path.join(now.slice(0, -".jsonl".length), "subagents", "agent-1.jsonl"))).toBe(true);
+    expect(fs.existsSync(was)).toBe(false);
     expect(stub.ops.find(([target, action]) => target === "commands" && action === "vscode.openFolder")?.[2]).toEqual([expect.objectContaining({ fsPath: other }), { forceNewWindow: true }]);
     expect(opened).toEqual([]);
+  });
+
+  it("keeps a tab whose conversation is not filed under its folder where it was, and says why", async () => {
+    const state = new Memento();
+    const other = fs.realpathSync(tempConfigDir());
+    // The conversation is under /work/app, not under the folder the tab worked in: moved there, the tab would open an empty chat.
+    await state.update(PENDING_TABS_KEY, [tab(A, "/nowhere/gone", "Wire the cache")]);
+    window(state);
+    await settle();
+    stub.quickPick = (items) => items;
+    stub.openDialog = () => [other];
+    stub.commands.set("vscode.openFolder", () => undefined);
+    stub.notificationAnswer = "Choose Folder…";
+    await stub.commands.get(REOPEN_TABS)!();
+    await settle();
+    expect((state.values.get(PENDING_TABS_KEY) as PendingTab[]).map((t) => t.cwd)).toEqual(["/nowhere/gone"]);
+    expect(fs.existsSync(transcriptPath(claudeDirs[0]!.resolved, "/work/app", A))).toBe(true);
+    expect(messages("warning")).toContainEqual(expect.stringContaining('Lookout could not move the conversation of "Wire the cache"'));
+    expect(stub.ops.some(([target, action]) => target === "commands" && action === "vscode.openFolder")).toBe(false);
   });
 
   it("leaves the tabs where they were when no folder is chosen", async () => {
