@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TOMBSTONE_MS } from "../../src/core/syncedNotes";
-import { changedKeys, localValues, mergeList, mergeState, readLocalState, readSyncedState, type LocalState, type SyncedList, type SyncedState } from "../../src/core/syncedState";
+import { changedKeys, localValues, mergeList, mergeState, readLocalState, readSyncedState, type LocalState, type SessionsHere, type SyncedList, type SyncedState } from "../../src/core/syncedState";
 
 const DAY = 24 * 3_600_000;
 const NOW = 1_000 * DAY;
@@ -154,5 +154,57 @@ describe("Lookout's keys", () => {
       "lookout.group": "project",
       "lookout.claudeOrgs": { o1: "k" },
     });
+  });
+});
+
+describe("what the stars carry of their sessions", () => {
+  /** A machine named `host` that has the sessions `titles` names, each with its title. */
+  const here = (host: string, titles: Record<string, string>): SessionsHere => ({ host, of: (id) => (id in titles ? { title: titles[id], agent: "claude-code" } : undefined) });
+  const starred = (...ids: string[]) => local({ favourites: ids });
+
+  it("says the title, agent and machine of a starred session this machine has, and of no other", () => {
+    const merged = mergeState(undefined, starred("a", "b"), undefined, NOW, here("laptop", { a: "Wire the cache", c: "not starred" }));
+    expect(merged.about).toEqual({ a: { title: "Wire the cache", agent: "claude-code", host: "laptop", at: NOW } });
+    // Nothing to say: no `about` at all, as an older Lookout writes the state.
+    expect(mergeState(undefined, starred("b"), undefined, NOW, here("laptop", {})).about).toBeUndefined();
+    expect(mergeState(undefined, starred("a"), undefined, NOW).about).toBeUndefined();
+  });
+
+  it("keeps the first machine's word on a session two machines have, so they never take turns rewriting it", () => {
+    const a = mergeState(undefined, starred("s"), undefined, NOW, here("a", { s: "Title on a" }));
+    const b = mergeState(undefined, starred("s"), a, NOW + DAY, here("b", { s: "Title on b" }));
+    expect(b.about).toEqual(a.about);
+    const again = mergeState(a, starred("s"), b, NOW + 2 * DAY, here("a", { s: "Title on a" }));
+    expect(again).toEqual(a);
+  });
+
+  it("lets the machine that said it change the title, and takes the later word of the base's and the remote copy's", () => {
+    const first = mergeState(undefined, starred("s"), undefined, NOW, here("a", { s: "Old" }));
+    const renamed = mergeState(first, starred("s"), undefined, NOW + DAY, here("a", { s: "New" }));
+    expect(renamed.about?.s).toEqual({ title: "New", agent: "claude-code", host: "a", at: NOW + DAY });
+    // A machine without the session: the later word, whichever copy has it.
+    expect(mergeState(first, starred("s"), renamed, NOW + 2 * DAY, here("b", {})).about?.s?.title).toBe("New");
+    expect(mergeState(renamed, starred("s"), first, NOW + 2 * DAY, here("b", {})).about?.s?.title).toBe("New");
+  });
+
+  it("lets what a star carried go with the star", () => {
+    const base = mergeState(undefined, starred("s", "t"), undefined, NOW, here("a", { s: "One", t: "Two" }));
+    const merged = mergeState(base, starred("t"), undefined, NOW + DAY, here("a", { s: "One", t: "Two" }));
+    expect(Object.keys(merged.about ?? {})).toEqual(["t"]);
+  });
+
+  it("reads what a synced copy carries and the machine that wrote it, and a copy without them as before", () => {
+    const copy = mergeState(undefined, starred("s"), undefined, NOW, here("a", { s: "Wire the cache" }));
+    const read = readSyncedState({ ...copy, about: { ...copy.about, bad: { title: "no time" }, worse: "x", t: { title: "".padEnd(1000, "y"), at: NOW } }, by: "a" });
+    expect(read?.about?.s).toEqual(copy.about?.s);
+    expect(Object.keys(read?.about ?? {})).toEqual(["s", "t"]);
+    expect(read?.about?.t?.title).toHaveLength(300);
+    expect(read?.by).toBe("a");
+    // An older Lookout reads the rest of it, the lists, alike: they are what both read.
+    const older: Partial<SyncedState> = { ...read };
+    delete older.about;
+    delete older.by;
+    expect(readSyncedState(older)).toEqual(older);
+    expect(readSyncedState({ ...copy, by: 5 })?.by).toBeUndefined();
   });
 });

@@ -1174,6 +1174,47 @@ describe("the extension", () => {
       expect(stub.panels.find((panel) => panel.viewType === "lookout.findings")?.posted.at(-1)).toMatchObject({ type: "conversation", session: { id: ELSEWHERE } });
     }, 60_000);
 
+    it("lists starred and noted sessions whose conversations are on another machine, says where, and offers a restore", async () => {
+      const FAR = "00000000-0000-4000-8000-0000000000c1";
+      const NOTED = "00000000-0000-4000-8000-0000000000c2";
+      const empty = { ids: [], removed: [] };
+      savedGlobal["lookout.favourites"] = [FAR, HERE];
+      // As Settings Sync brought it: the machine that has FAR said what it is called.
+      savedGlobal["lookout.sync.state"] = {
+        v: 1,
+        favourites: { ids: [[FAR, 1], [HERE, 1]], removed: [] },
+        archive: empty,
+        parked: empty,
+        kept: empty,
+        claudeOrgs: {},
+        about: { [FAR]: { title: "Vendor identity plan", agent: "claude-code", host: "wsl-desktop", at: 5 } },
+        by: "wsl-desktop",
+      };
+      new SessionRecords(path.join(configDir, "global-storage", "sessions")).addNote(NOTED, "five calls still open", { agent: "claude-code", title: "Fleet hosts", cwd: "/home/bob/projects/sri" });
+      activate(context());
+      const { boardView, listed } = openBoard();
+      const elsewhere = () => (boardView.posted.filter((m) => (m as { type: string }).type === "sessions").at(-1) as { elsewhere?: { id: string; title: string; host?: string; elsewhere?: boolean; resumable: boolean; note?: string; noteCount?: number }[] } | undefined)?.elsewhere;
+      await vi.waitFor(() => expect(elsewhere()?.map((p) => p.id).sort()).toEqual([FAR, NOTED]), WAIT);
+      expect(elsewhere()!.find((p) => p.id === FAR)).toMatchObject({ title: "Vendor identity plan", host: "wsl-desktop", elsewhere: true, resumable: false });
+      expect(elsewhere()!.find((p) => p.id === NOTED)).toMatchObject({ title: "Fleet hosts", note: "five calls still open", noteCount: 1, elsewhere: true });
+      // HERE is on this machine: listed, not under On other machines.
+      expect(listed()?.past.map((p) => p.id)).toEqual([HERE]);
+      // A click says where it is, and offers to restore a backup.
+      stub.notificationAnswer = "Restore from Backup…";
+      boardView.receive({ type: "elsewhere", id: FAR });
+      await vi.waitFor(() => expect(stub.ops.some(([target, command]) => target === "commands" && command === "lookout.restore")).toBe(true), WAIT);
+      expect(stub.notices.find((n) => n.message.includes("Vendor identity plan"))).toMatchObject({ modal: true, message: '"Vendor identity plan" is on wsl-desktop.', actions: ["Restore from Backup…"] });
+      // Only a session the board listed there.
+      const shown = stub.notices.length;
+      boardView.receive({ type: "elsewhere", id: HERE });
+      await settle();
+      expect(stub.notices).toHaveLength(shown);
+      // Its star can be taken away from there, and it leaves the group.
+      boardView.receive({ type: "favourite", id: FAR });
+      await vi.waitFor(() => expect(elsewhere()?.map((p) => p.id)).toEqual([NOTED]), WAIT);
+      expect(savedGlobal["lookout.favourites"]).toEqual([HERE]);
+    }, 60_000);
+
     it("archives an earlier session from the board, takes its star away, lists it under Archived in every window, and brings it back", async () => {
       savedGlobal["lookout.favourites"] = [HERE];
       activate(context());

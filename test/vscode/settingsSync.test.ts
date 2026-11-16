@@ -7,7 +7,7 @@ import { readSyncedNotes } from "../../src/core/syncedNotes";
 import { readSyncedState } from "../../src/core/syncedState";
 import { SYNC_LIMIT, syncBytes } from "../../src/core/syncLimit";
 import { SYNC_KEYS, SYNC_NOTES_KEY, SYNC_STATE_KEY } from "../../src/core/transfer/types";
-import { registerSettingsSync, SettingsSync, SYNC_BASE_KEY, SYNC_CAPPED_KEY } from "../../src/vscode/settingsSync";
+import { registerSettingsSync, SettingsSync, SYNC_BASE_KEY, SYNC_CAPPED_KEY, SYNC_SEEN_KEY, SYNC_STATUS_COMMAND } from "../../src/vscode/settingsSync";
 import { settle } from "./helpers";
 import { stub, StubMemento } from "./stub-vscode";
 
@@ -57,10 +57,23 @@ class Machine {
   lastSync: State | undefined;
   /** Times the window was told a merge changed Lookout's keys or the notes. */
   changes = 0;
+  /** What the window wrote to Lookout's log. */
+  readonly logged: string[] = [];
 
-  constructor(name: string) {
+  /** `here`: the sessions on this machine, by id, with their titles. */
+  constructor(
+    readonly name: string,
+    readonly here: Record<string, string> = {},
+  ) {
     this.recordsDir = path.join(root, name, "global-storage", "sessions");
-    this.sync = new SettingsSync(this.memento, { recordsDir: this.recordsDir, now: () => clock, changed: () => this.changes++ });
+    this.sync = new SettingsSync(this.memento, {
+      recordsDir: this.recordsDir,
+      now: () => clock,
+      changed: () => this.changes++,
+      host: name,
+      describe: (id) => (id in this.here ? { title: this.here[id], agent: "claude-code" } : undefined),
+      log: { info: (line) => this.logged.push(line), errorOnce: () => {} },
+    });
     open.push(this.sync);
   }
 
@@ -360,6 +373,126 @@ describe("Settings Sync between two machines", () => {
     expect(a.list(FAVOURITES)).toEqual(["x", "y", "w"]);
     expect(b.list(FAVOURITES)).toEqual(["w", "y", "x"]);
     expect(readSyncedState(a.memento.get(SYNC_BASE_KEY))?.favourites.removed).toEqual([]);
+  });
+
+  it("carries a starred session's title and machine to a machine that does not have it", () => {
+    const laptop = new Machine("laptop", { [S1]: "Wire the cache" });
+    laptop.star(S1);
+    converge(cloud, [laptop, b]);
+    expect(readSyncedState(b.memento.get(SYNC_STATE_KEY))?.about?.[S1]).toMatchObject({ title: "Wire the cache", agent: "claude-code", host: "laptop" });
+    expect(readSyncedState(b.memento.get(SYNC_BASE_KEY))?.about?.[S1]).toMatchObject({ title: "Wire the cache", host: "laptop" });
+    expect(b.list(FAVOURITES)).toEqual([S1]);
+  });
+
+  it("carries the machine a noted session is on with its notes", () => {
+    const laptop = new Machine("laptop", { [S1]: "Wire the cache" });
+    laptop.notes.addNote(S1, "has the retag recipe", SEEN, clock);
+    converge(cloud, [laptop, b]);
+    expect(readSyncedNotes(b.memento.get(SYNC_NOTES_KEY))?.get(S1)?.host).toBe("laptop");
+  });
+
+  it("names the machine that last changed each copy, and two machines that agree leave the name alone", () => {
+    a.star("x");
+    converge(cloud, [a, b]);
+    expect((cloud.state?.[SYNC_STATE_KEY] as { by?: string }).by).toBe("a");
+    b.star("y");
+    b.merge();
+    settingsSync(b, cloud);
+    expect((cloud.state?.[SYNC_STATE_KEY] as { by?: string }).by).toBe("b");
+    // Once they agree, neither machine writes either copy again, and the name stays whoever changed it last.
+    converge(cloud, [a, b]);
+    const last = (cloud.state?.[SYNC_STATE_KEY] as { by?: string }).by;
+    stub.ops.length = 0;
+    converge(cloud, [a, b]);
+    expect(ops("update").filter(([, , args]) => SYNC_KEYS.includes((args as unknown[])[0] as string))).toEqual([]);
+    expect((cloud.state?.[SYNC_STATE_KEY] as { by?: string }).by).toBe(last);
+  });
+
+  it("says in Lookout's log when another machine's copy arrives, with what it brought, and not for its own", () => {
+    a.star("x");
+    a.star("y");
+    a.notes.addNote(S1, "has the retag recipe", SEEN, clock);
+    a.merge();
+    settingsSync(a, cloud);
+    a.merge();
+    expect(a.logged).toEqual([]);
+    settingsSync(b, cloud);
+    b.merge();
+    expect(b.logged).toEqual(["Settings Sync brought a's copy of the stars and lists: 2 stars.", "Settings Sync brought a's copy of the notes: 1 note on 1 session."]);
+    expect(b.sync.status().arrived).toEqual({ state: { at: clock, by: "a", stars: 2 }, notes: { at: clock, by: "a", notes: 1, sessions: 1 } });
+    // The same copy merged again: nothing more said.
+    b.merge();
+    expect(b.logged).toHaveLength(2);
+    // b's own copy goes back to a: a hears of it, b does not hear of its own.
+    b.star("z");
+    b.merge();
+    settingsSync(b, cloud);
+    settingsSync(a, cloud);
+    a.merge();
+    expect(a.logged).toEqual(["Settings Sync brought b's copy of the stars and lists: 3 stars."]);
+    b.merge();
+    expect(b.logged).toHaveLength(2);
+  });
+
+  it("does not take a copy another window of this machine wrote for another machine's", () => {
+    const second = new SettingsSync(a.memento, { recordsDir: a.recordsDir, now: () => clock, host: "a", log: { info: (line) => a.logged.push(line), errorOnce: () => {} } });
+    open.push(second);
+    a.star("x");
+    stub.config[SETTING] = true;
+    second.merge();
+    a.merge();
+    // The other window writes a new copy; what it saw reaches this window later than the copy does.
+    a.star("y");
+    const seenBefore = clone(a.memento.get(SYNC_SEEN_KEY));
+    second.merge();
+    a.memento.values.set(SYNC_SEEN_KEY, seenBefore);
+    a.merge();
+    expect(a.logged).toEqual([]);
+  });
+
+  it("does not take this machine's own copy from before the copies named their machine for another machine's", () => {
+    // As Lookout 0.1.6 left it: a synced copy with no name, and nothing seen.
+    a.memento.values.set(SYNC_STATE_KEY, { v: 1, favourites: { ids: [["x", 0]], removed: [] }, archive: { ids: [], removed: [] }, parked: { ids: [], removed: [] }, kept: { ids: [], removed: [] }, claudeOrgs: {} });
+    a.star("x");
+    a.merge();
+    expect(a.logged).toEqual([]);
+    expect(a.sync.status().arrived).toEqual({});
+    expect(a.memento.get(SYNC_SEEN_KEY)).toMatchObject({ state: expect.any(String), notes: expect.any(String) });
+  });
+
+  it("tells what it syncs, what came from another machine, and what is not on this machine, and opens VS Code's own Settings Sync log", async () => {
+    a.star("x");
+    a.notes.addNote(S1, "has the retag recipe", SEEN, clock);
+    converge(cloud, [a, b]);
+    expect(b.sync.status()).toMatchObject({ enabled: true, mergedAt: clock, stars: 1, notes: 1, sessions: 1 });
+    stub.config[SETTING] = true;
+    open.push(registerSettingsSync({ globalState: b.memento } as never, { recordsDir: b.recordsDir, now: () => clock, host: "b", elsewhere: () => ({ sessions: 2, stars: 1, notes: 1 }), version: "0.1.7" }));
+    stub.commands.set("workbench.userDataSync.actions.showLog", () => undefined);
+    stub.notificationAnswer = "Show Settings Sync Log";
+    stub.notices.length = 0;
+    await stub.commands.get(SYNC_STATUS_COMMAND)!();
+    const notice = stub.notices.at(-1)!;
+    expect(notice).toMatchObject({ modal: true, message: "Lookout's Settings Sync", actions: ["Sync Now", "Show Settings Sync Log", "Restore from Backup…"] });
+    expect(notice.detail).toContain("came from a on");
+    expect(notice.detail).toContain("This machine syncs 1 star, 0 archived sessions, 0 parked sessions and 1 note on 1 session.");
+    expect(notice.detail).toContain("2 starred or noted sessions (1 star, 1 note) are of conversations that are not on this machine");
+    // Machines on different versions of Lookout exchange nothing: the status says which this one runs.
+    expect(notice.detail).toContain("only on a machine that runs the same version of Lookout as the one that sent it: this one runs 0.1.7.");
+    await settle();
+    expect(stub.ops).toContainEqual(["commands", "workbench.userDataSync.actions.showLog", []]);
+    // In a remote window: says that Settings Sync carries Lookout's data only where it is installed in VS Code itself.
+    const vscodeEnv = (await import("./stub-vscode")).env;
+    vscodeEnv.remoteName = "wsl";
+    stub.notificationAnswer = undefined;
+    await stub.commands.get(SYNC_STATUS_COMMAND)!();
+    vscodeEnv.remoteName = undefined;
+    expect(stub.notices.at(-1)!.detail).toContain("This window's Lookout runs in wsl. Settings Sync carries Lookout's data only where Lookout is also installed in VS Code itself");
+    // Off: says so, and offers only the restore.
+    stub.config[SETTING] = false;
+    await stub.commands.get(SYNC_STATUS_COMMAND)!();
+    expect(stub.notices.at(-1)).toMatchObject({ actions: ["Restore from Backup…"] });
+    expect(stub.notices.at(-1)!.detail).toContain("lookout.settingsSync.enabled is off");
+    expect(stub.notices.at(-1)!.detail).not.toContain("same version");
   });
 });
 

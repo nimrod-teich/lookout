@@ -19,6 +19,8 @@ export interface SessionNotes {
   agent: string;
   /** Its title, for a machine that has no record of the session. */
   title?: string;
+  /** The machine the session is on, for a machine that does not have it. */
+  host?: string;
   /** Oldest first. */
   notes: NoteEntry[];
   /** The notes taken away in the last 90 days, by id. */
@@ -29,12 +31,16 @@ export interface SessionNotes {
 export interface SyncedNotes {
   v: 1;
   sessions: Record<string, SessionNotes>;
+  /** The machine that last changed the synced copy; only the synced value carries it. */
+  by?: string;
 }
 
 /** What this machine's records hold of a session. */
 export interface LocalNotes {
   agent?: string;
   title?: string;
+  /** This machine's name, when the session is on it. */
+  host?: string;
   notes: readonly NoteEntry[];
 }
 
@@ -43,6 +49,8 @@ export const TOMBSTONE_MS = 90 * 24 * 3_600_000;
 
 /** The longest session id a synced value is read for. */
 const ID_MAX = 256;
+/** The longest machine name a session's notes are read with. */
+const HOST_MAX = 255;
 
 /** A session id as a synced value may name one. */
 export function isSyncedId(id: unknown): id is string {
@@ -93,7 +101,8 @@ export function readSessionNotes(value: unknown): SessionNotes | undefined {
     if (typeof t?.id !== "string" || t.id === "" || !finite(t.at)) continue;
     removed.set(t.id, Math.max(removed.get(t.id) ?? -Infinity, t.at));
   }
-  return session(r.agent, typeof r.title === "string" ? r.title : undefined, sortNotes([...byId.values()]), sortTombstones(removed));
+  const host = typeof r.host === "string" && r.host !== "" && r.host.length <= HOST_MAX ? r.host : undefined;
+  return session(r.agent, typeof r.title === "string" ? r.title : undefined, host, sortNotes([...byId.values()]), sortTombstones(removed));
 }
 
 /**
@@ -112,8 +121,9 @@ export function readSessionNotes(value: unknown): SessionNotes | undefined {
  * 90 days: a machine that comes back with the note after that brings it
  * back.
  *
- * The agent and the title come from the synced copy first, then the base,
- * then this machine's records, so every machine settles on the same ones.
+ * The agent, the title and the machine the session is on come from the
+ * synced copy first, then the base, then this machine's records, so every
+ * machine settles on the same ones.
  * Undefined when nothing is left to keep: no note and no tombstone.
  */
 export function mergeNotes(base: SessionNotes | undefined, local: LocalNotes, remote: SessionNotes | undefined, now: number): SessionNotes | undefined {
@@ -140,7 +150,7 @@ export function mergeNotes(base: SessionNotes | undefined, local: LocalNotes, re
 
   const agent = remote?.agent ?? base?.agent ?? local.agent;
   if (!agent) return undefined;
-  return session(agent, remote?.title ?? base?.title ?? local.title, notes, sortTombstones(removed));
+  return session(agent, remote?.title ?? base?.title ?? local.title, remote?.host ?? base?.host ?? local.host, notes, sortTombstones(removed));
 }
 
 /** When the session's notes last changed: a note written or edited, or one taken away. */
@@ -194,6 +204,6 @@ function sortTombstones(removed: ReadonlyMap<string, number>): Tombstone[] {
 }
 
 /** A session's notes with their fields in one order, so two machines' copies of the same notes are the same JSON. */
-function session(agent: string, title: string | undefined, notes: NoteEntry[], removed: Tombstone[]): SessionNotes {
-  return title === undefined ? { agent, notes, removed } : { agent, title, notes, removed };
+function session(agent: string, title: string | undefined, host: string | undefined, notes: NoteEntry[], removed: Tombstone[]): SessionNotes {
+  return { agent, ...(title === undefined ? {} : { title }), ...(host === undefined ? {} : { host }), notes, removed };
 }

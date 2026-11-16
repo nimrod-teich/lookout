@@ -100,7 +100,7 @@
         post(earlierScope);
       }
     },
-    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), folded: (params.get("fold") ?? "").split(",").filter(Boolean), parked: params.get("parkedOpen") === "1", earlier: params.get("earlier") === "1", archive: params.get("archiveOpen") === "1", purged: params.get("purgedOpen") === "1", agents: (params.get("hideAgents") ?? "").split(",").filter(Boolean) }),
+    getState: () => ({ hidden: (params.get("hide") ?? "").split(",").filter(Boolean), folded: (params.get("fold") ?? "").split(",").filter(Boolean), parked: params.get("parkedOpen") === "1", earlier: params.get("earlier") === "1", archive: params.get("archiveOpen") === "1", purged: params.get("purgedOpen") === "1", elsewhere: params.get("elsewhereOpen") === "1", agents: (params.get("hideAgents") ?? "").split(",").filter(Boolean) }),
     setState: () => {},
   });
   window.addEventListener("load", async () => {
@@ -150,6 +150,10 @@
     const onBoard = [...fixture.sessions, ...(fixture.past ?? []), ...(Array.isArray(usage) ? usage : usage ? [usage] : []).filter((g) => g.meters.length > 0)];
     const markers = markersSetting === "always" || (markersSetting === "auto" && new Set(onBoard.map((s) => s.agent ?? "claude-code")).size >= 2);
     for (const p of fixture.past ?? []) if (p.modifiedAt < 1e12) p.modifiedAt = now - p.modifiedAt;
+    for (const p of fixture.elsewhere ?? []) {
+      if (p.modifiedAt > 0 && p.modifiedAt < 1e12) p.modifiedAt = now - p.modifiedAt;
+      if (p.noteAt > 0 && p.noteAt < 1e12) p.noteAt = now - p.noteAt;
+    }
     // &many=57: that many earlier sessions, copies of the fixture's an hour apart, to page through.
     const many = Number(params.get("many") ?? 0);
     const base = fixture.past ?? [];
@@ -179,7 +183,7 @@
       const favourites = { ids: favouriteIds, past: mark((fixture.past ?? []).filter((p) => favouriteIds.includes(p.id) && !past.includes(p))) };
       // &bar=claude-code:personal: the group the status bar shows, which the extension names; the tab shown follows it.
       const usageBar = params.get("bar") ?? undefined;
-      window.postMessage({ type: "sessions", sessions: mark(fixture.sessions), past: mark(past), now, usage, usageBar, markers, earlier: { ...earlier }, favourites, archive: mark(archive), purged: mark(purged), sort, group: groupBy, answers: params.get("answers") !== "0" }, "*");
+      window.postMessage({ type: "sessions", sessions: mark(fixture.sessions), past: mark(past), now, usage, usageBar, markers, earlier: { ...earlier }, favourites, archive: mark(archive), purged: mark(purged), elsewhere: fixture.elsewhere ?? [], sort, group: groupBy, answers: params.get("answers") !== "0" }, "*");
     };
     post(earlier.scope);
     const q = params.get("q");

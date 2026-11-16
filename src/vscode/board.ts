@@ -37,6 +37,10 @@ export interface BoardActions {
   forget?(id: string): void;
   /** Puts a purged session's kept transcript back for the agent. */
   restore?(id: string): void;
+  /** The starred and noted sessions whose conversations are on another machine. */
+  elsewhere?(): readonly PastView[];
+  /** Says a session's conversation is on another machine, and offers to restore a backup. */
+  showElsewhere?(id: string): void;
   /** How the sessions are ordered inside each group. */
   sort?(): SessionSort;
   /** The user dragged a card: their own order, which the board now follows. */
@@ -145,6 +149,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
           favourites: this.actions.favourites(),
           archive: this.actions.archive?.().past,
           purged: this.actions.purged ? [...this.actions.purged()] : undefined,
+          elsewhere: this.actions.elsewhere ? [...this.actions.elsewhere()] : undefined,
           watching: this.actions.watching?.(),
           sort: this.actions.sort?.(),
           group: this.actions.group?.(),
@@ -232,7 +237,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         // Only a session the board was shown, or one already starred.
         const id = message.id;
         if (typeof id !== "string") return;
-        const known = this.actions.sessions().some((v) => v.id === id) || this.actions.past().some((p) => p.id === id) || this.actions.favourites().ids.includes(id) || (this.actions.purged?.() ?? []).some((p) => p.id === id);
+        const known = this.actions.sessions().some((v) => v.id === id) || this.actions.past().some((p) => p.id === id) || this.actions.favourites().ids.includes(id) || (this.actions.purged?.() ?? []).some((p) => p.id === id) || this.isElsewhere(id);
         if (known) this.actions.toggleFavourite(id);
         return;
       }
@@ -250,7 +255,7 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         // Only an earlier session the board was shown, or one already archived.
         const id = message.id;
         if (typeof id !== "string" || !this.actions.toggleArchive) return;
-        const known = this.actions.past().some((p) => p.id === id) || this.actions.favourites().past.some((p) => p.id === id) || (this.actions.archive?.().ids.includes(id) ?? false);
+        const known = this.actions.past().some((p) => p.id === id) || this.actions.favourites().past.some((p) => p.id === id) || (this.actions.archive?.().ids.includes(id) ?? false) || this.isElsewhere(id);
         if (known) this.actions.toggleArchive(id);
         return;
       }
@@ -277,14 +282,25 @@ export class Board implements vscode.WebviewViewProvider, vscode.Disposable {
         // Only a session the board was shown, running or not.
         const id = message.id;
         if (typeof id !== "string") return;
-        const known = this.actions.sessions().some((v) => v.id === id) || [...this.actions.past(), ...this.actions.favourites().past, ...(this.actions.archive?.().past ?? []), ...(this.actions.purged?.() ?? [])].some((p) => p.id === id);
+        const known = this.actions.sessions().some((v) => v.id === id) || [...this.actions.past(), ...this.actions.favourites().past, ...(this.actions.archive?.().past ?? []), ...(this.actions.purged?.() ?? [])].some((p) => p.id === id) || this.isElsewhere(id);
         if (known) this.actions.editNote?.(id);
+        return;
+      }
+      case "elsewhere": {
+        // Only a session the board was shown as on another machine.
+        const id = message.id;
+        if (typeof id === "string" && this.isElsewhere(id)) this.actions.showElsewhere?.(id);
         return;
       }
       case "earlierScope":
         if (message.scope === "folders" || message.scope === "all") this.actions.setEarlierScope(message.scope);
         return;
     }
+  }
+
+  /** A session the board was shown as on another machine. */
+  private isElsewhere(id: string): boolean {
+    return (this.actions.elsewhere?.() ?? []).some((p) => p.id === id);
   }
 
   private html(webview: vscode.Webview): string {
